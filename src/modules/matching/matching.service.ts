@@ -1,0 +1,611 @@
+import {
+  BadRequestException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+  Logger,
+  NotFoundException,
+  OnModuleDestroy,
+  OnModuleInit,
+  forwardRef,
+} from "@nestjs/common";
+import { Cron, CronExpression } from "@nestjs/schedule";
+import { Prisma, RideClass, Trip } from "@prisma/client";
+import type Redis from "ioredis";
+import { PrismaService } from "../../prisma/prisma.service";
+import { PaginationDto } from "../../common/dto/pagination.dto";
+import { RedisService } from "../redis/redis.service";
+import { RealtimeGateway } from "../realtime/realtime.gateway";
+import { PricingService } from "./pricing.service";
+import { CouponsService } from "../coupons/coupons.service";
+import { RequestRideDto } from "./dto/matching.dto";
+
+interface PendingOffer {
+  resolve: (accepted: boolean) => void;
+  timer: NodeJS.Timeout;
+}
+
+// إعدادات المطابقة
+const SEARCH_RADIUS_KM = 5;
+const MAX_CANDIDATES = 10;
+const OFFER_TIMEOUT_MS = 15_000; // مهلة قبول كل سائق
+
+// قناة Redis Pub/Sub لإيصال رد السائق (قبول/رفض) عبر كل نسخ الخادم.
+// حرجة للتوسّع الأفقي: عند تشغيل عدة نسخ خلف Load Balancer قد يتصل
+// السائق بنسخة مختلفة عن النسخة التي تُشغّل حلقة المطابقة؛ بدون هذا
+// الجسر لا يصل رد السائق أبدًا فتنتهي مهلة كل عرض (الإرسال معطّل فعليًا).
+const CH_OFFER_RESPONSE = "matching:offer_response";
+
+// حدّ أمان لاسترداد الرحلات العالقة في SEARCHING إذا تعطّلت النسخة
+// التي كانت تُشغّل حلقة المطابقة (فشل تعافٍ). أكبر من أقصى زمن بحث
+// نظري (radiusان × 10 مرشحين × 15s ≈ 5 دقائق).
+const STUCK_SEARCH_MS = 10 * 60 * 1000;
+
+/**
+ * محرك المطابقة:
+ * 1. الراكب يطلب رحلة ← تقدير أجرة + إنشاء Trip (SEARCHING)
+ * 2. إيجاد أقرب السائقين المتاحين عبر Redis GEO
+ * 3. عرض الرحلة عليهم واحدًا تلو الآخر مع مهلة قبول
+ * 4. أول من يقبل يفوز ← تعيين السائق (ACCEPTED)
+ * 5. إن رفض الجميع / انتهت المهلة ← لا يوجد سائق
+ */
+@Injectable()
+export class MatchingService implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(MatchingService.name);
+  // عروض معلّقة بانتظار رد السائق — المفتاح هو `${tripId}:${driverUserId}`.
+  // محلية لكل نسخة (تحمل الوعد Promise)؛ يُحلّها رد يصل عبر Pub/Sub.
+  private readonly pending = new Map<string, PendingOffer>();
+  // رحلات أُلغيت أثناء البحث (تسريع كسر الحلقة على النسخة نفسها).
+  // الإلغاء عبر النسخ يُلتقط أيضًا عبر إعادة فحص حالة الرحلة في القاعدة.
+  private readonly cancelled = new Set<string>();
+  // اتصال اشتراك منفصل (ioredis في وضع الاشتراك لا ينفّذ أوامر عادية).
+  private sub: Redis | null = null;
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly redis: RedisService,
+    private readonly pricing: PricingService,
+    private readonly coupons: CouponsService,
+    @Inject(forwardRef(() => RealtimeGateway))
+    private readonly realtime: RealtimeGateway,
+  ) {}
+
+  async onModuleInit(): Promise<void> {
+    try {
+      this.sub = this.redis.duplicate();
+      await this.sub.subscribe(CH_OFFER_RESPONSE);
+      this.sub.on("message", (channel: string, raw: string) => {
+        if (channel === CH_OFFER_RESPONSE) this.onOfferResponse(raw);
+      });
+      this.sub.on("error", (err) =>
+        this.logger.error(`matching sub error: ${err?.message ?? err}`),
+      );
+    } catch (err) {
+      this.logger.error(`تعذّر تفعيل جسر المطابقة عبر Redis: ${err}`);
+    }
+  }
+
+  async onModuleDestroy(): Promise<void> {
+    // تنظيف: أوقف كل مؤقتات العروض وحُلّها كرفض حتى لا تبقى وعود معلّقة،
+    // ثم أغلق اتصال الاشتراك (منع تسرّب الذاكرة/الاتصالات عند الإيقاف).
+    for (const [, offer] of this.pending) {
+      clearTimeout(offer.timer);
+      offer.resolve(false);
+    }
+    this.pending.clear();
+    this.cancelled.clear();
+    if (this.sub) {
+      try {
+        await this.sub.quit();
+      } catch {
+        this.sub.disconnect();
+      }
+      this.sub = null;
+    }
+  }
+
+  /** الراكب يطلب رحلة: ينشئ Trip ثم يبدأ البحث في الخلفية */
+  async requestRide(passengerId: string, dto: RequestRideDto): Promise<Trip> {
+    // منع رحلتين نشطتين للراكب نفسه
+    const active = await this.prisma.trip.findFirst({
+      where: {
+        passengerId,
+        status: { in: ["SEARCHING", "ACCEPTED", "ARRIVING", "IN_PROGRESS"] },
+      },
+    });
+    if (active) {
+      throw new BadRequestException("لديك رحلة نشطة بالفعل");
+    }
+
+    const rideClass: RideClass = dto.rideClass ?? "ECONOMY";
+    const quote = await this.pricing.quote(
+      dto.pickupLat,
+      dto.pickupLng,
+      dto.destLat,
+      dto.destLng,
+      rideClass,
+      dto.cityId,
+    );
+
+    // تطبيق الكوبون (اختياري) — يتحقق ويحسب الخصم ويحجز الاستخدام
+    let fare = quote.fare;
+    let couponId: string | null = null;
+    if (dto.couponCode) {
+      const applied = await this.coupons.validateAndCompute(
+        dto.couponCode,
+        passengerId,
+        quote.fare,
+      );
+      fare = applied.finalFare;
+      couponId = applied.coupon.id;
+      await this.coupons.redeem(applied.coupon.id);
+    }
+
+    const trip = await this.prisma.trip.create({
+      data: {
+        passengerId,
+        status: "SEARCHING",
+        rideClass,
+        pickupLat: dto.pickupLat,
+        pickupLng: dto.pickupLng,
+        pickupAddress: dto.pickupAddress,
+        destLat: dto.destLat,
+        destLng: dto.destLng,
+        destAddress: dto.destAddress,
+        distanceKm: quote.distanceKm,
+        durationSec: quote.durationSec,
+        fare,
+        currency: quote.currency,
+        cityId: dto.cityId,
+        couponId,
+        events: { create: { type: "trip:requested", actor: "PASSENGER" } },
+      },
+    });
+
+    // بدء البحث دون حجز الطلب (fire-and-forget)
+    void this.runMatching(trip.id).catch((err) =>
+      this.logger.error(`matching failed for ${trip.id}: ${err}`),
+    );
+
+    return trip;
+  }
+
+  /** حلقة البحث عن سائق وعرض الرحلة بالتتابع */
+  private async runMatching(tripId: string): Promise<void> {
+    try {
+      const trip = await this.prisma.trip.findUnique({ where: { id: tripId } });
+      if (!trip || trip.status !== "SEARCHING") return;
+
+      const tried = new Set<string>();
+
+      // محاولتان لتوسيع نطاق البحث
+      for (const radius of [SEARCH_RADIUS_KM, SEARCH_RADIUS_KM * 2]) {
+        if (this.cancelled.has(tripId)) break;
+
+        const candidates = await this.findCandidates(
+          trip.pickupLat,
+          trip.pickupLng,
+          radius,
+          tried,
+        );
+
+        for (const driverUserId of candidates) {
+          if (this.cancelled.has(tripId)) break;
+          tried.add(driverUserId);
+
+          // تأكد أن الرحلة ما زالت قيد البحث (يلتقط الإلغاء عبر النسخ أيضًا)
+          const fresh = await this.prisma.trip.findUnique({
+            where: { id: tripId },
+            select: { status: true },
+          });
+          if (!fresh || fresh.status !== "SEARCHING") return;
+
+          const accepted = await this.offerToDriver(trip, driverUserId);
+          if (accepted) {
+            const assigned = await this.assignDriver(tripId, driverUserId);
+            if (assigned) return; // نجحت المطابقة
+          }
+        }
+      }
+
+      // لا يوجد سائق متاح
+      const current = await this.prisma.trip.findUnique({
+        where: { id: tripId },
+        select: { status: true, passengerId: true },
+      });
+      if (current && current.status === "SEARCHING") {
+        await this.releaseCoupon(tripId);
+        await this.prisma.trip.update({
+          where: { id: tripId },
+          data: {
+            status: "CANCELLED",
+            cancelReason: "لا يوجد سائق متاح",
+            cancelledBy: "SYSTEM",
+            events: { create: { type: "trip:no_drivers", actor: "SYSTEM" } },
+          },
+        });
+        this.realtime.emitToUser(current.passengerId, "ride:no_drivers", {
+          tripId,
+        });
+        this.realtime.emitTripStatus(tripId, "CANCELLED");
+      }
+    } finally {
+      // نظّف علامة الإلغاء المحلية دائمًا (منع تسرّب ذاكرة تدريجي).
+      this.cancelled.delete(tripId);
+    }
+  }
+
+  /** إيجاد مرشحين متاحين (APPROVED + ONLINE + بلا رحلة حالية) */
+  private async findCandidates(
+    lat: number,
+    lng: number,
+    radiusKm: number,
+    exclude: Set<string>,
+  ): Promise<string[]> {
+    const nearby = await this.redis.nearbyDrivers(lat, lng, radiusKm);
+    const userIds = nearby.filter((id) => !exclude.has(id));
+    if (userIds.length === 0) return [];
+
+    // 1) جلب دفعي لحالة "مشغول برحلة" من Redis (خط أنابيب واحد)
+    //    بدل استعلام GET منفصل لكل سائق (N+1).
+    const pipeline = this.redis.client.pipeline();
+    for (const id of userIds) pipeline.get(`driver:${id}:trip`);
+    const onTripRes = await pipeline.exec();
+    const busy = new Set<string>();
+    userIds.forEach((id, i) => {
+      if (onTripRes?.[i]?.[1]) busy.add(id);
+    });
+
+    // 2) جلب دفعي واحد للسائقين المؤهلين (APPROVED + ONLINE)
+    //    بدل findUnique لكل سائق.
+    const eligible = await this.prisma.driver.findMany({
+      where: {
+        userId: { in: userIds },
+        status: "APPROVED",
+        availability: "ONLINE",
+      },
+      select: { userId: true },
+    });
+    const eligibleSet = new Set(eligible.map((d) => d.userId));
+
+    // 3) الحفاظ على ترتيب القرب (ASC) مع تطبيق المرشّحات والحد الأقصى.
+    const result: string[] = [];
+    for (const id of userIds) {
+      if (busy.has(id) || !eligibleSet.has(id)) continue;
+      result.push(id);
+      if (result.length >= MAX_CANDIDATES) break;
+    }
+    return result;
+  }
+
+  /** إرسال عرض للسائق وانتظار ردّه ضمن المهلة */
+  private offerToDriver(trip: Trip, driverUserId: string): Promise<boolean> {
+    const key = `${trip.id}:${driverUserId}`;
+
+    this.realtime.emitToUser(driverUserId, "ride:offer", {
+      tripId: trip.id,
+      pickupLat: trip.pickupLat,
+      pickupLng: trip.pickupLng,
+      pickupAddress: trip.pickupAddress,
+      destLat: trip.destLat,
+      destLng: trip.destLng,
+      destAddress: trip.destAddress,
+      rideClass: trip.rideClass,
+      fare: trip.fare,
+      currency: trip.currency,
+      distanceKm: trip.distanceKm,
+      expiresInMs: OFFER_TIMEOUT_MS,
+    });
+
+    return new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(key);
+        this.realtime.emitToUser(driverUserId, "ride:offer_expired", {
+          tripId: trip.id,
+        });
+        resolve(false);
+      }, OFFER_TIMEOUT_MS);
+
+      this.pending.set(key, { resolve, timer });
+    });
+  }
+
+  /**
+   * يستدعى من الـ Gateway عند رد السائق. قد تصل الاستجابة على نسخة
+   * مختلفة عن النسخة التي تُشغّل الحلقة؛ لذا:
+   *  - نحاول الحلّ محليًا (المسار السريع/النسخة الواحدة)، و
+   *  - ننشر عبر Redis ليحلّها مالك العرض على أي نسخة.
+   * الحلّ ذاتيّ التكرار (idempotent): بعد أول حلّ يُحذف المفتاح.
+   */
+  respondToOffer(
+    tripId: string,
+    driverUserId: string,
+    accepted: boolean,
+  ): void {
+    const key = `${tripId}:${driverUserId}`;
+    this.resolvePending(key, accepted);
+    void this.redis.client
+      .publish(
+        CH_OFFER_RESPONSE,
+        JSON.stringify({ tripId, driverUserId, accepted }),
+      )
+      .catch(() => undefined);
+  }
+
+  /** حلّ عرض معلّق محلي إن وُجد (آمن للاستدعاء المتكرر) */
+  private resolvePending(key: string, accepted: boolean): boolean {
+    const offer = this.pending.get(key);
+    if (!offer) return false;
+    clearTimeout(offer.timer);
+    this.pending.delete(key);
+    offer.resolve(accepted);
+    return true;
+  }
+
+  /** معالج رسائل Pub/Sub لردود العروض القادمة من نسخ أخرى */
+  private onOfferResponse(raw: string): void {
+    try {
+      const msg = JSON.parse(raw) as {
+        tripId?: string;
+        driverUserId?: string;
+        accepted?: boolean;
+      };
+      if (typeof msg.tripId === "string" && typeof msg.driverUserId === "string") {
+        this.resolvePending(
+          `${msg.tripId}:${msg.driverUserId}`,
+          msg.accepted === true,
+        );
+      }
+    } catch {
+      // رسالة مشوّهة — تجاهل.
+    }
+  }
+
+  /** تعيين السائق ذريًا (يفشل إن تغيرت حالة الرحلة) */
+  private async assignDriver(
+    tripId: string,
+    driverUserId: string,
+  ): Promise<boolean> {
+    const driver = await this.prisma.driver.findUnique({
+      where: { userId: driverUserId },
+    });
+    if (!driver) return false;
+
+    try {
+      const updated = await this.prisma.$transaction(async (client) => {
+        // 1) مطالبة ذرية بالسائق (قفل الصف): لا تنجح إلا إن كان ONLINE.
+        //    تمنع إسناد السائق نفسه لرحلتين متزامنتين (double assignment).
+        const claimed = await client.driver.updateMany({
+          where: { id: driver.id, availability: "ONLINE" },
+          data: { availability: "ON_TRIP" },
+        });
+        if (claimed.count === 0) return null; // السائق مأخوذ بالفعل
+
+        // 2) تأكد أن الرحلة ما زالت قيد البحث؛ وإلا تراجع عن المعاملة
+        //    (throw يُلغي المطالبة بالسائق تلقائيًا).
+        const current = await client.trip.findUnique({
+          where: { id: tripId },
+          select: { status: true },
+        });
+        if (!current || current.status !== "SEARCHING") {
+          throw new Error("trip-not-searching");
+        }
+
+        // 3) عيّن السائق للرحلة
+        const trip = await client.trip.update({
+          where: { id: tripId },
+          data: {
+            status: "ACCEPTED",
+            driverId: driver.id,
+            events: {
+              create: { type: "trip:accepted", actor: "DRIVER" },
+            },
+          },
+        });
+        return trip;
+      });
+
+      if (!updated) return false;
+
+      // ربط السائق بالرحلة في Redis (لتوجيه driver:moved للراكب)
+      await this.redis.client.set(`driver:${driverUserId}:trip`, tripId);
+
+      // إشعار الطرفين
+      this.realtime.emitToUser(updated.passengerId, "ride:accepted", {
+        tripId,
+        driverId: driver.id,
+        driverUserId,
+      });
+      this.realtime.emitToUser(driverUserId, "ride:assigned", { tripId });
+      this.realtime.emitTripStatus(tripId, "ACCEPTED");
+      return true;
+    } catch (err) {
+      // "trip-not-searching" تسابق طبيعي (الرحلة أُسندت/أُلغيت) — ليس خطأً.
+      if ((err as Error)?.message !== "trip-not-searching") {
+        this.logger.error(`assignDriver failed: ${err}`);
+      }
+      return false;
+    }
+  }
+
+  /** إلغاء الطلب من الراكب أثناء البحث */
+  async cancelSearch(tripId: string, passengerId: string): Promise<void> {
+    const trip = await this.prisma.trip.findUnique({ where: { id: tripId } });
+    if (!trip) throw new NotFoundException("الرحلة غير موجودة");
+    if (trip.passengerId !== passengerId) {
+      throw new BadRequestException("غير مسموح");
+    }
+    if (trip.status !== "SEARCHING") {
+      throw new BadRequestException("لا يمكن إلغاء البحث في هذه الحالة");
+    }
+    this.cancelled.add(tripId);
+    await this.releaseCoupon(tripId);
+    await this.prisma.trip.update({
+      where: { id: tripId },
+      data: {
+        status: "CANCELLED",
+        cancelReason: "ألغاه الراكب",
+        cancelledBy: "PASSENGER",
+        events: { create: { type: "trip:cancelled", actor: "PASSENGER" } },
+      },
+    });
+    this.realtime.emitTripStatus(tripId, "CANCELLED");
+  }
+
+  /**
+   * إلغاء الرحلة من طرف الراكب عبر WebSocket (ride:cancel).
+   * - أثناء البحث: يوقف حلقة المطابقة ويعيد الكوبون (عبر cancelSearch).
+   * - بعد القبول وقبل بدء الرحلة (ACCEPTED/ARRIVING): يلغي الرحلة،
+   *   يعيد الكوبون، يحرّر السائق (إتاحته + مسح مفتاح رحلته) ويبلّغه.
+   */
+  async passengerCancel(
+    passengerUserId: string,
+    tripId: string,
+    reason?: string,
+  ): Promise<void> {
+    const trip = await this.prisma.trip.findUnique({
+      where: { id: tripId },
+      select: {
+        status: true,
+        passengerId: true,
+        driverId: true,
+        driver: { select: { userId: true } },
+      },
+    });
+    if (!trip) throw new NotFoundException("الرحلة غير موجودة");
+    if (trip.passengerId !== passengerUserId) {
+      throw new ForbiddenException("غير مسموح");
+    }
+
+    // أثناء البحث: أعد استخدام منطق cancelSearch (يوقف الحلقة + يعيد الكوبون)
+    if (trip.status === "SEARCHING") {
+      await this.cancelSearch(tripId, passengerUserId);
+      return;
+    }
+
+    // بعد القبول وقبل بدء الرحلة
+    if (trip.status === "ACCEPTED" || trip.status === "ARRIVING") {
+      await this.releaseCoupon(tripId);
+      await this.prisma.trip.update({
+        where: { id: tripId },
+        data: {
+          status: "CANCELLED",
+          cancelReason: reason ?? "ألغاه الراكب",
+          cancelledBy: "PASSENGER",
+          events: { create: { type: "trip:cancelled", actor: "PASSENGER" } },
+        },
+      });
+      // تحرير السائق: إتاحته من جديد ومسح ارتباطه بالرحلة في Redis
+      if (trip.driverId) {
+        await this.prisma.driver
+          .update({
+            where: { id: trip.driverId },
+            data: { availability: "ONLINE" },
+          })
+          .catch(() => undefined);
+      }
+      if (trip.driver?.userId) {
+        await this.redis.client
+          .del(`driver:${trip.driver.userId}:trip`)
+          .catch(() => undefined);
+      }
+      // بثّ التغيير لطرفَي الرحلة (السائق منضمّ لغرفة trip:{id}) وللمديرين
+      this.realtime.emitTripStatus(tripId, "CANCELLED");
+      return;
+    }
+
+    throw new BadRequestException("لا يمكن إلغاء الرحلة في هذه الحالة");
+  }
+
+  /** سجل رحلات الراكب (رحلاتي) */
+  async passengerTrips(passengerId: string, q: PaginationDto) {
+    const where: Prisma.TripWhereInput = { passengerId };
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.trip.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        skip: (q.page - 1) * q.limit,
+        take: q.limit,
+        include: {
+          driver: {
+            include: { user: { select: { name: true, phone: true } } },
+          },
+        },
+      }),
+      this.prisma.trip.count({ where }),
+    ]);
+    return { items, total, page: q.page, limit: q.limit };
+  }
+
+  /** تفاصيل رحلة يملكها الراكب (أو المكلّف بها السائق) */
+  async getTripForUser(tripId: string, userId: string) {
+    const trip = await this.prisma.trip.findUnique({
+      where: { id: tripId },
+      include: {
+        passenger: { select: { name: true, phone: true } },
+        driver: {
+          include: {
+            user: { select: { name: true, phone: true } },
+            vehicles: { where: { isActive: true }, take: 1 },
+          },
+        },
+        tracking: { orderBy: { recordedAt: "desc" }, take: 1 },
+        ratings: true,
+      },
+    });
+    if (!trip) throw new NotFoundException("Trip not found");
+    const isOwner =
+      trip.passengerId === userId || trip.driver?.userId === userId;
+    if (!isOwner) {
+      throw new ForbiddenException("ليست لديك صلاحية على هذه الرحلة");
+    }
+    return trip;
+  }
+
+  /** إرجاع استخدام الكوبون إن كانت الرحلة تحمل واحدًا (عند الإلغاء) */
+  private async releaseCoupon(tripId: string): Promise<void> {
+    const trip = await this.prisma.trip.findUnique({
+      where: { id: tripId },
+      select: { couponId: true },
+    });
+    if (trip?.couponId) {
+      await this.coupons.release(trip.couponId);
+    }
+  }
+
+  /**
+   * استرداد الرحلات العالقة في SEARCHING (فشل تعافٍ): إن تعطّلت النسخة
+   * التي كانت تُشغّل حلقة المطابقة تبقى الرحلة عالقة للأبد. هذا المهمّة
+   * المجدولة تلغيها ذريًا (updateMany بحارس الحالة) فلا تكرار عبر النسخ.
+   */
+  @Cron(CronExpression.EVERY_5_MINUTES)
+  async reapStuckSearches(): Promise<void> {
+    const cutoff = new Date(Date.now() - STUCK_SEARCH_MS);
+    const stuck = await this.prisma.trip.findMany({
+      where: { status: "SEARCHING", createdAt: { lt: cutoff } },
+      select: { id: true, passengerId: true },
+    });
+    for (const t of stuck) {
+      const claimed = await this.prisma.trip.updateMany({
+        where: { id: t.id, status: "SEARCHING" },
+        data: {
+          status: "CANCELLED",
+          cancelReason: "انتهت مهلة البحث",
+          cancelledBy: "SYSTEM",
+        },
+      });
+      if (claimed.count === 0) continue; // نسخة أخرى عالجتها
+      await this.releaseCoupon(t.id).catch(() => undefined);
+      await this.prisma.tripEvent
+        .create({
+          data: { tripId: t.id, type: "trip:search_timeout", actor: "SYSTEM" },
+        })
+        .catch(() => undefined);
+      this.realtime.emitToUser(t.passengerId, "ride:no_drivers", {
+        tripId: t.id,
+      });
+      this.realtime.emitTripStatus(t.id, "CANCELLED");
+      this.logger.warn(`استُرِدّت رحلة عالقة في البحث: ${t.id}`);
+    }
+  }
+}

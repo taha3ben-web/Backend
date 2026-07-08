@@ -1,0 +1,81 @@
+import { Injectable, NotFoundException } from "@nestjs/common";
+import { DriverStatus, Prisma } from "@prisma/client";
+import { PrismaService } from "../../prisma/prisma.service";
+import { RedisService } from "../redis/redis.service";
+import { PaginationDto } from "../../common/dto/pagination.dto";
+
+@Injectable()
+export class DriversService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly redis: RedisService,
+  ) {}
+
+  async findAll(q: PaginationDto, status?: DriverStatus) {
+    const where: Prisma.DriverWhereInput = {
+      ...(status ? { status } : {}),
+      ...(q.search
+        ? {
+            user: {
+              OR: [
+                { name: { contains: q.search, mode: "insensitive" } },
+                { phone: { contains: q.search } },
+              ],
+            },
+          }
+        : {}),
+    };
+
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.driver.findMany({
+        where,
+        skip: (q.page - 1) * q.limit,
+        take: q.limit,
+        orderBy: { createdAt: "desc" },
+        include: {
+          user: { select: { name: true, phone: true, status: true } },
+          vehicles: { where: { isActive: true }, take: 1 },
+          city: { select: { name: true } },
+        },
+      }),
+      this.prisma.driver.count({ where }),
+    ]);
+
+    return { items, total, page: q.page, limit: q.limit };
+  }
+
+  async findOne(id: string) {
+    const driver = await this.prisma.driver.findUnique({
+      where: { id },
+      include: {
+        user: {
+          select: { name: true, phone: true, email: true, status: true },
+        },
+        vehicles: true,
+        documents: true,
+        city: true,
+      },
+    });
+    if (!driver) throw new NotFoundException("Driver not found");
+
+    // الموقع اللحظي من Redis (إن وجد)
+    const live = await this.redis.client.hgetall(`driver:${id}`);
+    return { ...driver, live: live?.lat ? live : null };
+  }
+
+  setStatus(id: string, status: DriverStatus) {
+    return this.prisma.driver.update({ where: { id }, data: { status } });
+  }
+
+  async reviewDocument(
+    docId: string,
+    status: "APPROVED" | "REJECTED",
+    reviewedById: string,
+    note?: string,
+  ) {
+    return this.prisma.driverDocument.update({
+      where: { id: docId },
+      data: { status, reviewedById, note },
+    });
+  }
+}
