@@ -71,7 +71,6 @@ export class DriverSelfService {
       email: driver.user?.email ?? null,
       photoUrl: driver.user?.avatarUrl ?? docUrl("PROFILE_PHOTO"),
       status: driver.status,
-      statusMessage: driver.statusMessage ?? null,
       approved: driver.status === "APPROVED",
       availability: driver.availability,
       rating: Number(driver.rating),
@@ -106,6 +105,22 @@ export class DriverSelfService {
         where: { id: userId },
         data: { name: dto.name },
       });
+    }
+
+    // مزامنة رقم الهاتف مع الخادم (تقرأه لوحة التحكم). نحمي قيد التفرّد:
+    // لا نكتب الرقم إن كان مستخدَمًا من حساب آخر.
+    if (dto.phone && dto.phone.trim()) {
+      const phone = dto.phone.trim();
+      const clash = await this.prisma.user.findFirst({
+        where: { phone, id: { not: userId } },
+        select: { id: true },
+      });
+      if (!clash) {
+        await this.prisma.user.update({
+          where: { id: userId },
+          data: { phone },
+        });
+      }
     }
 
     if (dto.cityId !== undefined) {
@@ -244,6 +259,13 @@ export class DriverSelfService {
 
   async addDocument(userId: string, dto: AddDocumentDto) {
     const driver = await this.requireDriver(userId);
+    // صورة الملف الشخصي: نحدّث avatarUrl أيضًا لتظهر مباشرةً في لوحة التحكم.
+    if (dto.type === "PROFILE_PHOTO") {
+      await this.prisma.user.update({
+        where: { id: userId },
+        data: { avatarUrl: dto.url },
+      });
+    }
     return this.prisma.driverDocument.create({
       data: {
         driverId: driver.id,
