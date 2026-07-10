@@ -49,22 +49,87 @@ export class DriversService {
       where: { id },
       include: {
         user: {
-          select: { name: true, phone: true, email: true, status: true },
+          select: {
+            name: true,
+            phone: true,
+            email: true,
+            status: true,
+            avatarUrl: true,
+            createdAt: true,
+            wallet: {
+              select: {
+                id: true,
+                balance: true,
+                currency: true,
+                updatedAt: true,
+                transactions: {
+                  take: 20,
+                  orderBy: { createdAt: "desc" },
+                  select: {
+                    id: true,
+                    type: true,
+                    amount: true,
+                    balanceAfter: true,
+                    reason: true,
+                    createdAt: true,
+                  },
+                },
+              },
+            },
+          },
         },
-        vehicles: true,
-        documents: true,
+        vehicles: { orderBy: { createdAt: "desc" } },
+        documents: { orderBy: { createdAt: "desc" } },
         city: true,
+        trips: {
+          take: 10,
+          orderBy: { createdAt: "desc" },
+          select: {
+            id: true,
+            status: true,
+            fare: true,
+            pickupAddress: true,
+            destAddress: true,
+            createdAt: true,
+            completedAt: true,
+          },
+        },
       },
     });
     if (!driver) throw new NotFoundException("Driver not found");
 
+    // ملخّص أرباح السائق (إجمالي الصافي والعمولة وعدد الرحلات المدفوعة)
+    const earningsAgg = await this.prisma.driverEarning.aggregate({
+      where: { driverId: id },
+      _sum: { net: true, gross: true, commission: true },
+      _count: true,
+    });
+
     // الموقع اللحظي من Redis (إن وجد)
     const live = await this.redis.client.hgetall(`driver:${id}`);
-    return { ...driver, live: live?.lat ? live : null };
+    return {
+      ...driver,
+      // نُبرِز المحفظة في المستوى الأعلى لتسهيل قراءتها في اللوحة.
+      wallet: driver.user?.wallet ?? null,
+      earningsSummary: {
+        net: Number(earningsAgg._sum.net ?? 0),
+        gross: Number(earningsAgg._sum.gross ?? 0),
+        commission: Number(earningsAgg._sum.commission ?? 0),
+        count: earningsAgg._count,
+      },
+      live: live?.lat ? live : null,
+    };
   }
 
-  setStatus(id: string, status: DriverStatus) {
-    return this.prisma.driver.update({ where: { id }, data: { status } });
+  setStatus(id: string, status: DriverStatus, message?: string) {
+    return this.prisma.driver.update({
+      where: { id },
+      data: {
+        status,
+        // رسالة يتحكّم بها الطاقم من لوحة التحكم وتظهر للسائق في التطبيق.
+        ...(message !== undefined ? { statusMessage: message || null } : {}),
+      },
+    });
   }
 
   async reviewDocument(

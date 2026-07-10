@@ -12,7 +12,7 @@ import { LoginDto } from "./dto/login.dto";
 import { FirebaseLoginDto } from "./dto/firebase-login.dto";
 import { FirebaseAdminService } from "./firebase-admin.service";
 
-interface Tokens {
+export interface Tokens {
   accessToken: string;
   refreshToken: string;
   userId: string;

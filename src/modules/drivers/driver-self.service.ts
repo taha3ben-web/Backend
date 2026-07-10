@@ -71,6 +71,7 @@ export class DriverSelfService {
       email: driver.user?.email ?? null,
       photoUrl: driver.user?.avatarUrl ?? docUrl("PROFILE_PHOTO"),
       status: driver.status,
+      statusMessage: driver.statusMessage ?? null,
       approved: driver.status === "APPROVED",
       availability: driver.availability,
       rating: Number(driver.rating),

@@ -28,6 +28,7 @@ import { SessionsModule } from "./modules/sessions/sessions.module";
 import { VehicleTypesModule } from "./modules/vehicle-types/vehicle-types.module";
 import { AdsModule } from "./modules/ads/ads.module";
 import { MetricsModule } from "./modules/metrics/metrics.module";
+import { AssetsModule } from "./modules/assets/assets.module";
 import { HealthController } from "./modules/health/health.controller";
 
 @Module({
@@ -59,6 +60,7 @@ import { HealthController } from "./modules/health/health.controller";
     VehicleTypesModule,
     AdsModule,
     MetricsModule,
+    AssetsModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

@@ -178,8 +178,9 @@ model Driver {
   id           String             @id @default(uuid())
   userId       String             @unique
   user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  status       DriverStatus       @default(PENDING)
-  availability DriverAvailability @default(OFFLINE)
+  status        DriverStatus       @default(PENDING)
+  statusMessage String?
+  availability  DriverAvailability @default(OFFLINE)
   rating       Float              @default(5)
   totalTrips   Int                @default(0)
   cityId       String?
