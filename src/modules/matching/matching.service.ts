@@ -19,6 +19,7 @@ import { RealtimeGateway } from "../realtime/realtime.gateway";
 import { PricingService } from "./pricing.service";
 import { CouponsService } from "../coupons/coupons.service";
 import { RequestRideDto } from "./dto/matching.dto";
+import { MatchingEngineService } from "./engine/matching-engine.service";
 
 interface PendingOffer {
   resolve: (accepted: boolean) => void;
@@ -66,6 +67,7 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
     private readonly redis: RedisService,
     private readonly pricing: PricingService,
     private readonly coupons: CouponsService,
+    private readonly engine: MatchingEngineService,
     @Inject(forwardRef(() => RealtimeGateway))
     private readonly realtime: RealtimeGateway,
   ) {}
@@ -118,13 +120,13 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
     }
 
     const rideClass: RideClass = dto.rideClass ?? "ECONOMY";
+    const vehicleTypeId = dto.vehicleTypeId ?? null;
     const quote = await this.pricing.quote(
       dto.pickupLat,
       dto.pickupLng,
       dto.destLat,
       dto.destLng,
-      rideClass,
-      dto.cityId,
+      { rideClass, cityId: dto.cityId, vehicleTypeId: vehicleTypeId ?? undefined },
     );
 
     // تطبيق الكوبون (اختياري) — يتحقق ويحسب الخصم ويحجز الاستخدام
@@ -146,6 +148,7 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
         passengerId,
         status: "SEARCHING",
         rideClass,
+        vehicleTypeId,
         pickupLat: dto.pickupLat,
         pickupLng: dto.pickupLng,
         pickupAddress: dto.pickupAddress,
@@ -187,6 +190,8 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
           trip.pickupLng,
           radius,
           tried,
+          trip.rideClass,
+          trip.vehicleTypeId,
         );
 
         for (const driverUserId of candidates) {
@@ -235,47 +240,30 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  /** إيجاد مرشحين متاحين (APPROVED + ONLINE + بلا رحلة حالية) */
-  private async findCandidates(
+  /**
+   * إيجاد مرشحين متاحين (APPROVED + ONLINE + بلا رحلة حالية).
+   * يفوّض الاختيار والترتيب إلى محرك المطابقة المستقل (MatchingEngineService)
+   * الذي يطبّق الاستراتيجية الحالية (الافتراضي: أقرب سائق). حلقة العروض تبقى هنا.
+   */
+  private findCandidates(
     lat: number,
     lng: number,
     radiusKm: number,
     exclude: Set<string>,
+    rideClass: RideClass,
+    vehicleTypeId?: string | null,
   ): Promise<string[]> {
-    const nearby = await this.redis.nearbyDrivers(lat, lng, radiusKm);
-    const userIds = nearby.filter((id) => !exclude.has(id));
-    if (userIds.length === 0) return [];
-
-    // 1) جلب دفعي لحالة "مشغول برحلة" من Redis (خط أنابيب واحد)
-    //    بدل استعلام GET منفصل لكل سائق (N+1).
-    const pipeline = this.redis.client.pipeline();
-    for (const id of userIds) pipeline.get(`driver:${id}:trip`);
-    const onTripRes = await pipeline.exec();
-    const busy = new Set<string>();
-    userIds.forEach((id, i) => {
-      if (onTripRes?.[i]?.[1]) busy.add(id);
-    });
-
-    // 2) جلب دفعي واحد للسائقين المؤهلين (APPROVED + ONLINE)
-    //    بدل findUnique لكل سائق.
-    const eligible = await this.prisma.driver.findMany({
-      where: {
-        userId: { in: userIds },
-        status: "APPROVED",
-        availability: "ONLINE",
+    return this.engine.selectCandidates(
+      {
+        pickupLat: lat,
+        pickupLng: lng,
+        radiusKm,
+        rideClass,
+        vehicleTypeId,
       },
-      select: { userId: true },
-    });
-    const eligibleSet = new Set(eligible.map((d) => d.userId));
-
-    // 3) الحفاظ على ترتيب القرب (ASC) مع تطبيق المرشّحات والحد الأقصى.
-    const result: string[] = [];
-    for (const id of userIds) {
-      if (busy.has(id) || !eligibleSet.has(id)) continue;
-      result.push(id);
-      if (result.length >= MAX_CANDIDATES) break;
-    }
-    return result;
+      exclude,
+      MAX_CANDIDATES,
+    );
   }
 
   /** إرسال عرض للسائق وانتظار ردّه ضمن المهلة */
@@ -291,6 +279,7 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
       destLng: trip.destLng,
       destAddress: trip.destAddress,
       rideClass: trip.rideClass,
+      vehicleTypeId: trip.vehicleTypeId,
       fare: trip.fare,
       currency: trip.currency,
       distanceKm: trip.distanceKm,

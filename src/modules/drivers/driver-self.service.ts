@@ -86,6 +86,7 @@ export class DriverSelfService {
             plate: vehicle.plate,
             year: vehicle.year ?? null,
             rideClass: vehicle.rideClass,
+            vehicleTypeId: vehicle.vehicleTypeId ?? null,
           }
         : null,
       documents: (driver.documents ?? []).map((d) => ({
@@ -107,22 +108,6 @@ export class DriverSelfService {
       });
     }
 
-    // مزامنة رقم الهاتف مع الخادم (تقرأه لوحة التحكم). نحمي قيد التفرّد:
-    // لا نكتب الرقم إن كان مستخدَمًا من حساب آخر.
-    if (dto.phone && dto.phone.trim()) {
-      const phone = dto.phone.trim();
-      const clash = await this.prisma.user.findFirst({
-        where: { phone, id: { not: userId } },
-        select: { id: true },
-      });
-      if (!clash) {
-        await this.prisma.user.update({
-          where: { id: userId },
-          data: { phone },
-        });
-      }
-    }
-
     if (dto.cityId !== undefined) {
       await this.prisma.driver.update({
         where: { id: driver.id },
@@ -136,7 +121,8 @@ export class DriverSelfService {
       dto.carColor !== undefined ||
       dto.carPlate !== undefined ||
       dto.carYear !== undefined ||
-      dto.rideClass !== undefined;
+      dto.rideClass !== undefined ||
+      dto.vehicleTypeId !== undefined;
 
     if (touchesVehicle) {
       const active = await this.prisma.vehicle.findFirst({
@@ -154,6 +140,7 @@ export class DriverSelfService {
         plate,
         year: dto.carYear ?? active?.year ?? null,
         rideClass: dto.rideClass ?? active?.rideClass ?? "ECONOMY",
+        vehicleTypeId: dto.vehicleTypeId ?? active?.vehicleTypeId ?? null,
       };
       if (active) {
         await this.prisma.vehicle.update({ where: { id: active.id }, data });
@@ -259,13 +246,6 @@ export class DriverSelfService {
 
   async addDocument(userId: string, dto: AddDocumentDto) {
     const driver = await this.requireDriver(userId);
-    // صورة الملف الشخصي: نحدّث avatarUrl أيضًا لتظهر مباشرةً في لوحة التحكم.
-    if (dto.type === "PROFILE_PHOTO") {
-      await this.prisma.user.update({
-        where: { id: userId },
-        data: { avatarUrl: dto.url },
-      });
-    }
     return this.prisma.driverDocument.create({
       data: {
         driverId: driver.id,

@@ -39,6 +39,11 @@ export class RequestRideDto {
   @IsOptional()
   rideClass?: RideClass;
 
+  // معرّف نوع المركبة الديناميكي (النظام الجديد المُدار من لوحة التحكم)
+  @IsString()
+  @IsOptional()
+  vehicleTypeId?: string;
+
   @IsString()
   @IsOptional()
   cityId?: string;
@@ -70,6 +75,11 @@ export class QuoteDto {
   @IsEnum(RideClass)
   @IsOptional()
   rideClass?: RideClass;
+
+  // معرّف نوع المركبة الديناميكي (النظام الجديد المُدار من لوحة التحكم)
+  @IsString()
+  @IsOptional()
+  vehicleTypeId?: string;
 
   @IsString()
   @IsOptional()

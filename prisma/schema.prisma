@@ -43,6 +43,15 @@ enum RideClass {
   COMFORT
   VAN
   XL
+  CAR
+  BIKE
+}
+
+enum WorkflowStatus {
+  DRAFT
+  PENDING
+  PUBLISHED
+  ARCHIVED
 }
 
 enum DocumentType {
@@ -178,9 +187,8 @@ model Driver {
   id           String             @id @default(uuid())
   userId       String             @unique
   user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  status        DriverStatus       @default(PENDING)
-  statusMessage String?
-  availability  DriverAvailability @default(OFFLINE)
+  status       DriverStatus       @default(PENDING)
+  availability DriverAvailability @default(OFFLINE)
   rating       Float              @default(5)
   totalTrips   Int                @default(0)
   cityId       String?
@@ -213,10 +221,13 @@ model Vehicle {
   color     String?
   plate     String    @unique
   rideClass RideClass @default(ECONOMY)
+  vehicleTypeId String?
+  vehicleType   VehicleType? @relation(fields: [vehicleTypeId], references: [id], onDelete: SetNull)
   isActive  Boolean   @default(true)
   createdAt DateTime  @default(now())
 
   @@index([driverId])
+  @@index([vehicleTypeId])
 }
 
 model DriverDocument {
@@ -245,6 +256,8 @@ model Trip {
   driver        Driver?       @relation("DriverTrips", fields: [driverId], references: [id])
   status        TripStatus    @default(SEARCHING)
   rideClass     RideClass     @default(ECONOMY)
+  vehicleTypeId String?
+  vehicleType   VehicleType?  @relation(fields: [vehicleTypeId], references: [id])
   pickupLat     Float
   pickupLng     Float
   pickupAddress String?
@@ -696,20 +709,225 @@ model SystemLog {
 }
 
 /// أنواع المركبات المعروضة في التطبيق (اقتصادي، مريح، فان...) — تُدار من لوحة التحكم
-model VehicleType {
-  id          String    @id @default(uuid())
-  name        String    @unique
-  description String?
-  rideClass   RideClass @default(ECONOMY)
-  multiplier  Float     @default(1)
-  capacity    Int       @default(4)
-  iconUrl     String?
-  isActive    Boolean   @default(true)
-  sortOrder   Int       @default(0)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+// فئة مركبات ديناميكية (سيارات / دراجات / أي فئة جديدة يضيفها المدير).
+model VehicleCategory {
+  id              String   @id @default(uuid())
+  name            String   @unique
+  nameI18n        Json? // { ar, fr, en }
+  description     String?
+  descriptionI18n Json?
+  iconType        String   @default("EMOJI") // EMOJI | ICON_PACK | SVG | PNG | LOTTIE
+  iconValue       String? // رمز إيموجي أو مفتاح داخل حزمة أيقونات
+  iconUrl         String? // رابط ملف SVG/PNG/Lottie (URL أو File ID فقط)
+  imageUrl        String?
+  color           String?
+  usageType       String   @default("BOTH") // RIDE | DELIVERY | BOTH
+  domain          String   @default("MOBILITY") // MOBILITY | FOOD | PARCEL | CORPORATE | RENTAL — كتالوج قابل لإعادة الاستخدام
+  status          WorkflowStatus @default(PUBLISHED)
+  version         Int      @default(1) // يتغير مع كل تعديل — للـ smart cache
+  isActive        Boolean  @default(true)
+  sortOrder       Int      @default(0)
+  deletedAt       DateTime? // حذف ناعم
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  types VehicleType[]
 
   @@index([isActive])
+  @@index([domain])
+  @@index([deletedAt])
+}
+
+// نوع المركبة = خدمة كاملة. كل الخصائص والميزات والأسعار تُدار من لوحة التحكم.
+model VehicleType {
+  id              String           @id @default(uuid())
+  categoryId      String?
+  category        VehicleCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  name            String
+  nameI18n        Json?
+  description     String?
+  descriptionI18n Json?
+  rideClass       RideClass        @default(ECONOMY) // للتوافق مع البيانات القديمة
+  multiplier      Float            @default(1)
+  capacity        Int              @default(4)
+  luggage         Int              @default(0)
+  notes           String?
+  usageType       String           @default("BOTH") // RIDE | DELIVERY | BOTH
+
+  // خصائص الخدمة (تُدار من اللوحة)
+  allowsNegotiation   Boolean @default(false)
+  supportsCash        Boolean @default(true)
+  supportsWallet      Boolean @default(true)
+  requiresApproval    Boolean @default(false)
+  visibleToPassengers Boolean @default(true)
+  visibleToDrivers    Boolean @default(true)
+
+  // أيقونات مرنة (Icon Pack / SVG / PNG / Lottie)
+  iconType  String  @default("EMOJI")
+  iconValue String?
+  iconUrl   String?
+  imageUrl  String?
+  color     String?
+
+  // متطلبات القبول لهذا النوع — يتحقق منها النظام تلقائياً
+  minVehicleYear      Int?
+  minDriverRating     Float?
+  minDriverTrips      Int?
+  requiredLicenseType String?
+  requiredDocuments   String[] @default([]) // أنواع مستندات إلزامية
+  requiredPhotos      String[] @default([]) // صور إلزامية
+  requirements        Json? // متطلبات إضافية مرنة
+
+  // دورة حياة النشر (Workflow) + الإصدار + الحذف الناعم
+  status    WorkflowStatus @default(DRAFT)
+  version   Int       @default(1)
+  deletedAt DateTime?
+
+  isActive  Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  features     VehicleTypeFeature[]
+  pricingRules VehiclePricingRule[]
+  fields       VehicleTypeField[]
+  vehicles     Vehicle[]
+  trips        Trip[]
+
+  @@unique([categoryId, name])
+  @@index([isActive])
+  @@index([categoryId])
+  @@index([status])
+  @@index([deletedAt])
+}
+
+// ميزات مرنة (مكيف/براد/واي فاي/شاحن/كرسي أطفال...) تُضاف من اللوحة دون تعديل قاعدة البيانات.
+model Feature {
+  id        String   @id @default(uuid())
+  code      String   @unique
+  name      String
+  nameI18n  Json?
+  iconType  String   @default("EMOJI")
+  iconValue String?
+  iconUrl   String?
+  isActive  Boolean  @default(true)
+  sortOrder Int      @default(0)
+  version   Int      @default(1)
+  deletedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  types VehicleTypeFeature[]
+
+  @@index([isActive])
+  @@index([deletedAt])
+}
+
+// جدول الربط بين النوع والميزات (متعدد-إلى-متعدد).
+model VehicleTypeFeature {
+  vehicleTypeId String
+  featureId     String
+  vehicleType   VehicleType @relation(fields: [vehicleTypeId], references: [id], onDelete: Cascade)
+  feature       Feature     @relation(fields: [featureId], references: [id], onDelete: Cascade)
+
+  @@id([vehicleTypeId, featureId])
+  @@index([featureId])
+}
+
+// مناطق الخدمة (اسم/مدينة/ولاية/دولة/حدود GeoJSON/تفعيل). يرتبط بها التسعير.
+model ServiceArea {
+  id        String   @id @default(uuid())
+  name      String
+  city      String?
+  state     String?
+  country   String?
+  geojson     Json? // Polygon / GeoJSON — تمثيل هندسي عام مستقل عن مزوّد الخرائط
+  provider    String   @default("GEOJSON") // GEOJSON | GOOGLE | OSM | MAPBOX
+  providerRef Json? // معرفات خاصة بالمزوّد (اختياري) دون تغيير المخطط
+  centerLat Float?
+  centerLng Float?
+  isActive  Boolean  @default(true)
+  sortOrder Int      @default(0)
+  version   Int      @default(1)
+  deletedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  pricingRules VehiclePricingRule[]
+
+  @@index([isActive])
+  @@index([deletedAt])
+}
+
+// نظام تسعير مرن: عدة قواعد سعر لكل نوع مركبة، تختلف حسب المنطقة/المدينة/الولاية/الدولة/
+// الوقت/الذروة/المناسبات/نوع العميل/العروض/الكوبونات. يُختار أنسبها حسب الأولوية والتطابق.
+model VehiclePricingRule {
+  id            String       @id @default(uuid())
+  vehicleTypeId String
+  vehicleType   VehicleType  @relation(fields: [vehicleTypeId], references: [id], onDelete: Cascade)
+  name          String?
+
+  // النطاق الجغرافي
+  serviceAreaId String?
+  serviceArea   ServiceArea? @relation(fields: [serviceAreaId], references: [id], onDelete: SetNull)
+  cityId        String?
+  state         String?
+  country       String?
+
+  // نوع العميل والعروض والكوبونات
+  customerType String? // ALL | NEW | VIP ...
+  couponCode   String?
+
+  // النافذة الزمنية / المناسبات / الذروة
+  validFrom      DateTime?
+  validTo        DateTime?
+  daysOfWeek     Int[]     @default([])
+  startTime      String? // HH:MM
+  endTime        String? // HH:MM
+  peakMultiplier Float     @default(1)
+
+  // القيم
+  baseFare       Decimal  @db.Decimal(12, 2)
+  perKm          Decimal  @db.Decimal(12, 2)
+  perMin         Decimal  @db.Decimal(12, 2)
+  minFare        Decimal  @db.Decimal(12, 2)
+  maxFare        Decimal? @db.Decimal(12, 2)
+  negotiationMin Decimal? @db.Decimal(12, 2)
+  negotiationMax Decimal? @db.Decimal(12, 2)
+  commissionPct  Float    @default(0)
+  currency       String   @default("DZD")
+
+  priority  Int      @default(0) // الأعلى يفوز عند تطابق أكثر من قاعدة
+  isActive  Boolean  @default(true)
+  version   Int      @default(1)
+  deletedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([vehicleTypeId])
+  @@index([serviceAreaId])
+  @@index([isActive])
+  @@index([deletedAt])
+}
+
+// حقول ديناميكية يعرّفها المدير لكل نوع (Dynamic Forms) دون تعديل الكود.
+model VehicleTypeField {
+  id            String      @id @default(uuid())
+  vehicleTypeId String
+  vehicleType   VehicleType @relation(fields: [vehicleTypeId], references: [id], onDelete: Cascade)
+  key           String // مفتاح برمجي، مثل: hasWater
+  label         String
+  labelI18n     Json? // { ar, fr, en }
+  fieldType     String      @default("TEXT") // TEXT | NUMBER | BOOLEAN | SELECT | MULTISELECT
+  options       Json? // خيارات SELECT/MULTISELECT
+  required      Boolean     @default(false)
+  isActive      Boolean     @default(true)
+  sortOrder     Int         @default(0)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@unique([vehicleTypeId, key])
+  @@index([vehicleTypeId])
 }
 
 /// الإعلانات/البانرات المعروضة في تطبيقي الراكب والسائق

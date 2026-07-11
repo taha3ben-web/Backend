@@ -35,23 +35,23 @@ export class DriversController {
   }
 
   @Patch(":id/approve")
-  approve(@Param("id") id: string, @Body() body: { message?: string }) {
-    return this.drivers.setStatus(id, "APPROVED", body?.message);
+  approve(@Param("id") id: string) {
+    return this.drivers.setStatus(id, "APPROVED");
   }
 
   @Patch(":id/reject")
-  reject(@Param("id") id: string, @Body() body: { message?: string }) {
-    return this.drivers.setStatus(id, "REJECTED", body?.message);
+  reject(@Param("id") id: string) {
+    return this.drivers.setStatus(id, "REJECTED");
   }
 
   @Patch(":id/suspend")
-  suspend(@Param("id") id: string, @Body() body: { message?: string }) {
-    return this.drivers.setStatus(id, "SUSPENDED", body?.message);
+  suspend(@Param("id") id: string) {
+    return this.drivers.setStatus(id, "SUSPENDED");
   }
 
   @Patch(":id/ban")
-  ban(@Param("id") id: string, @Body() body: { message?: string }) {
-    return this.drivers.setStatus(id, "BANNED", body?.message);
+  ban(@Param("id") id: string) {
+    return this.drivers.setStatus(id, "BANNED");
   }
 
   @Patch("documents/:docId/review")

@@ -5,6 +5,7 @@ import { ScheduleModule } from "@nestjs/schedule";
 import { APP_GUARD } from "@nestjs/core";
 import configuration from "./config/configuration";
 import { PrismaModule } from "./prisma/prisma.module";
+import { InfraModule } from "./common/infra/infra.module";
 import { RedisModule } from "./modules/redis/redis.module";
 import { StorageModule } from "./modules/storage/storage.module";
 import { AuthModule } from "./modules/auth/auth.module";
@@ -28,7 +29,6 @@ import { SessionsModule } from "./modules/sessions/sessions.module";
 import { VehicleTypesModule } from "./modules/vehicle-types/vehicle-types.module";
 import { AdsModule } from "./modules/ads/ads.module";
 import { MetricsModule } from "./modules/metrics/metrics.module";
-import { AssetsModule } from "./modules/assets/assets.module";
 import { HealthController } from "./modules/health/health.controller";
 
 @Module({
@@ -36,6 +36,7 @@ import { HealthController } from "./modules/health/health.controller";
     ConfigModule.forRoot({ isGlobal: true, load: [configuration] }),
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }]),
     ScheduleModule.forRoot(),
+    InfraModule,
     PrismaModule,
     RedisModule,
     StorageModule,
@@ -60,7 +61,6 @@ import { HealthController } from "./modules/health/health.controller";
     VehicleTypesModule,
     AdsModule,
     MetricsModule,
-    AssetsModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

@@ -34,8 +34,11 @@ export class MatchingController {
       dto.pickupLng,
       dto.destLat,
       dto.destLng,
-      dto.rideClass ?? "ECONOMY",
-      dto.cityId,
+      {
+        rideClass: dto.rideClass ?? "ECONOMY",
+        cityId: dto.cityId,
+        vehicleTypeId: dto.vehicleTypeId,
+      },
     );
   }
 

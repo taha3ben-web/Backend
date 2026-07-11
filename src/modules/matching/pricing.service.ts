@@ -1,9 +1,12 @@
 import { Injectable } from "@nestjs/common";
 import { RideClass } from "@prisma/client";
-import { PrismaService } from "../../prisma/prisma.service";
-import { haversineKm, estimateDurationSec } from "./geo.util";
-import { computeFare } from "./pricing.util";
+import {
+  PricingEngineService,
+  PricingContext,
+} from "../pricing-engine/pricing-engine.service";
 
+/**
+ * شكل نتيجة تقدير الأجرة (يُحافَظ عليه للتوافق مع المستدعين الحاليين). */
 export interface FareQuote {
   distanceKm: number;
   durationSec: number;
@@ -16,116 +19,68 @@ export interface FareQuote {
     peakMultiplier: number;
     minFare: number;
     maxFare: number | null;
+    negotiationMin: number | null;
+    negotiationMax: number | null;
   };
 }
 
-// قيم احتياطية إن لم توجد قاعدة تسعير في قاعدة البيانات
-const DEFAULT_RULE = {
-  baseFare: 50,
-  perKm: 20,
-  perMin: 3,
-  minFare: 100,
-  maxFare: null as number | null,
-  currency: "DZD",
-};
+export interface QuoteOptions {
+  rideClass?: RideClass;
+  vehicleTypeId?: string;
+  cityId?: string;
+  serviceAreaId?: string;
+  state?: string;
+  country?: string;
+  customerType?: string;
+  couponCode?: string;
+}
 
+/**
+ * غلاف رقيق حول محرك التسعير المستقل (PricingEngineService).
+ * يحافظ على التوقيع القديم (quote) حتى لا تنكسر المطابقة،
+ * بينما انتقل منطق التسعير بالكامل إلى المحرك المستقل.
+ */
 @Injectable()
 export class PricingService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly engine: PricingEngineService) {}
 
-  /**
-   * تقدير الأجرة: يبحث عن قاعدة تسعير حسب المدينة والفئة،
-   * يحسب المسافة/الزمن، ويطبق تسعير الذروة إن كان فعّالًا الآن.
-   */
   async quote(
     pickupLat: number,
     pickupLng: number,
     destLat: number,
     destLng: number,
-    rideClass: RideClass = "ECONOMY",
+    rideClassOrOptions: RideClass | QuoteOptions = "ECONOMY",
     cityId?: string,
   ): Promise<FareQuote> {
-    const rule = await this.resolveRule(rideClass, cityId);
-    const distanceKm =
-      Math.round(haversineKm(pickupLat, pickupLng, destLat, destLng) * 100) /
-      100;
-    const durationSec = estimateDurationSec(distanceKm);
-    const baseFare = Number(rule.baseFare);
-    const minFare = Number(rule.minFare);
-    const maxFare = rule.maxFare != null ? Number(rule.maxFare) : null;
-    const peakMultiplier = await this.currentPeakMultiplier(rule.id);
+    const opts: QuoteOptions =
+      typeof rideClassOrOptions === "object"
+        ? rideClassOrOptions
+        : { rideClass: rideClassOrOptions, cityId };
 
-    const { fare, distanceCost, timeCost } = computeFare(
-      {
-        baseFare,
-        perKm: Number(rule.perKm),
-        perMin: Number(rule.perMin),
-        minFare,
-        maxFare,
-      },
-      distanceKm,
-      durationSec,
-      peakMultiplier,
-    );
+    const ctx: PricingContext = {
+      ...opts,
+      pickupLat,
+      pickupLng,
+      destLat,
+      destLng,
+    };
+    const r = await this.engine.quote(ctx);
 
     return {
-      distanceKm,
-      durationSec,
-      fare,
-      currency: rule.currency,
+      distanceKm: r.distanceKm,
+      durationSec: r.durationSec,
+      fare: r.fare,
+      currency: r.currency,
       breakdown: {
-        baseFare,
-        distanceCost,
-        timeCost,
-        peakMultiplier,
-        minFare,
-        maxFare,
+        baseFare: r.breakdown.baseFare,
+        distanceCost: r.breakdown.distanceCost,
+        timeCost: r.breakdown.timeCost,
+        peakMultiplier: r.breakdown.peakMultiplier,
+        minFare: r.breakdown.minFare,
+        maxFare: r.breakdown.maxFare,
+        negotiationMin: r.breakdown.negotiationMin,
+        negotiationMax: r.breakdown.negotiationMax,
       },
     };
-  }
-
-  private async resolveRule(rideClass: RideClass, cityId?: string) {
-    // أولاً: قاعدة خاصة بالمدينة + الفئة، ثم عامة بالفئة
-    const rule =
-      (cityId
-        ? await this.prisma.pricingRule.findFirst({
-            where: { cityId, rideClass, isActive: true },
-          })
-        : null) ??
-      (await this.prisma.pricingRule.findFirst({
-        where: { rideClass, isActive: true },
-        orderBy: { createdAt: "asc" },
-      }));
-
-    if (rule) return rule;
-    return { id: null as string | null, ...DEFAULT_RULE };
-  }
-
-  /** مضاعف الذروة الفعّال الآن (اليوم + الوقت)، وإلا 1 */
-  private async currentPeakMultiplier(ruleId: string | null): Promise<number> {
-    if (!ruleId) return 1;
-    const peaks = await this.prisma.peakPricing.findMany({
-      where: { pricingRuleId: ruleId, isActive: true },
-    });
-    if (peaks.length === 0) return 1;
-
-    const now = new Date();
-    const day = now.getDay(); // 0=الأحد
-    const hm = now.getHours() * 60 + now.getMinutes();
-
-    for (const p of peaks) {
-      if (p.daysOfWeek.length > 0 && !p.daysOfWeek.includes(day)) continue;
-      const start = this.parseHm(p.startTime);
-      const end = this.parseHm(p.endTime);
-      const active =
-        start <= end ? hm >= start && hm <= end : hm >= start || hm <= end;
-      if (active) return p.multiplier;
-    }
-    return 1;
-  }
-
-  private parseHm(value: string): number {
-    const [h, m] = value.split(":").map((n) => parseInt(n, 10));
-    return (h || 0) * 60 + (m || 0);
   }
 }
