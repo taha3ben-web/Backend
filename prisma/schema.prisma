@@ -308,6 +308,9 @@ model Trip {
   createdAt     DateTime      @default(now())
   startedAt     DateTime?
   completedAt   DateTime?
+  settlementAttempts Int      @default(0)
+  settlementError String?
+  settledAt      DateTime?
   updatedAt     DateTime      @updatedAt
 
   tracking       TripTracking[]
@@ -324,6 +327,7 @@ model Trip {
   @@index([passengerId, status])
   @@index([driverId, status])
   @@index([createdAt])
+  @@index([status, settledAt, completedAt])
 }
 
 model TripTracking {
@@ -380,7 +384,6 @@ model FinancialAccount {
   updatedAt     DateTime             @updatedAt
   entries       LedgerEntry[]
 
-  @@unique([partyId, currency, type])
   @@index([partyId, currency])
 }
 

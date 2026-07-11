@@ -17,7 +17,7 @@ const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
  * تختلف حسب المنطقة/المدينة/الوقت/نوع العميل/العروض...
  */
 export class CreateVehiclePricingRuleDto {
-  @IsString() @IsNotEmpty() vehicleTypeId!: string;
+  @IsString() @IsNotEmpty() declare vehicleTypeId: string;
   @IsOptional() @IsString() name?: string;
 
   // النطاق الجغرافي
@@ -39,10 +39,10 @@ export class CreateVehiclePricingRuleDto {
   @IsOptional() @IsNumber() @Min(0) peakMultiplier?: number;
 
   // القيم
-  @IsNumber() @Min(0) baseFare!: number;
-  @IsNumber() @Min(0) perKm!: number;
-  @IsNumber() @Min(0) perMin!: number;
-  @IsNumber() @Min(0) minFare!: number;
+  @IsNumber() @Min(0) declare baseFare: number;
+  @IsNumber() @Min(0) declare perKm: number;
+  @IsNumber() @Min(0) declare perMin: number;
+  @IsNumber() @Min(0) declare minFare: number;
   @IsOptional() @IsNumber() @Min(0) maxFare?: number;
   @IsOptional() @IsNumber() @Min(0) negotiationMin?: number;
   @IsOptional() @IsNumber() @Min(0) negotiationMax?: number;

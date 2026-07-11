@@ -13,7 +13,7 @@ export class CreateRoleDto {
   @IsString()
   @MinLength(2)
   @MaxLength(60)
-  name!: string;
+  declare name: string;
 
   @IsString()
   @IsOptional()
@@ -43,7 +43,7 @@ export class CreatePermissionDto {
   @IsString()
   @MinLength(2)
   @MaxLength(80)
-  key!: string;
+  declare key: string;
 
   @IsString()
   @IsOptional()
@@ -55,28 +55,28 @@ export class CreatePermissionDto {
 export class CreateStaffDto {
   @IsString()
   @MinLength(2)
-  name!: string;
+  declare name: string;
 
   @IsString()
   @MinLength(6)
-  phone!: string;
+  declare phone: string;
 
   @IsString()
   @MinLength(6)
-  password!: string;
+  declare password: string;
 
   @IsString()
-  roleId!: string;
+  declare roleId: string;
 }
 
 export class AssignRoleDto {
   @IsString()
-  roleId!: string;
+  declare roleId: string;
 }
 
 export class SetRolePermissionsDto {
   @IsArray()
   @ArrayNotEmpty()
   @IsString({ each: true })
-  permissionKeys!: string[];
+  declare permissionKeys: string[];
 }

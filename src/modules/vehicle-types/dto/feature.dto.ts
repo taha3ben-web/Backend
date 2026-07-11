@@ -11,8 +11,8 @@ import { ICON_TYPES, IconType } from "./vehicle-category.dto";
 
 /** إنشاء ميزة مرنة (مكيف/براد/واي فاي...). */
 export class CreateFeatureDto {
-  @IsString() @IsNotEmpty() code!: string;
-  @IsString() @IsNotEmpty() name!: string;
+  @IsString() @IsNotEmpty() declare code: string;
+  @IsString() @IsNotEmpty() declare name: string;
   @IsOptional() @IsObject() nameI18n?: Record<string, string>;
   @IsOptional() @IsIn(ICON_TYPES) iconType?: IconType;
   @IsOptional() @IsString() iconValue?: string;

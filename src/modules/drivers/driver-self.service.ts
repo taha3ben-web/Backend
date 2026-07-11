@@ -244,6 +244,24 @@ export class DriverSelfService {
     return { items, total, page: q.page, limit: q.limit };
   }
 
+
+  async trip(userId: string, tripId: string) {
+    const trip = await this.prisma.trip.findUnique({ where: { id: tripId }, include: { passenger: { select: { name: true, phone: true } } } });
+    const driver = await this.requireDriver(userId);
+    if (!trip || trip.driverId !== driver.id) throw new NotFoundException("الرحلة غير موجودة");
+    return trip;
+  }
+
+  async updateTripStatus(userId: string, tripId: string, status: "ARRIVING" | "IN_PROGRESS" | "COMPLETED", reason?: string) {
+    const driver = await this.requireDriver(userId); const trip = await this.prisma.trip.findUnique({ where: { id: tripId } });
+    if (!trip || trip.driverId !== driver.id) throw new NotFoundException("الرحلة غير موجودة");
+    const allowed = (trip.status === "ACCEPTED" && status === "ARRIVING") || (trip.status === "ARRIVING" && status === "IN_PROGRESS") || (trip.status === "IN_PROGRESS" && status === "COMPLETED");
+    if (!allowed) throw new BadRequestException(`Invalid transition ${trip.status} -> ${status}`);
+    const changed = await this.prisma.trip.updateMany({ where: { id: tripId, status: trip.status }, data: { status, startedAt: status === "IN_PROGRESS" ? new Date() : undefined, completedAt: status === "COMPLETED" ? new Date() : undefined, cancelReason: reason } });
+    if (changed.count !== 1) throw new BadRequestException("Trip state changed concurrently");
+    return this.prisma.trip.findUnique({ where: { id: tripId } });
+  }
+
   async addDocument(userId: string, dto: AddDocumentDto) {
     const driver = await this.requireDriver(userId);
     return this.prisma.driverDocument.create({

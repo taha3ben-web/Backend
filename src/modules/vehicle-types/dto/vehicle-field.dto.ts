@@ -21,9 +21,9 @@ export type FieldType = (typeof FIELD_TYPES)[number];
 
 /** إنشاء حقل ديناميكي لنوع مركبة (مثل: هل يوجد ماء؟). */
 export class CreateVehicleFieldDto {
-  @IsString() @IsNotEmpty() vehicleTypeId!: string;
-  @IsString() @IsNotEmpty() key!: string;
-  @IsString() @IsNotEmpty() label!: string;
+  @IsString() @IsNotEmpty() declare vehicleTypeId: string;
+  @IsString() @IsNotEmpty() declare key: string;
+  @IsString() @IsNotEmpty() declare label: string;
   @IsOptional() @IsObject() labelI18n?: Record<string, string>;
   @IsOptional() @IsIn(FIELD_TYPES) fieldType?: FieldType;
   @IsOptional() @IsArray() options?: unknown[];

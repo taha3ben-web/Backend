@@ -36,7 +36,7 @@ export class DateRangeDto {
 /** طلب تقرير قابل للتنزيل */
 export class ReportQueryDto extends DateRangeDto {
   @IsEnum(ReportFormat)
-  format!: ReportFormat;
+  declare format: ReportFormat;
 
   @Type(() => Number)
   @IsInt()

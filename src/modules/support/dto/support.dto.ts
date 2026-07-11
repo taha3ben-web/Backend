@@ -15,7 +15,7 @@ import { ComplaintStatus, TicketStatus } from "@prisma/client";
 export class CreateTicketDto {
   @IsString()
   @MaxLength(200)
-  subject!: string;
+  declare subject: string;
 
   @IsString()
   @IsOptional()
@@ -24,18 +24,18 @@ export class CreateTicketDto {
   // أول رسالة في التذكرة
   @IsString()
   @MaxLength(2000)
-  message!: string;
+  declare message: string;
 }
 
 export class AddTicketMessageDto {
   @IsString()
   @MaxLength(2000)
-  body!: string;
+  declare body: string;
 }
 
 export class UpdateTicketStatusDto {
   @IsEnum(TicketStatus)
-  status!: TicketStatus;
+  declare status: TicketStatus;
 }
 
 // ---------- الشكاوى ----------
@@ -51,25 +51,25 @@ export class CreateComplaintDto {
 
   @IsString()
   @MaxLength(2000)
-  message!: string;
+  declare message: string;
 }
 
 export class UpdateComplaintStatusDto {
   @IsEnum(ComplaintStatus)
-  status!: ComplaintStatus;
+  declare status: ComplaintStatus;
 }
 
 // ---------- التقييمات ----------
 
 export class CreateRatingDto {
   @IsString()
-  tripId!: string;
+  declare tripId: string;
 
   @Type(() => Number)
   @IsInt()
   @Min(1)
   @Max(5)
-  stars!: number;
+  declare stars: number;
 
   @IsString()
   @MaxLength(1000)

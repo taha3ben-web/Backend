@@ -56,7 +56,7 @@ function isValidLatLng(lat: unknown, lng: unknown): boolean {
 export class RealtimeGateway
   implements OnGatewayConnection, OnGatewayDisconnect
 {
-  @WebSocketServer() server!: Server;
+  @WebSocketServer() declare server: Server;
 
   constructor(
     private readonly jwt: JwtService,

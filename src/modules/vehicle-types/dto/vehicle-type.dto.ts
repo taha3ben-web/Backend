@@ -25,7 +25,7 @@ import {
 export class CreateVehicleTypeDto {
   @IsString()
   @IsNotEmpty()
-  name!: string;
+  declare name: string;
 
   @IsOptional() @IsObject() nameI18n?: Record<string, string>;
   @IsOptional() @IsString() categoryId?: string;

@@ -21,7 +21,7 @@ const SORTABLE = ["name", "sortOrder", "createdAt", "updatedAt", "version"];
 
 /**
  * خدمة مناطق الخدمة: CRUD + تفعيل + حذف ناعم + إصدار + أحداث + Cache + تدقيق.
- * مصمّمة بشكل عام (provider) تدعم GEOJSON / Google / OSM / Mapbox دون تغيير قاعدة البيانات.
+ * مصمّمة بشكل عام (provider) تدعم GEOJSON / Google دون تغيير قاعدة البيانات.
  */
 @Injectable()
 export class ServiceAreasService {

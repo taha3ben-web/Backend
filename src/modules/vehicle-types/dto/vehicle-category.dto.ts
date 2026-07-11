@@ -42,7 +42,7 @@ export type CatalogDomain = (typeof CATALOG_DOMAINS)[number];
 export class CreateVehicleCategoryDto {
   @IsString()
   @IsNotEmpty()
-  name!: string;
+  declare name: string;
 
   @IsOptional() @IsObject() nameI18n?: Record<string, string>;
   @IsOptional() @IsString() description?: string;
@@ -79,8 +79,8 @@ export class UpdateVehicleCategoryDto {
 
 /** عنصر ترتيب واحد. */
 export class ReorderItemDto {
-  @IsString() @IsNotEmpty() id!: string;
-  @IsInt() sortOrder!: number;
+  @IsString() @IsNotEmpty() declare id: string;
+  @IsInt() declare sortOrder: number;
 }
 
 /** إعادة ترتيب مجموعة عناصر. */
@@ -88,10 +88,10 @@ export class ReorderDto {
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => ReorderItemDto)
-  items!: ReorderItemDto[];
+  declare items: ReorderItemDto[];
 }
 
 /** تغيير حالة النشر (Workflow). */
 export class SetStatusDto {
-  @IsIn(WORKFLOW_STATUSES) status!: WorkflowStatusValue;
+  @IsIn(WORKFLOW_STATUSES) declare status: WorkflowStatusValue;
 }

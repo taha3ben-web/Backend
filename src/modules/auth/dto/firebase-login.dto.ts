@@ -10,7 +10,7 @@ export enum FirebaseRole {
  */
 export class FirebaseLoginDto {
   @IsString()
-  idToken!: string;
+  declare idToken: string;
 
   // الدور المطلوب عند إنشاء المستخدم لأول مرة (افتراضي: PASSENGER).
   @IsOptional()

@@ -5,6 +5,7 @@ import {
   Patch,
   Post,
   Query,
+  Param,
   UseGuards,
 } from "@nestjs/common";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
@@ -60,6 +61,13 @@ export class DriverSelfController {
   trips(@CurrentUser() user: AuthUser, @Query() q: PaginationDto) {
     return this.service.trips(user.userId, q);
   }
+
+
+  @Get("me/trips/:id")
+  trip(@CurrentUser() user: AuthUser, @Param("id") id: string) { return this.service.trip(user.userId, id); }
+
+  @Patch("me/trips/:id/status")
+  updateTrip(@CurrentUser() user: AuthUser, @Param("id") id: string, @Body() body: { status: "ARRIVING" | "IN_PROGRESS" | "COMPLETED"; reason?: string }) { return this.service.updateTripStatus(user.userId, id, body.status, body.reason); }
 
   @Post("me/documents")
   addDocument(@CurrentUser() user: AuthUser, @Body() dto: AddDocumentDto) {

@@ -51,7 +51,7 @@ export class MatchingController {
   /** الراكب يلغي البحث */
   @Patch(":id/cancel")
   cancel(@Param("id") id: string, @CurrentUser() user: AuthUser) {
-    return this.matching.cancelSearch(id, user.userId);
+    return this.matching.passengerCancel(user.userId, id);
   }
 
   /** سجل رحلات الراكب (رحلاتي) */

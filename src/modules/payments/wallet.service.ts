@@ -15,6 +15,6 @@ export class WalletService {
       this.prisma.ledgerEntry.findMany({ where, include: { transaction: true }, orderBy: { createdAt: "desc" }, skip: (q.page - 1) * q.limit, take: q.limit }),
       this.prisma.ledgerEntry.count({ where }),
     ]);
-    return { wallet: balance, transactions: entries, total, page: q.page, limit: q.limit };
+    return { ...balance, transactions: entries, total, page: q.page, limit: q.limit };
   }
 }

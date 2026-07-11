@@ -13,11 +13,11 @@ import { RideClass } from "@prisma/client";
 export class RequestRideDto {
   @Type(() => Number)
   @IsLatitude()
-  pickupLat!: number;
+  declare pickupLat: number;
 
   @Type(() => Number)
   @IsLongitude()
-  pickupLng!: number;
+  declare pickupLng: number;
 
   @IsString()
   @IsOptional()
@@ -25,11 +25,11 @@ export class RequestRideDto {
 
   @Type(() => Number)
   @IsLatitude()
-  destLat!: number;
+  declare destLat: number;
 
   @Type(() => Number)
   @IsLongitude()
-  destLng!: number;
+  declare destLng: number;
 
   @IsString()
   @IsOptional()
@@ -58,19 +58,19 @@ export class RequestRideDto {
 export class QuoteDto {
   @Type(() => Number)
   @IsNumber()
-  pickupLat!: number;
+  declare pickupLat: number;
 
   @Type(() => Number)
   @IsNumber()
-  pickupLng!: number;
+  declare pickupLng: number;
 
   @Type(() => Number)
   @IsNumber()
-  destLat!: number;
+  declare destLat: number;
 
   @Type(() => Number)
   @IsNumber()
-  destLng!: number;
+  declare destLng: number;
 
   @IsEnum(RideClass)
   @IsOptional()

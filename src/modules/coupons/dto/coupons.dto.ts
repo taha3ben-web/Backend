@@ -14,7 +14,7 @@ import { DiscountType } from "@prisma/client";
 
 export class CreateCouponDto {
   @IsString()
-  code!: string;
+  declare code: string;
 
   @IsEnum(DiscountType)
   @IsOptional()
@@ -23,7 +23,7 @@ export class CreateCouponDto {
   @Type(() => Number)
   @IsNumber()
   @IsPositive()
-  value!: number;
+  declare value: number;
 
   @Type(() => Number)
   @IsInt()
@@ -84,10 +84,10 @@ export class UpdateCouponDto {
 
 export class ValidateCouponDto {
   @IsString()
-  code!: string;
+  declare code: string;
 
   @Type(() => Number)
   @IsNumber()
   @IsPositive()
-  fare!: number;
+  declare fare: number;
 }

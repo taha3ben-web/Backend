@@ -12,11 +12,21 @@ import { LoginDto } from "./dto/login.dto";
 import { FirebaseLoginDto } from "./dto/firebase-login.dto";
 import { FirebaseAdminService } from "./firebase-admin.service";
 
+export interface AuthUserResponse {
+  id: string;
+  name: string;
+  phone: string;
+  email?: string;
+  type: "PASSENGER" | "DRIVER" | "STAFF";
+  status: string;
+}
+
 export interface Tokens {
   accessToken: string;
   refreshToken: string;
   userId: string;
   role: string;
+  user: AuthUserResponse;
 }
 
 /**
@@ -219,6 +229,17 @@ export class AuthService {
       },
     });
 
-    return { accessToken, refreshToken, userId, role };
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, name: true, phone: true, email: true, type: true, status: true },
+    });
+    if (!user) throw new UnauthorizedException("User no longer exists");
+    return {
+      accessToken,
+      refreshToken,
+      userId,
+      role,
+      user: { ...user, email: user.email ?? undefined },
+    };
   }
 }

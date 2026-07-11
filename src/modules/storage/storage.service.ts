@@ -42,7 +42,7 @@ export class StorageService {
     contentType: string,
   ): Promise<string> {
     this.ensureEnabled();
-    const file = this.storage!.bucket(this.bucketName!).file(objectPath);
+    const file = this.getBucket().file(objectPath);
     await file.save(data, {
       contentType,
       resumable: false,
@@ -60,7 +60,7 @@ export class StorageService {
     expiresInMinutes = 15,
   ): Promise<string> {
     this.ensureEnabled();
-    const [url] = await this.storage!.bucket(this.bucketName!)
+    const [url] = await this.getBucket()
       .file(objectPath)
       .getSignedUrl({
         version: "v4",
@@ -79,7 +79,7 @@ export class StorageService {
     expiresInMinutes = 15,
   ): Promise<string> {
     this.ensureEnabled();
-    const [url] = await this.storage!.bucket(this.bucketName!)
+    const [url] = await this.getBucket()
       .file(objectPath)
       .getSignedUrl({
         version: "v4",
@@ -93,9 +93,14 @@ export class StorageService {
   /** يحذف ملفًا من الـ bucket (يتجاهل إن لم يوجد). */
   async delete(objectPath: string): Promise<void> {
     this.ensureEnabled();
-    await this.storage!.bucket(this.bucketName!)
+    await this.getBucket()
       .file(objectPath)
       .delete({ ignoreNotFound: true });
+  }
+
+  private getBucket() {
+    if (!this.storage || !this.bucketName) throw new Error("خدمة Cloud Storage معطّلة — اضبط GCS_BUCKET وبيانات الاعتماد.");
+    return this.storage.bucket(this.bucketName);
   }
 
   private ensureEnabled(): void {

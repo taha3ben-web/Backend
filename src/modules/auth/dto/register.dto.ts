@@ -13,17 +13,17 @@ export enum RegisterRole {
 
 export class RegisterDto {
   @IsString()
-  name!: string;
+  declare name: string;
 
   @IsString()
-  phone!: string;
+  declare phone: string;
 
   @IsString()
   @MinLength(6)
-  password!: string;
+  declare password: string;
 
   @IsEnum(RegisterRole)
-  role!: RegisterRole;
+  declare role: RegisterRole;
 
   @IsOptional()
   @IsEmail()

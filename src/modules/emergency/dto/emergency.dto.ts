@@ -4,12 +4,12 @@ export class CreateEmergencyContactDto {
   @IsString()
   @MinLength(2)
   @MaxLength(80)
-  name!: string;
+  declare name: string;
 
   @IsString()
   @MinLength(4)
   @MaxLength(20)
-  phone!: string;
+  declare phone: string;
 
   @IsOptional()
   @IsString()

@@ -10,12 +10,12 @@ import {
 } from "class-validator";
 
 // مزوّدو الخرائط المدعومون (تصميم عام دون تغيير قاعدة البيانات).
-export const MAP_PROVIDERS = ["GEOJSON", "GOOGLE", "OSM", "MAPBOX"] as const;
+export const MAP_PROVIDERS = ["GEOJSON", "GOOGLE"] as const;
 export type MapProvider = (typeof MAP_PROVIDERS)[number];
 
 /** إنشاء منطقة خدمة. */
 export class CreateServiceAreaDto {
-  @IsString() @IsNotEmpty() name!: string;
+  @IsString() @IsNotEmpty() declare name: string;
   @IsOptional() @IsString() city?: string;
   @IsOptional() @IsString() state?: string;
   @IsOptional() @IsString() country?: string;

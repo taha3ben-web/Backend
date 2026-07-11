@@ -26,22 +26,22 @@ export class CreatePricingRuleDto {
   @Type(() => Number)
   @IsNumber()
   @Min(0)
-  baseFare!: number;
+  declare baseFare: number;
 
   @Type(() => Number)
   @IsNumber()
   @Min(0)
-  perKm!: number;
+  declare perKm: number;
 
   @Type(() => Number)
   @IsNumber()
   @Min(0)
-  perMin!: number;
+  declare perMin: number;
 
   @Type(() => Number)
   @IsNumber()
   @Min(0)
-  minFare!: number;
+  declare minFare: number;
 
   @Type(() => Number)
   @IsNumber()
@@ -100,22 +100,22 @@ export class UpdatePricingRuleDto {
 
 export class CreatePeakPricingDto {
   @IsString()
-  pricingRuleId!: string;
+  declare pricingRuleId: string;
 
   @IsString()
-  name!: string;
+  declare name: string;
 
   @Type(() => Number)
   @IsNumber()
   @IsPositive()
-  multiplier!: number;
+  declare multiplier: number;
 
   // HH:mm
   @Matches(/^([01]\d|2[0-3]):[0-5]\d$/)
-  startTime!: string;
+  declare startTime: string;
 
   @Matches(/^([01]\d|2[0-3]):[0-5]\d$/)
-  endTime!: string;
+  declare endTime: string;
 
   // 0=الأحد ... 6=السبت
   @IsArray()

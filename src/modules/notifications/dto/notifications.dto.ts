@@ -11,7 +11,7 @@ import { NotificationChannel, NotificationTarget } from "@prisma/client";
 
 export class SendNotificationDto {
   @IsEnum(NotificationTarget)
-  target!: NotificationTarget;
+  declare target: NotificationTarget;
 
   @IsEnum(NotificationChannel)
   @IsOptional()
@@ -24,11 +24,11 @@ export class SendNotificationDto {
 
   @IsString()
   @MaxLength(120)
-  title!: string;
+  declare title: string;
 
   @IsString()
   @MaxLength(1000)
-  body!: string;
+  declare body: string;
 
   @IsObject()
   @IsOptional()
@@ -42,8 +42,8 @@ export class SendNotificationDto {
 
 export class RegisterDeviceDto {
   @IsString()
-  token!: string;
+  declare token: string;
 
   @IsString()
-  platform!: string;
+  declare platform: string;
 }

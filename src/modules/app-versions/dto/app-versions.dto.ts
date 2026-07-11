@@ -10,12 +10,12 @@ export class CreateAppVersionDto {
   @IsString()
   @MinLength(2)
   @MaxLength(20)
-  platform!: string;
+  declare platform: string;
 
   @IsString()
   @MinLength(1)
   @MaxLength(20)
-  version!: string;
+  declare version: string;
 
   @IsOptional()
   @IsString()

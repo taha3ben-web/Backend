@@ -13,11 +13,11 @@ import { AdPlacement } from "@prisma/client";
 export class CreateAdDto {
   @IsString()
   @IsNotEmpty()
-  title!: string;
+  declare title: string;
 
   @IsString()
   @IsNotEmpty()
-  imageUrl!: string;
+  declare imageUrl: string;
 
   @IsOptional()
   @IsUrl()

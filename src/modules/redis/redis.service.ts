@@ -12,7 +12,6 @@ export class RedisService implements OnModuleDestroy {
     // غير ملتقَط يُسقِط العملية (unhandled 'error' event).
     this.client.on("error", (err) => {
       // تسجيل فقط؛ ioredis يعيد الاتصال تلقائيًا.
-      // eslint-disable-next-line no-console
       console.error("[redis] connection error:", err?.message ?? err);
     });
   }

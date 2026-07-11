@@ -33,17 +33,17 @@ export class UpdateDriverProfileDto {
 
 /** تبديل توفّر السائق (اتصال/قطع) */
 export class SetAvailabilityDto {
-  @IsIn(["ONLINE", "OFFLINE"]) availability!: "ONLINE" | "OFFLINE";
+  @IsIn(["ONLINE", "OFFLINE"]) declare availability: "ONLINE" | "OFFLINE";
 }
 
 /** تسجيل وثيقة بعد رفعها */
 export class AddDocumentDto {
-  @IsIn(DOC_TYPES) type!: (typeof DOC_TYPES)[number];
-  @IsString() url!: string;
+  @IsIn(DOC_TYPES) declare type: (typeof DOC_TYPES)[number];
+  @IsString() declare url: string;
 }
 
 /** طلب رابط رفع موقّع لوثيقة */
 export class UploadUrlDto {
-  @IsIn(DOC_TYPES) kind!: (typeof DOC_TYPES)[number];
+  @IsIn(DOC_TYPES) declare kind: (typeof DOC_TYPES)[number];
   @IsOptional() @IsString() contentType?: string;
 }

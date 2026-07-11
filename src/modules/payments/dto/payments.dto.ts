@@ -12,7 +12,7 @@ import { PaymentMethod, PaymentStatus, WalletTxType } from "@prisma/client";
 /** تسجيل دفعة لرحلة (عادة عند إنهاء الرحلة) */
 export class CreatePaymentDto {
   @IsString()
-  tripId!: string;
+  declare tripId: string;
 
   @IsEnum(PaymentMethod)
   @IsOptional()
@@ -26,7 +26,7 @@ export class CreatePaymentDto {
 /** تحديث حالة الدفعة (دفع/استرداد/فشل) */
 export class UpdatePaymentStatusDto {
   @IsEnum(PaymentStatus)
-  status!: PaymentStatus;
+  declare status: PaymentStatus;
 
   @IsString()
   @IsOptional()
@@ -36,12 +36,12 @@ export class UpdatePaymentStatusDto {
 /** تعديل رصيد المحفظة يدويًا من اللوحة (إضافة/خصم) */
 export class WalletAdjustDto {
   @IsEnum(WalletTxType)
-  type!: WalletTxType;
+  declare type: WalletTxType;
 
   @Type(() => Number)
   @IsNumber()
   @IsPositive()
-  amount!: number;
+  declare amount: number;
 
   @IsString()
   @IsOptional()
@@ -53,7 +53,7 @@ export class WalletTopUpDto {
   @Type(() => Number)
   @IsNumber()
   @IsPositive()
-  amount!: number;
+  declare amount: number;
 
   @IsEnum(PaymentMethod)
   @IsOptional()
@@ -70,7 +70,7 @@ export class CreateWithdrawDto {
   @IsNumber()
   @IsPositive()
   @Min(1)
-  amount!: number;
+  declare amount: number;
 
   @IsString()
   @IsOptional()

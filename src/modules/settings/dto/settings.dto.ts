@@ -13,10 +13,10 @@ import {
 export class UpsertSettingDto {
   @IsString()
   @IsNotEmpty()
-  key!: string;
+  declare key: string;
 
   // قيمة JSON حرة (كائن/مصفوفة/نص/رقم/منطقي)
-  value!: unknown;
+  declare value: unknown;
 
   @IsOptional()
   @IsString()
@@ -25,7 +25,7 @@ export class UpsertSettingDto {
 
 /** تحديث قيمة إعداد موجود (المفتاح يأتي من المسار). */
 export class UpdateSettingValueDto {
-  value!: unknown;
+  declare value: unknown;
 
   @IsOptional()
   @IsString()
@@ -36,9 +36,9 @@ export class UpdateSettingValueDto {
 export class BulkSettingItemDto {
   @IsString()
   @IsNotEmpty()
-  key!: string;
+  declare key: string;
 
-  value!: unknown;
+  declare value: unknown;
 
   @IsOptional()
   @IsString()
@@ -48,14 +48,14 @@ export class BulkSettingItemDto {
 export class BulkUpsertSettingsDto {
   @ValidateNested({ each: true })
   @Type(() => BulkSettingItemDto)
-  items!: BulkSettingItemDto[];
+  declare items: BulkSettingItemDto[];
 }
 
 // ---------- المدن ----------
 export class CreateCityDto {
   @IsString()
   @IsNotEmpty()
-  name!: string;
+  declare name: string;
 
   @IsOptional()
   @IsString()
@@ -101,11 +101,11 @@ export class UpdateCityDto {
 export class CreateZoneDto {
   @IsString()
   @IsNotEmpty()
-  cityId!: string;
+  declare cityId: string;
 
   @IsString()
   @IsNotEmpty()
-  name!: string;
+  declare name: string;
 
   // polygon: GeoJSON-لايك (مصفوفة إحداثيات) أو أي شكل JSON
   @IsOptional()
