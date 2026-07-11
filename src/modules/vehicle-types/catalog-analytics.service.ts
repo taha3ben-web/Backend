@@ -77,18 +77,25 @@ export class CatalogAnalyticsService {
         _count: { _all: true },
         _sum: { fare: true },
         _avg: { fare: true },
+        orderBy: { vehicleTypeId: "asc" },
       }),
       this.prisma.vehicle.groupBy({
         by: ["vehicleTypeId"],
         where: { isActive: true, vehicleTypeId: { not: null } },
         _count: { _all: true },
+        orderBy: { vehicleTypeId: "asc" },
       }),
     ]);
 
-    const tripMap = new Map(tripGroups.map((g) => [g.vehicleTypeId, g]));
-    const vehicleMap = new Map(
-      vehicleGroups.map((g) => [g.vehicleTypeId, g._count._all]),
-    );
+    // بناء الخرائط بمفاتيح string مؤمّنة الأنواع (vehicleTypeId قد يكون null في نوع Prisma).
+    const tripMap = new Map<string, (typeof tripGroups)[number]>();
+    for (const g of tripGroups) {
+      if (g.vehicleTypeId) tripMap.set(g.vehicleTypeId, g);
+    }
+    const vehicleMap = new Map<string, number>();
+    for (const g of vehicleGroups) {
+      if (g.vehicleTypeId) vehicleMap.set(g.vehicleTypeId, g._count._all);
+    }
 
     const perType: TypeStat[] = typeRows.map((t) => {
       const g = tripMap.get(t.id);

@@ -55,8 +55,11 @@ export class RequirementsService {
     if (!driver) throw new NotFoundException("السائق غير موجود");
 
     const checks: RequirementCheck[] = [];
-    const approvedDocTypes = new Set(
-      driver.documents.filter((d) => d.status === "APPROVED").map((d) => d.type),
+    // مجموعة أنواع المستندات المعتمدة كسلاسل نصية (requiredDocuments/requiredPhotos من نوع string[]).
+    const approvedDocTypes = new Set<string>(
+      driver.documents
+        .filter((d) => d.status === "APPROVED")
+        .map((d) => d.type),
     );
 
     if (type.minDriverRating != null) {
