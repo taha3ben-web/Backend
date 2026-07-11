@@ -12,7 +12,7 @@ import { PrismaService } from "../../prisma/prisma.service";
 import { RealtimeGateway } from "../realtime/realtime.gateway";
 import { RedisService } from "../redis/redis.service";
 import { PaginationDto } from "../../common/dto/pagination.dto";
-import { WalletService } from "../payments/wallet.service";
+import { FinancialService } from "../financial/financial.service";
 import { canTransition } from "./trip-transitions";
 import { computeSettlement } from "./settlement.util";
 
@@ -22,7 +22,7 @@ export class TripsService {
     private readonly prisma: PrismaService,
     @Inject(forwardRef(() => RealtimeGateway))
     private readonly realtime: RealtimeGateway,
-    private readonly wallet: WalletService,
+    private readonly financial: FinancialService,
     private readonly redis: RedisService,
     private readonly config: ConfigService,
   ) {}
@@ -176,76 +176,7 @@ export class TripsService {
    * - حساب عمولة الشركة وصافي السائق.
    * - إضافة صافي السائق إلى محفظته (منها يطلب السحب).
    */
-  private async settleCompletedTrip(tripId: string) {
-    const trip = await this.prisma.trip.findUnique({
-      where: { id: tripId },
-      include: { driverEarning: true },
-    });
-    if (!trip || !trip.driverId || trip.fare == null) return;
-    if (trip.driverEarning) return; // تمت التسوية مسبقًا
-
-    const rate = this.config.get<number>("companyCommission") ?? 0.15;
-    const { gross, commission, net } = computeSettlement(
-      Number(trip.fare),
-      rate,
-    );
-    const driverId = trip.driverId;
-
-    await this.prisma.$transaction(async (client) => {
-      // دفعة الراكب (إن لم توجد)
-      const existingPayment = await client.payment.findUnique({
-        where: { tripId },
-      });
-      if (!existingPayment) {
-        const paidNow = trip.paymentMethod === "WALLET";
-        if (paidNow) {
-          await this.wallet.adjust(
-            trip.passengerId,
-            "DEBIT",
-            gross,
-            `دفع رحلة ${tripId}`,
-            client,
-          );
-        }
-        await client.payment.create({
-          data: {
-            tripId,
-            userId: trip.passengerId,
-            amount: gross,
-            method: trip.paymentMethod,
-            status: paidNow ? "PAID" : "PENDING",
-          },
-        });
-      }
-
-      // أرباح السائق + عمولة الشركة
-      await client.driverEarning.create({
-        data: { driverId, tripId, gross, commission, net },
-      });
-      await client.companyEarning.create({
-        data: { tripId, amount: commission, source: "commission" },
-      });
-
-      // إضافة صافي الربح لمحفظة السائق
-      const driver = await client.driver.findUnique({
-        where: { id: driverId },
-        select: { userId: true },
-      });
-      if (driver) {
-        await this.wallet.adjust(
-          driver.userId,
-          "CREDIT",
-          net,
-          `صافي أرباح رحلة ${tripId}`,
-          client,
-        );
-      }
-
-      // تحديث عدّاد رحلات السائق
-      await client.driver.update({
-        where: { id: driverId },
-        data: { totalTrips: { increment: 1 } },
-      });
-    });
+  private async settleCompletedTrip(tripId: string): Promise<void> {
+    await this.financial.settleTrip(tripId);
   }
 }

@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { FinancialModule } from "../financial/financial.module";
 import { WalletService } from "./wallet.service";
 import { PaymentsService } from "./payments.service";
 import { WithdrawalsService } from "./withdrawals.service";
@@ -7,6 +8,7 @@ import { PaymentsController } from "./payments.controller";
 import { WithdrawalsController } from "./withdrawals.controller";
 
 @Module({
+  imports: [FinancialModule],
   providers: [WalletService, PaymentsService, WithdrawalsService],
   controllers: [WalletController, PaymentsController, WithdrawalsController],
   exports: [WalletService, PaymentsService, WithdrawalsService],

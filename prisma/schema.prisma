@@ -109,6 +109,35 @@ enum WalletTxType {
   DEBIT
 }
 
+enum FinancialPartyType {
+  USER
+  AGENT
+  PLATFORM
+  EXTERNAL
+}
+
+enum FinancialAccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  EXPENSE
+}
+
+enum LedgerTransactionStatus {
+  PENDING
+  POSTED
+  FAILED
+  REVERSED
+  CANCELLED
+}
+
+enum LedgerEntryDirection {
+  DEBIT
+  CREDIT
+}
+
+
 enum DiscountType {
   PERCENT
   FIXED
@@ -160,6 +189,7 @@ model User {
 
   driver             Driver?
   wallet             Wallet?
+  financialParty     FinancialParty?
   passengerTrips     Trip[]             @relation("PassengerTrips")
   payments           Payment[]
   withdrawRequests   WithdrawRequest[]
@@ -306,7 +336,7 @@ model TripTracking {
   speed      Float?
   recordedAt DateTime @default(now())
 
-  @@index([tripId])
+  @@index([tripId, recordedAt])
 }
 
 model TripEvent {
@@ -318,10 +348,78 @@ model TripEvent {
   meta      Json?
   createdAt DateTime  @default(now())
 
-  @@index([tripId])
+  @@index([tripId, createdAt])
 }
 
 // ---------- Money ----------
+model FinancialParty {
+  id          String             @id @default(uuid())
+  type        FinancialPartyType
+  userId      String?            @unique
+  user        User?              @relation(fields: [userId], references: [id], onDelete: Restrict)
+  displayName String
+  countryCode String             @default("DZ")
+  metadata    Json?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  accounts    FinancialAccount[]
+
+  @@index([type])
+}
+
+model FinancialAccount {
+  id            String               @id @default(uuid())
+  partyId       String
+  party         FinancialParty       @relation(fields: [partyId], references: [id], onDelete: Restrict)
+  code          String               @unique
+  type          FinancialAccountType
+  currency      String               @db.Char(3)
+  balanceCache  Decimal              @default(0) @db.Decimal(18, 2)
+  isActive      Boolean              @default(true)
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+  entries       LedgerEntry[]
+
+  @@unique([partyId, currency, type])
+  @@index([partyId, currency])
+}
+
+model LedgerTransaction {
+  id              String                  @id @default(uuid())
+  command         String
+  idempotencyKey  String                  @unique
+  status          LedgerTransactionStatus @default(PENDING)
+  currency        String                  @db.Char(3)
+  referenceType   String?
+  referenceId     String?
+  metadata        Json?
+  failureReason   String?
+  reversalOfId    String?                 @unique
+  reversalOf      LedgerTransaction?      @relation("LedgerReversal", fields: [reversalOfId], references: [id], onDelete: Restrict)
+  reversedBy      LedgerTransaction?      @relation("LedgerReversal")
+  createdAt       DateTime                @default(now())
+  postedAt        DateTime?
+  entries         LedgerEntry[]
+
+  @@index([status, createdAt])
+  @@index([referenceType, referenceId])
+}
+
+model LedgerEntry {
+  id            String               @id @default(uuid())
+  transactionId String
+  transaction   LedgerTransaction    @relation(fields: [transactionId], references: [id], onDelete: Restrict)
+  accountId     String
+  account       FinancialAccount     @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  direction     LedgerEntryDirection
+  amount        Decimal              @db.Decimal(18, 2)
+  createdAt     DateTime             @default(now())
+
+  @@unique([transactionId, accountId, direction])
+  @@index([accountId, createdAt])
+  @@index([transactionId])
+}
+
 model DriverEarning {
   id         String   @id @default(uuid())
   driverId   String
@@ -358,7 +456,7 @@ model Payment {
   createdAt DateTime      @default(now())
 
   @@index([userId])
-  @@index([status])
+  @@index([status, createdAt])
 }
 
 model Wallet {
@@ -383,7 +481,7 @@ model WalletTransaction {
   reason       String?
   createdAt    DateTime     @default(now())
 
-  @@index([walletId])
+  @@index([walletId, createdAt])
 }
 
 model WithdrawRequest {
@@ -400,7 +498,8 @@ model WithdrawRequest {
   processedAt   DateTime?
 
   @@index([driverId])
-  @@index([status])
+  @@index([status, createdAt])
+  @@index([userId, status])
 }
 
 // ---------- Marketing ----------

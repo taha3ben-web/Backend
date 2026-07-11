@@ -1,0 +1,20 @@
+-- P0 unified double-entry ledger
+CREATE TYPE "FinancialPartyType" AS ENUM ('USER','AGENT','PLATFORM','EXTERNAL');
+CREATE TYPE "FinancialAccountType" AS ENUM ('ASSET','LIABILITY','EQUITY','REVENUE','EXPENSE');
+CREATE TYPE "LedgerTransactionStatus" AS ENUM ('PENDING','POSTED','FAILED','REVERSED','CANCELLED');
+CREATE TYPE "LedgerEntryDirection" AS ENUM ('DEBIT','CREDIT');
+CREATE TABLE "FinancialParty" ("id" TEXT PRIMARY KEY, "type" "FinancialPartyType" NOT NULL, "userId" TEXT UNIQUE, "displayName" TEXT NOT NULL, "countryCode" TEXT NOT NULL DEFAULT 'DZ', "metadata" JSONB, "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, "updatedAt" TIMESTAMP(3) NOT NULL);
+CREATE TABLE "FinancialAccount" ("id" TEXT PRIMARY KEY, "partyId" TEXT NOT NULL, "code" TEXT NOT NULL UNIQUE, "type" "FinancialAccountType" NOT NULL, "currency" CHAR(3) NOT NULL, "balanceCache" DECIMAL(18,2) NOT NULL DEFAULT 0, "isActive" BOOLEAN NOT NULL DEFAULT true, "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, "updatedAt" TIMESTAMP(3) NOT NULL);
+CREATE TABLE "LedgerTransaction" ("id" TEXT PRIMARY KEY, "command" TEXT NOT NULL, "idempotencyKey" TEXT NOT NULL UNIQUE, "status" "LedgerTransactionStatus" NOT NULL DEFAULT 'PENDING', "currency" CHAR(3) NOT NULL, "referenceType" TEXT, "referenceId" TEXT, "metadata" JSONB, "failureReason" TEXT, "reversalOfId" TEXT UNIQUE, "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, "postedAt" TIMESTAMP(3));
+CREATE TABLE "LedgerEntry" ("id" TEXT PRIMARY KEY, "transactionId" TEXT NOT NULL, "accountId" TEXT NOT NULL, "direction" "LedgerEntryDirection" NOT NULL, "amount" DECIMAL(18,2) NOT NULL CHECK ("amount" > 0), "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, CONSTRAINT "LedgerEntry_transactionId_accountId_direction_key" UNIQUE("transactionId","accountId","direction"));
+ALTER TABLE "FinancialParty" ADD CONSTRAINT "FinancialParty_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "FinancialAccount" ADD CONSTRAINT "FinancialAccount_partyId_fkey" FOREIGN KEY ("partyId") REFERENCES "FinancialParty"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "LedgerTransaction" ADD CONSTRAINT "LedgerTransaction_reversalOfId_fkey" FOREIGN KEY ("reversalOfId") REFERENCES "LedgerTransaction"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "LedgerEntry" ADD CONSTRAINT "LedgerEntry_transactionId_fkey" FOREIGN KEY ("transactionId") REFERENCES "LedgerTransaction"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "LedgerEntry" ADD CONSTRAINT "LedgerEntry_accountId_fkey" FOREIGN KEY ("accountId") REFERENCES "FinancialAccount"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+CREATE UNIQUE INDEX "FinancialAccount_partyId_currency_type_key" ON "FinancialAccount"("partyId","currency","type");
+CREATE INDEX "FinancialAccount_partyId_currency_idx" ON "FinancialAccount"("partyId","currency");
+CREATE INDEX "LedgerTransaction_status_createdAt_idx" ON "LedgerTransaction"("status","createdAt");
+CREATE INDEX "LedgerTransaction_referenceType_referenceId_idx" ON "LedgerTransaction"("referenceType","referenceId");
+CREATE INDEX "LedgerEntry_accountId_createdAt_idx" ON "LedgerEntry"("accountId","createdAt");
+CREATE INDEX "LedgerEntry_transactionId_idx" ON "LedgerEntry"("transactionId");

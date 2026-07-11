@@ -6,13 +6,13 @@ import {
 import { Prisma, WithdrawStatus } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import { PaginationDto } from "../../common/dto/pagination.dto";
-import { WalletService } from "./wallet.service";
+import { FinancialService } from "../financial/financial.service";
 
 @Injectable()
 export class WithdrawalsService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly wallet: WalletService,
+    private readonly financial: FinancialService,
   ) {}
 
   async findAll(q: PaginationDto, status?: WithdrawStatus) {
@@ -41,19 +41,9 @@ export class WithdrawalsService {
     const driver = await this.prisma.driver.findUnique({ where: { userId } });
     if (!driver) throw new NotFoundException("السائق غير موجود");
 
-    return this.prisma.$transaction(async (client) => {
-      // حجز المبلغ بخصمه من المحفظة (يرمي خطأ إن كان الرصيد غير كافٍ)
-      await this.wallet.adjust(userId, "DEBIT", amount, "حجز طلب سحب", client);
-      return client.withdrawRequest.create({
-        data: {
-          driverId: driver.id,
-          userId,
-          amount,
-          note,
-          status: "PENDING",
-        },
-      });
-    });
+    const request = await this.prisma.withdrawRequest.create({ data: { driverId: driver.id, userId, amount, note, status: "PENDING" } });
+    try { await this.financial.reserveWithdrawal(request.id); } catch (error) { await this.prisma.withdrawRequest.delete({ where: { id: request.id } }); throw error; }
+    return request;
   }
 
   /** المدير يوافق على الطلب (المبلغ محجوز مسبقًا) */
@@ -77,6 +67,7 @@ export class WithdrawalsService {
     if (req.status !== "APPROVED" && req.status !== "PENDING") {
       throw new BadRequestException("لا يمكن تأكيد دفع هذا الطلب");
     }
+    await this.financial.completeWithdrawal(id);
     return this.prisma.withdrawRequest.update({
       where: { id },
       data: {
@@ -91,24 +82,8 @@ export class WithdrawalsService {
   /** رفض الطلب: نعيد المبلغ المحجوز إلى محفظة السائق */
   async reject(id: string, processedById: string, note?: string) {
     const req = await this.getPending(id);
-    return this.prisma.$transaction(async (client) => {
-      await this.wallet.adjust(
-        req.userId,
-        "CREDIT",
-        Number(req.amount),
-        "إلغاء طلب سحب مرفوض",
-        client,
-      );
-      return client.withdrawRequest.update({
-        where: { id: req.id },
-        data: {
-          status: "REJECTED",
-          processedById,
-          note: note ?? req.note,
-          processedAt: new Date(),
-        },
-      });
-    });
+    await this.financial.releaseWithdrawal(id);
+    return this.prisma.withdrawRequest.update({ where: { id: req.id }, data: { status: "REJECTED", processedById, note: note ?? req.note, processedAt: new Date() } });
   }
 
   private async getPending(id: string) {

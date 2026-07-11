@@ -30,6 +30,7 @@ import { VehicleTypesModule } from "./modules/vehicle-types/vehicle-types.module
 import { AdsModule } from "./modules/ads/ads.module";
 import { MetricsModule } from "./modules/metrics/metrics.module";
 import { HealthController } from "./modules/health/health.controller";
+import { FinancialModule } from "./modules/financial/financial.module";
 
 @Module({
   imports: [
@@ -45,6 +46,7 @@ import { HealthController } from "./modules/health/health.controller";
     DriversModule,
     TripsModule,
     DashboardModule,
+    FinancialModule,
     PaymentsModule,
     MatchingModule,
     NotificationsModule,

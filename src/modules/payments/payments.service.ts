@@ -6,13 +6,13 @@ import {
 import { PaymentMethod, PaymentStatus, Prisma } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import { PaginationDto } from "../../common/dto/pagination.dto";
-import { WalletService } from "./wallet.service";
+import { FinancialService } from "../financial/financial.service";
 
 @Injectable()
 export class PaymentsService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly wallet: WalletService,
+    private readonly financial: FinancialService,
   ) {}
 
   async findAll(q: PaginationDto, status?: PaymentStatus) {
@@ -70,15 +70,6 @@ export class PaymentsService {
     const paidNow = method === "WALLET";
 
     return this.prisma.$transaction(async (client) => {
-      if (paidNow) {
-        await this.wallet.adjust(
-          trip.passengerId,
-          "DEBIT",
-          amount,
-          `دفع رحلة ${tripId}`,
-          client,
-        );
-      }
       return client.payment.create({
         data: {
           tripId,
@@ -96,27 +87,8 @@ export class PaymentsService {
   async updateStatus(id: string, status: PaymentStatus, reference?: string) {
     const payment = await this.findOne(id);
 
-    // استرداد: إرجاع المبلغ لمحفظة الراكب إن كانت مدفوعة سابقًا
     if (status === "REFUNDED" && payment.status === "PAID") {
-      return this.prisma.$transaction(async (client) => {
-        // انتقال حالة ذري أولًا: لا نردّ إلا إن كانت الدفعة ما زالت PAID.
-        // يمنع الاسترداد المزدوج عند طلبين متزامنين (نقرة مزدوجة/إعادة محاولة).
-        const claim = await client.payment.updateMany({
-          where: { id, status: "PAID" },
-          data: { status, reference: reference ?? payment.reference },
-        });
-        if (claim.count === 0) {
-          throw new BadRequestException("تعذّر الاسترداد — تغيّرت حالة الدفعة");
-        }
-        await this.wallet.adjust(
-          payment.userId,
-          "CREDIT",
-          Number(payment.amount),
-          `استرداد دفعة ${payment.id}`,
-          client,
-        );
-        return client.payment.findUnique({ where: { id } });
-      });
+      await this.financial.refundPayment(payment.id);
     }
 
     return this.prisma.payment.update({
