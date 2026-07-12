@@ -17,7 +17,9 @@ import {
 } from "./dto/support.dto";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
 import { RolesGuard } from "../../common/guards/roles.guard";
+import { PermissionsGuard } from "../../common/guards/permissions.guard";
 import { Roles } from "../../common/decorators/roles.decorator";
+import { RequirePermissions } from "../../common/decorators/permissions.decorator";
 import {
   CurrentUser,
   AuthUser,
@@ -38,6 +40,8 @@ export class ComplaintsController {
 
   @UseGuards(RolesGuard)
   @Roles("STAFF")
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions("support.manage")
   @Get()
   findAll(
     @Query() q: PaginationDto,
@@ -48,6 +52,8 @@ export class ComplaintsController {
 
   @UseGuards(RolesGuard)
   @Roles("STAFF")
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions("support.manage")
   @Get(":id")
   findOne(@Param("id") id: string) {
     return this.complaints.findOne(id);
@@ -55,6 +61,8 @@ export class ComplaintsController {
 
   @UseGuards(RolesGuard)
   @Roles("STAFF")
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions("support.manage")
   @Patch(":id/status")
   updateStatus(
     @CurrentUser() user: AuthUser,

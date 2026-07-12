@@ -10,7 +10,13 @@ import {
 } from "@nestjs/common";
 import { StaffService } from "./staff.service";
 import { PaginationDto } from "../../common/dto/pagination.dto";
-import { AssignRoleDto, CreateStaffDto } from "./dto/rbac.dto";
+import {
+  AssignRoleDto,
+  CreateStaffDto,
+  UpdateStaffPasswordDto,
+  UpdateStaffProfileDto,
+  UpdateStaffStatusDto,
+} from "./dto/rbac.dto";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
 import { RolesGuard } from "../../common/guards/roles.guard";
 import { PermissionsGuard } from "../../common/guards/permissions.guard";
@@ -37,5 +43,26 @@ export class StaffController {
   @Patch(":id/role")
   assignRole(@Param("id") id: string, @Body() dto: AssignRoleDto) {
     return this.staff.assignRole(id, dto);
+  }
+
+  @Patch(":id")
+  update(@Param("id") id: string, @Body() dto: UpdateStaffProfileDto) {
+    return this.staff.updateStaff(id, dto);
+  }
+
+  @Patch(":id/password")
+  updatePassword(
+    @Param("id") id: string,
+    @Body() dto: UpdateStaffPasswordDto,
+  ) {
+    return this.staff.updatePassword(id, dto);
+  }
+
+  @Patch(":id/status")
+  updateStatus(
+    @Param("id") id: string,
+    @Body() dto: UpdateStaffStatusDto,
+  ) {
+    return this.staff.updateStatus(id, dto);
   }
 }

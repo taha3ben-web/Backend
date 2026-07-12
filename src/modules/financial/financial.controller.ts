@@ -1,11 +1,14 @@
 import { Body, Controller, Get, Post, Query, UseGuards } from "@nestjs/common";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
 import { RolesGuard } from "../../common/guards/roles.guard";
+import { PermissionsGuard } from "../../common/guards/permissions.guard";
 import { Roles } from "../../common/decorators/roles.decorator";
+import { RequirePermissions } from "../../common/decorators/permissions.decorator";
 import { FinancialService } from "./financial.service";
 
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 @Roles("STAFF")
+@RequirePermissions("payments.read", "payments.manage", "reports.read")
 @Controller("financial")
 export class FinancialController {
   constructor(private readonly financial: FinancialService) {}

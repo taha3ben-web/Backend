@@ -1,7 +1,9 @@
 import { Controller, Get, Query, UseGuards } from "@nestjs/common";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
 import { RolesGuard } from "../../common/guards/roles.guard";
+import { PermissionsGuard } from "../../common/guards/permissions.guard";
 import { Roles } from "../../common/decorators/roles.decorator";
+import { RequirePermissions } from "../../common/decorators/permissions.decorator";
 import { CatalogService } from "./catalog.service";
 import { CatalogAnalyticsService } from "./catalog-analytics.service";
 import { AuditService } from "./audit.service";
@@ -37,8 +39,9 @@ export class CatalogController {
 
   /** إحصائيات الكتالوج للوحة (STAFF فقط). */
   @Get("analytics")
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
   @Roles("STAFF")
+  @RequirePermissions("pricing.manage", "reports.read")
   analyticsOverview() {
     return this.analytics.overview();
   }
@@ -48,8 +51,9 @@ export class CatalogController {
    * مثال: /api/catalog/audit?entity=VehicleType&entityId=<id>&page=1&limit=20
    */
   @Get("audit")
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
   @Roles("STAFF")
+  @RequirePermissions("pricing.manage", "audit.read")
   auditLog(
     @Query("entity") entity?: string,
     @Query("entityId") entityId?: string,

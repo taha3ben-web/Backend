@@ -18,7 +18,9 @@ import {
 } from "./dto/coupons.dto";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
 import { RolesGuard } from "../../common/guards/roles.guard";
+import { PermissionsGuard } from "../../common/guards/permissions.guard";
 import { Roles } from "../../common/decorators/roles.decorator";
+import { RequirePermissions } from "../../common/decorators/permissions.decorator";
 import {
   CurrentUser,
   AuthUser,
@@ -39,6 +41,8 @@ export class CouponsController {
 
   @UseGuards(RolesGuard)
   @Roles("STAFF")
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions("coupons.manage")
   @Post()
   create(@Body() dto: CreateCouponDto) {
     return this.coupons.create(dto);
@@ -46,6 +50,8 @@ export class CouponsController {
 
   @UseGuards(RolesGuard)
   @Roles("STAFF")
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions("coupons.manage")
   @Get()
   findAll(@Query() q: PaginationDto) {
     return this.coupons.findAll(q);
@@ -53,6 +59,8 @@ export class CouponsController {
 
   @UseGuards(RolesGuard)
   @Roles("STAFF")
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions("coupons.manage")
   @Get(":id")
   findOne(@Param("id") id: string) {
     return this.coupons.findOne(id);
@@ -60,6 +68,8 @@ export class CouponsController {
 
   @UseGuards(RolesGuard)
   @Roles("STAFF")
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions("coupons.manage")
   @Patch(":id")
   update(@Param("id") id: string, @Body() dto: UpdateCouponDto) {
     return this.coupons.update(id, dto);
@@ -67,6 +77,8 @@ export class CouponsController {
 
   @UseGuards(RolesGuard)
   @Roles("STAFF")
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions("coupons.manage")
   @Delete(":id")
   deactivate(@Param("id") id: string) {
     return this.coupons.deactivate(id);

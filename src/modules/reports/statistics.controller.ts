@@ -3,10 +3,13 @@ import { StatisticsService } from "./statistics.service";
 import { DateRangeDto } from "./dto/reports.dto";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
 import { RolesGuard } from "../../common/guards/roles.guard";
+import { PermissionsGuard } from "../../common/guards/permissions.guard";
 import { Roles } from "../../common/decorators/roles.decorator";
+import { RequirePermissions } from "../../common/decorators/permissions.decorator";
 
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 @Roles("STAFF")
+@RequirePermissions("reports.read")
 @Controller("statistics")
 export class StatisticsController {
   constructor(private readonly stats: StatisticsService) {}

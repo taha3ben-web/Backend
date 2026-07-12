@@ -22,7 +22,9 @@ import {
 } from "./dto/notifications.dto";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
 import { RolesGuard } from "../../common/guards/roles.guard";
+import { PermissionsGuard } from "../../common/guards/permissions.guard";
 import { Roles } from "../../common/decorators/roles.decorator";
+import { RequirePermissions } from "../../common/decorators/permissions.decorator";
 import {
   CurrentUser,
   AuthUser,
@@ -62,6 +64,8 @@ export class NotificationsController {
 
   @UseGuards(RolesGuard)
   @Roles("STAFF")
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions("notifications.send")
   @Get("templates")
   templates() {
     return this.notifications.listTemplates();
@@ -69,6 +73,8 @@ export class NotificationsController {
 
   @UseGuards(RolesGuard)
   @Roles("STAFF")
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions("notifications.send")
   @Post("templates")
   upsertTemplate(@Body() dto: UpsertNotificationTemplateDto) {
     return this.notifications.upsertTemplate(dto);
@@ -76,6 +82,8 @@ export class NotificationsController {
 
   @UseGuards(RolesGuard)
   @Roles("STAFF")
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions("notifications.send")
   @Put("templates/:key")
   updateTemplate(
     @Param("key") key: string,
@@ -86,6 +94,8 @@ export class NotificationsController {
 
   @UseGuards(RolesGuard)
   @Roles("STAFF")
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions("notifications.send")
   @Delete("templates/:key")
   removeTemplate(@Param("key") key: string) {
     return this.notifications.removeTemplate(key);
@@ -93,6 +103,8 @@ export class NotificationsController {
 
   @UseGuards(RolesGuard)
   @Roles("STAFF")
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions("notifications.send")
   @Post()
   send(@Body() dto: SendNotificationDto) {
     return this.notifications.send(dto);
@@ -100,6 +112,8 @@ export class NotificationsController {
 
   @UseGuards(RolesGuard)
   @Roles("STAFF")
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions("notifications.send")
   @Get()
   findAll(@Query() q: ListNotificationsQueryDto) {
     return this.notifications.findAll(q);
@@ -107,6 +121,8 @@ export class NotificationsController {
 
   @UseGuards(RolesGuard)
   @Roles("STAFF")
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions("notifications.send")
   @Delete(":id")
   cancel(@Param("id") id: string) {
     return this.notifications.cancelScheduled(id);

@@ -18,7 +18,9 @@ import {
 } from "./dto/support.dto";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
 import { RolesGuard } from "../../common/guards/roles.guard";
+import { PermissionsGuard } from "../../common/guards/permissions.guard";
 import { Roles } from "../../common/decorators/roles.decorator";
+import { RequirePermissions } from "../../common/decorators/permissions.decorator";
 import {
   CurrentUser,
   AuthUser,
@@ -44,6 +46,8 @@ export class SupportController {
   /** كل التذاكر (الدعم) */
   @UseGuards(RolesGuard)
   @Roles("STAFF")
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions("support.manage")
   @Get()
   all(@Query() q: PaginationDto, @Query("status") status?: TicketStatus) {
     return this.support.allTickets(q, status);
@@ -68,6 +72,8 @@ export class SupportController {
   /** تغيير الحالة (حل/إغلاق) — الدعم فقط */
   @UseGuards(RolesGuard)
   @Roles("STAFF")
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions("support.manage")
   @Patch(":id/status")
   updateStatus(@Param("id") id: string, @Body() dto: UpdateTicketStatusDto) {
     return this.support.updateStatus(id, dto.status);

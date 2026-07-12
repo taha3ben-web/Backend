@@ -17,10 +17,17 @@ import { DeviceContextDto } from "./dto/device-context.dto";
 export interface AuthUserResponse {
   id: string;
   name: string;
+  username?: string;
   phone: string;
   email?: string;
   type: "PASSENGER" | "DRIVER" | "STAFF" | "AGENT";
   status: string;
+}
+
+export interface AuthRoleSummary {
+  id?: string;
+  name?: string;
+  permissions: string[];
 }
 
 export interface Tokens {
@@ -30,6 +37,8 @@ export interface Tokens {
   role: string;
   sessionId: string;
   user: AuthUserResponse;
+  staffRole?: AuthRoleSummary;
+  permissions: string[];
 }
 
 export interface SessionContext {
@@ -98,12 +107,25 @@ export class AuthService {
   }
 
   async login(dto: LoginDto, ctx: SessionContext = {}): Promise<Tokens> {
-    const user = await this.prisma.user.findUnique({
-      where: { phone: dto.phone },
+    const rawIdentifier = (dto.identifier ?? dto.phone ?? "").trim();
+    const normalizedIdentifier = rawIdentifier.toLowerCase();
+
+    if (!rawIdentifier) {
+      throw new UnauthorizedException("Invalid credentials");
+    }
+
+    const user = await this.prisma.user.findFirst({
+      where: {
+        OR: [
+          { phone: rawIdentifier },
+          { username: { equals: normalizedIdentifier, mode: "insensitive" } },
+          { email: { equals: normalizedIdentifier, mode: "insensitive" } },
+        ],
+      },
     });
     if (!user) {
       await this.recordActivity(null, "auth.login_failed", ctx, {
-        phone: dto.phone,
+        identifier: rawIdentifier,
       });
       throw new UnauthorizedException("Invalid credentials");
     }
@@ -111,12 +133,18 @@ export class AuthService {
     const ok = await bcrypt.compare(dto.password, user.passwordHash);
     if (!ok) {
       await this.recordActivity(null, "auth.login_failed", ctx, {
-        phone: dto.phone,
+        identifier: rawIdentifier,
       });
       throw new UnauthorizedException("Invalid credentials");
     }
     if (user.status === "BANNED") {
       throw new ForbiddenException("Account banned");
+    }
+    if (user.status === "SUSPENDED") {
+      throw new ForbiddenException("Account suspended");
+    }
+    if (user.status === "PENDING") {
+      throw new ForbiddenException("Account pending activation");
     }
 
     const session = await this.startSession(user.id, ctx);
@@ -154,6 +182,12 @@ export class AuthService {
     if (user) {
       if (user.status === "BANNED") {
         throw new ForbiddenException("Account banned");
+      }
+      if (user.status === "SUSPENDED") {
+        throw new ForbiddenException("Account suspended");
+      }
+      if (user.status === "PENDING") {
+        throw new ForbiddenException("Account pending activation");
       }
       if (!user.firebaseUid) {
         user = await this.prisma.user.update({
@@ -272,6 +306,24 @@ export class AuthService {
     return { ok: true };
   }
 
+  async me(userId: string): Promise<{
+    userId: string;
+    role: string;
+    user: AuthUserResponse;
+    staffRole?: AuthRoleSummary;
+    permissions: string[];
+  }> {
+    const auth = await this.loadAuthProfile(userId);
+    if (!auth) throw new UnauthorizedException("User no longer exists");
+    return {
+      userId: auth.user.id,
+      role: auth.user.type,
+      user: auth.user,
+      staffRole: auth.staffRole,
+      permissions: auth.permissions,
+    };
+  }
+
   private async issueTokens(
     userId: string,
     role: string,
@@ -304,25 +356,75 @@ export class AuthService {
       },
     });
 
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: {
-        id: true,
-        name: true,
-        phone: true,
-        email: true,
-        type: true,
-        status: true,
-      },
-    });
-    if (!user) throw new UnauthorizedException("User no longer exists");
+    const auth = await this.loadAuthProfile(userId);
+    if (!auth) throw new UnauthorizedException("User no longer exists");
     return {
       accessToken,
       refreshToken,
       userId,
       role,
       sessionId,
-      user: { ...user, email: user.email ?? undefined },
+      user: auth.user,
+      staffRole: auth.staffRole,
+      permissions: auth.permissions,
+    };
+  }
+
+  private async loadAuthProfile(
+    userId: string,
+  ): Promise<
+    | {
+        user: AuthUserResponse;
+        staffRole?: AuthRoleSummary;
+        permissions: string[];
+      }
+    | null
+  > {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        name: true,
+        username: true,
+        phone: true,
+        email: true,
+        type: true,
+        status: true,
+        staffRole: {
+          select: {
+            id: true,
+            name: true,
+            permissions: {
+              select: { permission: { select: { key: true } } },
+            },
+          },
+        },
+      },
+    });
+    if (!user) return null;
+
+    const permissions = (user.staffRole?.permissions ?? []).map(
+      (item) => item.permission.key,
+    );
+
+    return {
+      user: {
+        id: user.id,
+        name: user.name,
+        username: user.username ?? undefined,
+        phone: user.phone,
+        email: user.email ?? undefined,
+        type: user.type,
+        status: user.status,
+      },
+      staffRole: user.staffRole
+        ? {
+            id: user.staffRole.id,
+            name: user.staffRole.name,
+            permissions,
+          }
+        : undefined,
+      permissions,
     };
   }
 

@@ -13,15 +13,18 @@ import { TripsService } from "./trips.service";
 import { PaginationDto } from "../../common/dto/pagination.dto";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
 import { RolesGuard } from "../../common/guards/roles.guard";
+import { PermissionsGuard } from "../../common/guards/permissions.guard";
 import { Roles } from "../../common/decorators/roles.decorator";
+import { RequirePermissions } from "../../common/decorators/permissions.decorator";
 
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 @Roles("STAFF")
 @Controller("trips")
 export class TripsController {
   constructor(private readonly trips: TripsService) {}
 
   @Get()
+  @RequirePermissions("trips.read", "trips.manage")
   findAll(
     @Query() q: PaginationDto,
     @Query("status") status?: TripStatus,
@@ -32,11 +35,13 @@ export class TripsController {
   }
 
   @Get(":id")
+  @RequirePermissions("trips.read", "trips.manage")
   findOne(@Param("id") id: string) {
     return this.trips.findOne(id);
   }
 
   @Patch(":id/status")
+  @RequirePermissions("trips.manage")
   changeStatus(
     @Param("id") id: string,
     @Body() body: { status: TripStatus; reason?: string },
@@ -45,6 +50,7 @@ export class TripsController {
   }
 
   @Post(":id/retry-settlement")
+  @RequirePermissions("trips.manage", "payments.manage")
   retrySettlement(@Param("id") id: string) {
     return this.trips.retrySettlement(id);
   }

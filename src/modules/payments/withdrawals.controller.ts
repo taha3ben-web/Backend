@@ -14,7 +14,9 @@ import { PaginationDto } from "../../common/dto/pagination.dto";
 import { CreateWithdrawDto, ProcessWithdrawDto } from "./dto/payments.dto";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
 import { RolesGuard } from "../../common/guards/roles.guard";
+import { PermissionsGuard } from "../../common/guards/permissions.guard";
 import { Roles } from "../../common/decorators/roles.decorator";
+import { RequirePermissions } from "../../common/decorators/permissions.decorator";
 import {
   CurrentUser,
   AuthUser,
@@ -32,6 +34,8 @@ export class WithdrawalsController {
 
   @UseGuards(RolesGuard)
   @Roles("STAFF")
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions("payments.read", "payments.manage")
   @Get()
   findAll(
     @Query() q: PaginationDto,
@@ -43,6 +47,8 @@ export class WithdrawalsController {
 
   @UseGuards(RolesGuard)
   @Roles("STAFF")
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions("payments.read", "payments.manage", "reports.read")
   @Get("summary")
   summary(@Query("status") status?: WithdrawStatus, @Query("search") search?: string) {
     return this.withdrawals.summary(status, search);
@@ -50,6 +56,8 @@ export class WithdrawalsController {
 
   @UseGuards(RolesGuard)
   @Roles("STAFF")
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions("payments.manage")
   @Patch(":id/approve")
   approve(
     @Param("id") id: string,
@@ -61,6 +69,8 @@ export class WithdrawalsController {
 
   @UseGuards(RolesGuard)
   @Roles("STAFF")
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions("payments.manage")
   @Patch(":id/paid")
   markPaid(
     @Param("id") id: string,
@@ -72,6 +82,8 @@ export class WithdrawalsController {
 
   @UseGuards(RolesGuard)
   @Roles("STAFF")
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions("payments.manage")
   @Patch(":id/reject")
   reject(
     @Param("id") id: string,

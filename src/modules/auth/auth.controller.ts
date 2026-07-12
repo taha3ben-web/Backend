@@ -1,4 +1,4 @@
-import { Body, Controller, Post, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Post, Req, UseGuards } from "@nestjs/common";
 import type { Request } from "express";
 import { AuthService, SessionContext } from "./auth.service";
 import { RegisterDto } from "./dto/register.dto";
@@ -40,6 +40,12 @@ export class AuthController {
   @Post("logout")
   logout(@CurrentUser() user: AuthUser) {
     return this.auth.logout(user.userId, user.sessionId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get("me")
+  me(@CurrentUser() user: AuthUser) {
+    return this.auth.me(user.userId);
   }
 
   private sessionContext(

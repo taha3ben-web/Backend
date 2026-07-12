@@ -130,12 +130,21 @@ async function main(): Promise<void> {
 
   // حساب مدير عام (STAFF) مربوط بدور SUPER_ADMIN
   const adminPhone = "0000000000";
+  const adminUsername = "superadmin";
   const passwordHash = await bcrypt.hash("admin1234", 10);
   await prisma.user.upsert({
     where: { phone: adminPhone },
-    update: { staffRoleId: superAdminRole?.id },
+    update: {
+      username: adminUsername,
+      email: "admin@novaride.app",
+      passwordHash,
+      status: "ACTIVE",
+      type: "STAFF",
+      staffRoleId: superAdminRole?.id,
+    },
     create: {
       name: "Super Admin",
+      username: adminUsername,
       phone: adminPhone,
       email: "admin@novaride.app",
       passwordHash,
@@ -255,7 +264,7 @@ async function main(): Promise<void> {
   }
 
   console.log(
-    "Seed done. Admin login -> phone: 0000000000 / password: admin1234",
+    "Seed done. Admin login -> username: superadmin / phone: 0000000000 / password: admin1234",
   );
 }
 

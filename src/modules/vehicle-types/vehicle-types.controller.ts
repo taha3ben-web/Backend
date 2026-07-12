@@ -12,7 +12,9 @@ import {
 import { WorkflowStatus } from "@prisma/client";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
 import { RolesGuard } from "../../common/guards/roles.guard";
+import { PermissionsGuard } from "../../common/guards/permissions.guard";
 import { Roles } from "../../common/decorators/roles.decorator";
+import { RequirePermissions } from "../../common/decorators/permissions.decorator";
 import {
   CurrentUser,
   AuthUser,
@@ -32,8 +34,9 @@ import {
 } from "./dto/vehicle-field.dto";
 
 @Controller("vehicle-types")
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 @Roles("STAFF")
+@RequirePermissions("pricing.manage")
 export class VehicleTypesController {
   constructor(
     private readonly vehicleTypes: VehicleTypesService,
