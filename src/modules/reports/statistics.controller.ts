@@ -36,6 +36,21 @@ export class StatisticsController {
     return this.stats.withdrawalOps(range);
   }
 
+  @Get("funding-ops")
+  fundingOps(@Query() range: DateRangeDto) {
+    return this.stats.fundingOps(range);
+  }
+
+  @Get("transfer-ops")
+  transferOps(@Query() range: DateRangeDto) {
+    return this.stats.transferOps(range);
+  }
+
+  @Get("financial-health")
+  financialHealth(@Query() range: DateRangeDto) {
+    return this.stats.financialHealth(range);
+  }
+
   @Get("timeseries")
   timeseries(@Query() range: DateRangeDto) {
     return this.stats.timeseries(range);

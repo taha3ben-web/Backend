@@ -80,20 +80,26 @@ export class StatisticsService {
 
   async paymentOps(r: DateRange) {
     const createdAt = this.range(r);
-    const [totalCount, totalAmount, capturedAmount, pendingCount, failedCount, refundedCount] =
-      await this.prisma.$transaction([
-        this.prisma.payment.count({ where: { createdAt } }),
-        this.prisma.payment.aggregate({ where: { createdAt }, _sum: { amount: true } }),
-        this.prisma.payment.aggregate({
-          where: { createdAt, status: { in: ["CAPTURED", "PAID"] } },
-          _sum: { amount: true },
-        }),
-        this.prisma.payment.count({
-          where: { createdAt, status: { in: ["PENDING", "AUTHORIZED"] } },
-        }),
-        this.prisma.payment.count({ where: { createdAt, status: "FAILED" } }),
-        this.prisma.payment.count({ where: { createdAt, status: "REFUNDED" } }),
-      ]);
+    const [
+      totalCount,
+      totalAmount,
+      capturedAmount,
+      pendingCount,
+      failedCount,
+      refundedCount,
+    ] = await this.prisma.$transaction([
+      this.prisma.payment.count({ where: { createdAt } }),
+      this.prisma.payment.aggregate({ where: { createdAt }, _sum: { amount: true } }),
+      this.prisma.payment.aggregate({
+        where: { createdAt, status: { in: ["CAPTURED", "PAID"] } },
+        _sum: { amount: true },
+      }),
+      this.prisma.payment.count({
+        where: { createdAt, status: { in: ["PENDING", "AUTHORIZED"] } },
+      }),
+      this.prisma.payment.count({ where: { createdAt, status: "FAILED" } }),
+      this.prisma.payment.count({ where: { createdAt, status: "REFUNDED" } }),
+    ]);
 
     return {
       totalCount,
@@ -107,28 +113,33 @@ export class StatisticsService {
 
   async settlementOps(r: DateRange) {
     const completedAt = this.range(r);
-    const [completedTrips, settledTrips, unsettledTrips, failedSettlements, attempts] =
-      await this.prisma.$transaction([
-        this.prisma.trip.count({ where: { completedAt, status: "COMPLETED" } }),
-        this.prisma.trip.count({
-          where: { completedAt, status: "COMPLETED", settledAt: { not: null } },
-        }),
-        this.prisma.trip.count({
-          where: { completedAt, status: "COMPLETED", settledAt: null },
-        }),
-        this.prisma.trip.count({
-          where: {
-            completedAt,
-            status: "COMPLETED",
-            settledAt: null,
-            settlementError: { not: null },
-          },
-        }),
-        this.prisma.trip.aggregate({
-          where: { completedAt, status: "COMPLETED" },
-          _sum: { settlementAttempts: true },
-        }),
-      ]);
+    const [
+      completedTrips,
+      settledTrips,
+      unsettledTrips,
+      failedSettlements,
+      attempts,
+    ] = await this.prisma.$transaction([
+      this.prisma.trip.count({ where: { completedAt, status: "COMPLETED" } }),
+      this.prisma.trip.count({
+        where: { completedAt, status: "COMPLETED", settledAt: { not: null } },
+      }),
+      this.prisma.trip.count({
+        where: { completedAt, status: "COMPLETED", settledAt: null },
+      }),
+      this.prisma.trip.count({
+        where: {
+          completedAt,
+          status: "COMPLETED",
+          settledAt: null,
+          settlementError: { not: null },
+        },
+      }),
+      this.prisma.trip.aggregate({
+        where: { completedAt, status: "COMPLETED" },
+        _sum: { settlementAttempts: true },
+      }),
+    ]);
 
     return {
       completedTrips,
@@ -141,18 +152,24 @@ export class StatisticsService {
 
   async withdrawalOps(r: DateRange) {
     const createdAt = this.range(r);
-    const [totalCount, totalAmount, pendingCount, approvedCount, paidCount, rejectedCount] =
-      await this.prisma.$transaction([
-        this.prisma.withdrawRequest.count({ where: { createdAt } }),
-        this.prisma.withdrawRequest.aggregate({
-          where: { createdAt },
-          _sum: { amount: true },
-        }),
-        this.prisma.withdrawRequest.count({ where: { createdAt, status: "PENDING" } }),
-        this.prisma.withdrawRequest.count({ where: { createdAt, status: "APPROVED" } }),
-        this.prisma.withdrawRequest.count({ where: { createdAt, status: "PAID" } }),
-        this.prisma.withdrawRequest.count({ where: { createdAt, status: "REJECTED" } }),
-      ]);
+    const [
+      totalCount,
+      totalAmount,
+      pendingCount,
+      approvedCount,
+      paidCount,
+      rejectedCount,
+    ] = await this.prisma.$transaction([
+      this.prisma.withdrawRequest.count({ where: { createdAt } }),
+      this.prisma.withdrawRequest.aggregate({
+        where: { createdAt },
+        _sum: { amount: true },
+      }),
+      this.prisma.withdrawRequest.count({ where: { createdAt, status: "PENDING" } }),
+      this.prisma.withdrawRequest.count({ where: { createdAt, status: "APPROVED" } }),
+      this.prisma.withdrawRequest.count({ where: { createdAt, status: "PAID" } }),
+      this.prisma.withdrawRequest.count({ where: { createdAt, status: "REJECTED" } }),
+    ]);
 
     return {
       totalCount,
@@ -161,6 +178,182 @@ export class StatisticsService {
       approvedCount,
       paidCount,
       rejectedCount,
+    };
+  }
+
+  async fundingOps(r: DateRange) {
+    const createdAt = this.range(r);
+    const [
+      totalCount,
+      totalAmount,
+      pendingCount,
+      approvedCount,
+      fundedCount,
+      rejectedCount,
+      fundedAmount,
+    ] = await this.prisma.$transaction([
+      this.prisma.driverFundingRequest.count({ where: { createdAt } }),
+      this.prisma.driverFundingRequest.aggregate({
+        where: { createdAt },
+        _sum: { amount: true },
+      }),
+      this.prisma.driverFundingRequest.count({
+        where: { createdAt, status: "PENDING" },
+      }),
+      this.prisma.driverFundingRequest.count({
+        where: { createdAt, status: "APPROVED" },
+      }),
+      this.prisma.driverFundingRequest.count({ where: { createdAt, status: "FUNDED" } }),
+      this.prisma.driverFundingRequest.count({
+        where: { createdAt, status: "REJECTED" },
+      }),
+      this.prisma.driverFundingRequest.aggregate({
+        where: { createdAt, status: "FUNDED" },
+        _sum: { amount: true },
+      }),
+    ]);
+
+    return {
+      totalCount,
+      totalAmount: this.num(totalAmount._sum.amount),
+      pendingCount,
+      approvedCount,
+      fundedCount,
+      rejectedCount,
+      fundedAmount: this.num(fundedAmount._sum.amount),
+    };
+  }
+
+  async transferOps(r: DateRange) {
+    const createdAt = this.range(r);
+    const [
+      totalCount,
+      totalAmount,
+      pendingCount,
+      approvedCount,
+      completedCount,
+      rejectedCount,
+      completedAmount,
+      flaggedCount,
+    ] = await this.prisma.$transaction([
+      this.prisma.driverTransfer.count({ where: { createdAt } }),
+      this.prisma.driverTransfer.aggregate({
+        where: { createdAt },
+        _sum: { amount: true },
+      }),
+      this.prisma.driverTransfer.count({ where: { createdAt, status: "PENDING" } }),
+      this.prisma.driverTransfer.count({
+        where: { createdAt, status: "APPROVED" },
+      }),
+      this.prisma.driverTransfer.count({
+        where: { createdAt, status: "COMPLETED" },
+      }),
+      this.prisma.driverTransfer.count({
+        where: { createdAt, status: "REJECTED" },
+      }),
+      this.prisma.driverTransfer.aggregate({
+        where: { createdAt, status: "COMPLETED" },
+        _sum: { amount: true },
+      }),
+      this.prisma.driverTransfer.count({
+        where: { createdAt, riskFlags: { not: Prisma.JsonNull } },
+      }),
+    ]);
+
+    return {
+      totalCount,
+      totalAmount: this.num(totalAmount._sum.amount),
+      pendingCount,
+      approvedCount,
+      completedCount,
+      rejectedCount,
+      completedAmount: this.num(completedAmount._sum.amount),
+      flaggedCount,
+    };
+  }
+
+  async financialHealth(r: DateRange) {
+    const createdAt = this.range(r);
+    const [
+      totalTransactions,
+      postedCount,
+      pendingCount,
+      failedCount,
+      reversedCount,
+      cancelledCount,
+      tripReferences,
+      paymentReferences,
+      withdrawalReferences,
+      fundingReferences,
+      transferReferences,
+      platformCash,
+      withdrawalReserve,
+      cardReceivable,
+      userLiabilities,
+    ] = await this.prisma.$transaction([
+      this.prisma.ledgerTransaction.count({ where: { createdAt } }),
+      this.prisma.ledgerTransaction.count({
+        where: { createdAt, status: "POSTED" },
+      }),
+      this.prisma.ledgerTransaction.count({
+        where: { createdAt, status: "PENDING" },
+      }),
+      this.prisma.ledgerTransaction.count({ where: { createdAt, status: "FAILED" } }),
+      this.prisma.ledgerTransaction.count({
+        where: { createdAt, status: "REVERSED" },
+      }),
+      this.prisma.ledgerTransaction.count({
+        where: { createdAt, status: "CANCELLED" },
+      }),
+      this.prisma.ledgerTransaction.count({
+        where: { createdAt, referenceType: "TRIP", status: "POSTED" },
+      }),
+      this.prisma.ledgerTransaction.count({
+        where: { createdAt, referenceType: "PAYMENT", status: "POSTED" },
+      }),
+      this.prisma.ledgerTransaction.count({
+        where: { createdAt, referenceType: "WITHDRAWAL", status: "POSTED" },
+      }),
+      this.prisma.ledgerTransaction.count({
+        where: { createdAt, referenceType: "DRIVER_FUNDING", status: "POSTED" },
+      }),
+      this.prisma.ledgerTransaction.count({
+        where: { createdAt, referenceType: "DRIVER_TRANSFER", status: "POSTED" },
+      }),
+      this.prisma.financialAccount.aggregate({
+        where: { code: "PLATFORM:CASH:DZD" },
+        _sum: { balanceCache: true },
+      }),
+      this.prisma.financialAccount.aggregate({
+        where: { code: "PLATFORM:WITHDRAWAL_RESERVE:DZD" },
+        _sum: { balanceCache: true },
+      }),
+      this.prisma.financialAccount.aggregate({
+        where: { code: "PLATFORM:CARD_RECEIVABLE:DZD" },
+        _sum: { balanceCache: true },
+      }),
+      this.prisma.financialAccount.aggregate({
+        where: { code: { startsWith: "USER:", endsWith: ":DZD:AVAILABLE" } },
+        _sum: { balanceCache: true },
+      }),
+    ]);
+
+    return {
+      totalTransactions,
+      postedCount,
+      pendingCount,
+      failedCount,
+      reversedCount,
+      cancelledCount,
+      tripReferences,
+      paymentReferences,
+      withdrawalReferences,
+      fundingReferences,
+      transferReferences,
+      platformCash: this.num(platformCash._sum.balanceCache),
+      withdrawalReserve: this.num(withdrawalReserve._sum.balanceCache),
+      cardReceivable: this.num(cardReceivable._sum.balanceCache),
+      userLiabilities: this.num(userLiabilities._sum.balanceCache),
     };
   }
 
