@@ -107,7 +107,7 @@ export class AuthService {
   }
 
   async login(dto: LoginDto, ctx: SessionContext = {}): Promise<Tokens> {
-    const rawIdentifier = (dto.identifier ?? dto.phone ?? "").trim();
+    const rawIdentifier = dto.phone.trim();
     const normalizedIdentifier = rawIdentifier.toLowerCase();
 
     if (!rawIdentifier) {

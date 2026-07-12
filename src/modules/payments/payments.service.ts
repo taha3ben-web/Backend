@@ -231,12 +231,11 @@ export class PaymentsService {
   }
 
   async recordForTrip(tripId: string, method: PaymentMethod, reference?: string) {
-  const checkout = await this.createCheckoutForTrip(tripId, {
-    method,
-    reference,
-    idempotencyKey: `payment:record:${tripId}:${method}`,
-  });
-  return checkout.payment;
+    const checkout = await this.createCheckoutForTrip(tripId, {
+      method,
+      reference,
+    });
+    return checkout.payment;
   }
 
   async capture(id: string, idempotencyKey: string, reference?: string, reason?: string) {
