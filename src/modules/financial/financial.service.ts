@@ -122,6 +122,32 @@ export class FinancialService {
   async completeWithdrawal(id: string): Promise<void> {
     await this.prisma.$transaction(async (tx) => { const request = await tx.withdrawRequest.findUnique({ where: { id } }); if (!request) throw new NotFoundException("Withdrawal not found"); const reserve = await this.platformAccount(tx, "WITHDRAWAL_RESERVE", "LIABILITY", "DZD"); const cash = await this.platformAccount(tx, "CASH", "ASSET", "DZD"); await this.post(tx, { command: "completeWithdrawal", idempotencyKey: `withdrawal:complete:${id}`, currency: "DZD", referenceType: "WITHDRAWAL", referenceId: id, lines: [{ accountId: reserve.id, direction: "DEBIT", amount: Number(request.amount) }, { accountId: cash.id, direction: "CREDIT", amount: Number(request.amount) }] }); });
   }
+  async fundDriverWallet(requestId: string): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      const request = await tx.driverFundingRequest.findUnique({
+        where: { id: requestId },
+        include: { driver: { select: { userId: true } } },
+      });
+      if (!request) throw new NotFoundException("Driver funding request not found");
+      if (request.status === "FUNDED") return;
+      if (request.status !== "APPROVED") {
+        throw new BadRequestException("Driver funding request must be approved first");
+      }
+      const user = await this.userAccount(tx, request.driver.userId, "DZD");
+      const cash = await this.platformAccount(tx, "CASH", "ASSET", "DZD");
+      await this.post(tx, {
+        command: "fundDriverWallet",
+        idempotencyKey: `driverFunding:fund:${requestId}`,
+        currency: "DZD",
+        referenceType: "DRIVER_FUNDING",
+        referenceId: requestId,
+        lines: [
+          { accountId: cash.id, direction: "DEBIT", amount: Number(request.amount) },
+          { accountId: user.id, direction: "CREDIT", amount: Number(request.amount) },
+        ],
+      });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }
   private async byKey(key: string) { const row = await this.prisma.ledgerTransaction.findUnique({ where: { idempotencyKey: key } }); if (!row || row.status !== "POSTED") throw new NotFoundException("Posted ledger transaction not found"); return row; }
   async reverseTransaction(id: string, key: string, command = "reverseTransaction"): Promise<void> {
     await this.prisma.$transaction(async (tx) => { const original = await tx.ledgerTransaction.findUnique({ where: { id }, include: { entries: true, reversedBy: true } }); if (!original || original.status !== "POSTED") throw new BadRequestException("Only posted transactions can be reversed"); if (original.reversedBy) return; await this.post(tx, { command, idempotencyKey: key, currency: original.currency, referenceType: original.referenceType ?? undefined, referenceId: original.referenceId ?? undefined, reversalOfId: original.id, lines: original.entries.map((entry) => ({ accountId: entry.accountId, direction: entry.direction === "DEBIT" ? "CREDIT" : "DEBIT", amount: Number(entry.amount) })) }); }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });

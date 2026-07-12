@@ -16,6 +16,8 @@ async function main(): Promise<void> {
     { key: "trips.manage", description: "إدارة الرحلات" },
     { key: "payments.read", description: "عرض المدفوعات" },
     { key: "payments.manage", description: "إدارة المدفوعات والسحوبات" },
+    { key: "funding.read", description: "عرض طلبات شحن السائقين" },
+    { key: "funding.manage", description: "إدارة طلبات شحن السائقين" },
     { key: "coupons.manage", description: "إدارة الكوبونات" },
     { key: "pricing.manage", description: "إدارة التسعير" },
     { key: "notifications.send", description: "إرسال الإشعارات" },
@@ -53,6 +55,8 @@ async function main(): Promise<void> {
         "coupons.manage",
         "notifications.send",
         "reports.read",
+        "funding.read",
+        "funding.manage",
       ],
     },
     {
@@ -69,6 +73,19 @@ async function main(): Promise<void> {
         "trips.read",
         "reports.read",
         "notifications.send",
+        "funding.read",
+      ],
+    },
+    {
+      name: "AGENT_DISPATCHER",
+      description: "وكيل تشغيل",
+      keys: [
+        "passengers.read",
+        "trips.read",
+        "payments.read",
+        "support.manage",
+        "funding.read",
+        "funding.manage",
       ],
     },
     {

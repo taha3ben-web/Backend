@@ -26,6 +26,8 @@ CREATE TYPE "PaymentStatus" AS ENUM ('PENDING', 'AUTHORIZED', 'CAPTURED', 'PAID'
 
 CREATE TYPE "WithdrawStatus" AS ENUM ('PENDING', 'APPROVED', 'REJECTED', 'PAID');
 
+CREATE TYPE "FundingRequestStatus" AS ENUM ('PENDING', 'APPROVED', 'REJECTED', 'FUNDED');
+
 CREATE TYPE "WalletTxType" AS ENUM ('CREDIT', 'DEBIT');
 
 CREATE TYPE "FinancialPartyType" AS ENUM ('USER', 'AGENT', 'PLATFORM', 'EXTERNAL');
@@ -274,6 +276,22 @@ CREATE TABLE "WalletTransaction" (
   "balanceAfter" DECIMAL(12, 2) NOT NULL,
   "reason" TEXT,
   "createdAt" TIMESTAMP(3) DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+CREATE TABLE "DriverFundingRequest" (
+  "id" TEXT DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+  "driverId" TEXT NOT NULL,
+  "requestedById" TEXT NOT NULL,
+  "approvedById" TEXT,
+  "amount" DECIMAL(12, 2) NOT NULL,
+  "status" "FundingRequestStatus" DEFAULT 'PENDING' NOT NULL,
+  "note" TEXT,
+  "idempotencyKey" TEXT NOT NULL UNIQUE,
+  "approvedAt" TIMESTAMP(3),
+  "fundedAt" TIMESTAMP(3),
+  "rejectedAt" TIMESTAMP(3),
+  "createdAt" TIMESTAMP(3) DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  "updatedAt" TIMESTAMP(3) NOT NULL
 );
 
 CREATE TABLE "WithdrawRequest" (
@@ -752,6 +770,12 @@ ALTER TABLE "Wallet" ADD CONSTRAINT "Wallet_userId_fkey" FOREIGN KEY ("userId") 
 
 ALTER TABLE "WalletTransaction" ADD CONSTRAINT "WalletTransaction_walletId_fkey" FOREIGN KEY ("walletId") REFERENCES "Wallet" ("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
+ALTER TABLE "DriverFundingRequest" ADD CONSTRAINT "DriverFundingRequest_driverId_fkey" FOREIGN KEY ("driverId") REFERENCES "Driver" ("id") ON DELETE NO ACTION ON UPDATE CASCADE;
+
+ALTER TABLE "DriverFundingRequest" ADD CONSTRAINT "DriverFundingRequest_requestedById_fkey" FOREIGN KEY ("requestedById") REFERENCES "User" ("id") ON DELETE NO ACTION ON UPDATE CASCADE;
+
+ALTER TABLE "DriverFundingRequest" ADD CONSTRAINT "DriverFundingRequest_approvedById_fkey" FOREIGN KEY ("approvedById") REFERENCES "User" ("id") ON DELETE NO ACTION ON UPDATE CASCADE;
+
 ALTER TABLE "WithdrawRequest" ADD CONSTRAINT "WithdrawRequest_driverId_fkey" FOREIGN KEY ("driverId") REFERENCES "Driver" ("id") ON DELETE NO ACTION ON UPDATE CASCADE;
 
 ALTER TABLE "WithdrawRequest" ADD CONSTRAINT "WithdrawRequest_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE NO ACTION ON UPDATE CASCADE;
@@ -879,6 +903,12 @@ CREATE INDEX "PaymentEvent_paymentId_createdAt_idx" ON "PaymentEvent" ("paymentI
 CREATE INDEX "PaymentEvent_type_createdAt_idx" ON "PaymentEvent" ("type", "createdAt");
 
 CREATE INDEX "WalletTransaction_walletId_createdAt_idx" ON "WalletTransaction" ("walletId", "createdAt");
+
+CREATE INDEX "DriverFundingRequest_driverId_status_idx" ON "DriverFundingRequest" ("driverId", "status");
+
+CREATE INDEX "DriverFundingRequest_requestedById_createdAt_idx" ON "DriverFundingRequest" ("requestedById", "createdAt");
+
+CREATE INDEX "DriverFundingRequest_status_createdAt_idx" ON "DriverFundingRequest" ("status", "createdAt");
 
 CREATE INDEX "WithdrawRequest_driverId_idx" ON "WithdrawRequest" ("driverId");
 

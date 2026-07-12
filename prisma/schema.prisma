@@ -108,6 +108,13 @@ enum WithdrawStatus {
   PAID
 }
 
+enum FundingRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  FUNDED
+}
+
 enum WalletTxType {
   CREDIT
   DEBIT
@@ -204,6 +211,8 @@ model User {
   passengerTrips     Trip[]             @relation("PassengerTrips")
   payments           Payment[]
   withdrawRequests   WithdrawRequest[]
+  requestedFundingRequests DriverFundingRequest[] @relation("FundingRequester")
+  approvedFundingRequests  DriverFundingRequest[] @relation("FundingApprover")
   refreshTokens      RefreshToken[]
   sessions           Session[]
   deviceTokens       DeviceToken[]
@@ -246,6 +255,7 @@ model Driver {
   trips            Trip[]            @relation("DriverTrips")
   earnings         DriverEarning[]
   withdrawRequests WithdrawRequest[]
+  fundingRequests  DriverFundingRequest[]
 
   @@index([status])
   @@index([availability])
@@ -526,6 +536,29 @@ model WalletTransaction {
   createdAt    DateTime     @default(now())
 
   @@index([walletId, createdAt])
+}
+
+model DriverFundingRequest {
+  id            String               @id @default(uuid())
+  driverId      String
+  driver        Driver               @relation(fields: [driverId], references: [id])
+  requestedById String
+  requestedBy   User                 @relation("FundingRequester", fields: [requestedById], references: [id])
+  approvedById  String?
+  approvedBy    User?                @relation("FundingApprover", fields: [approvedById], references: [id])
+  amount        Decimal              @db.Decimal(12, 2)
+  status        FundingRequestStatus @default(PENDING)
+  note          String?
+  idempotencyKey String              @unique
+  approvedAt    DateTime?
+  fundedAt      DateTime?
+  rejectedAt    DateTime?
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+
+  @@index([driverId, status])
+  @@index([requestedById, createdAt])
+  @@index([status, createdAt])
 }
 
 model WithdrawRequest {
