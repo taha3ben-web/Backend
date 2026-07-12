@@ -32,4 +32,9 @@ export class DashboardController {
   liveMap() {
     return this.dashboard.liveMap();
   }
+
+  @Get("operations")
+  operations() {
+    return this.dashboard.operations();
+  }
 }

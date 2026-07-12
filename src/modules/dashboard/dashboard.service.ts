@@ -1,12 +1,14 @@
 import { Injectable } from "@nestjs/common";
 import { PrismaService } from "../../prisma/prisma.service";
 import { RedisService } from "../redis/redis.service";
+import { MetricsService } from "../metrics/metrics.service";
 
 @Injectable()
 export class DashboardService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
+    private readonly metrics: MetricsService,
   ) {}
 
   async summary() {
@@ -131,5 +133,139 @@ export class DashboardService {
       }
     });
     return { drivers, count: drivers.length };
+  }
+
+  async operations() {
+    const [
+      db,
+      redis,
+      driversWithGeo,
+      driversOnline,
+      activeTrips,
+      openSafetyIncidents,
+      openSupportTickets,
+      openComplaints,
+      pendingWithdrawals,
+      pendingPayments,
+      failedSettlements,
+      failedNotifications,
+      recentSafetyIncidents,
+      recentFailedSettlements,
+      recentComplaints,
+    ] = await Promise.all([
+      this.checkDb(),
+      this.checkRedis(),
+      this.countGeoDrivers(),
+      this.prisma.driver.count({ where: { availability: "ONLINE" } }),
+      this.prisma.trip.count({
+        where: { status: { in: ["ACCEPTED", "ARRIVING", "IN_PROGRESS"] } },
+      }),
+      this.prisma.safetyIncident.count({ where: { status: { in: ["OPEN", "ACKNOWLEDGED"] } } }),
+      this.prisma.supportTicket.count({ where: { status: "OPEN" } }),
+      this.prisma.complaint.count({ where: { status: { in: ["OPEN", "REVIEWING"] } } }),
+      this.prisma.withdrawRequest.count({ where: { status: "PENDING" } }),
+      this.prisma.payment.count({ where: { status: { in: ["PENDING", "PROCESSING"] } } }),
+      this.prisma.trip.count({
+        where: {
+          status: "COMPLETED",
+          settledAt: null,
+          settlementAttempts: { gte: 3 },
+        },
+      }),
+      this.prisma.notification.count({ where: { status: "FAILED" } }),
+      this.prisma.safetyIncident.findMany({
+        take: 8,
+        orderBy: { createdAt: "desc" },
+        include: {
+          user: { select: { name: true, phone: true } },
+          trip: { select: { id: true, status: true } },
+        },
+      }),
+      this.prisma.trip.findMany({
+        take: 8,
+        orderBy: [{ settlementAttempts: "desc" }, { completedAt: "desc" }],
+        where: {
+          status: "COMPLETED",
+          settledAt: null,
+          settlementAttempts: { gte: 1 },
+        },
+        include: {
+          passenger: { select: { name: true } },
+          driver: { select: { user: { select: { name: true } } } },
+        },
+      }),
+      this.prisma.complaint.findMany({
+        take: 8,
+        orderBy: { createdAt: "desc" },
+        where: { status: { in: ["OPEN", "REVIEWING"] } },
+        include: {
+          fromUser: { select: { name: true, phone: true } },
+          againstUser: { select: { name: true } },
+        },
+      }),
+    ]);
+
+    const mem = process.memoryUsage();
+    return {
+      ts: new Date().toISOString(),
+      uptimeSec: Math.round(process.uptime()),
+      memory: {
+        rssMB: this.round2(mem.rss / 1048576),
+        heapUsedMB: this.round2(mem.heapUsed / 1048576),
+        heapTotalMB: this.round2(mem.heapTotal / 1048576),
+      },
+      websocket: {
+        ...this.metrics.wsSnapshot(),
+        ...this.metrics.counters(),
+      },
+      health: { db, redis },
+      queues: {
+        driversWithGeo,
+        driversOnline,
+        activeTrips,
+        openSafetyIncidents,
+        openSupportTickets,
+        openComplaints,
+        pendingWithdrawals,
+        pendingPayments,
+        failedSettlements,
+        failedNotifications,
+      },
+      recentSafetyIncidents,
+      recentFailedSettlements,
+      recentComplaints,
+    };
+  }
+
+  private round2(n: number): number {
+    return Math.round(n * 100) / 100;
+  }
+
+  private async checkDb(): Promise<{ ok: boolean; latencyMs?: number; error?: string }> {
+    const start = Date.now();
+    try {
+      await this.prisma.$queryRaw`SELECT 1`;
+      return { ok: true, latencyMs: Date.now() - start };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+  }
+
+  private async checkRedis(): Promise<{ ok: boolean; latencyMs?: number; error?: string }> {
+    const start = Date.now();
+    try {
+      const pong = await this.redis.client.ping();
+      return { ok: pong === "PONG", latencyMs: Date.now() - start };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+  }
+
+  private async countGeoDrivers(): Promise<number> {
+    try {
+      return await this.redis.client.zcard("drivers:geo");
+    } catch {
+      return -1;
+    }
   }
 }
