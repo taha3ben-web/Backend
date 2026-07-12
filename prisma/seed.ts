@@ -26,6 +26,7 @@ async function main(): Promise<void> {
     { key: "pricing.manage", description: "إدارة التسعير" },
     { key: "notifications.send", description: "إرسال الإشعارات" },
     { key: "support.manage", description: "إدارة الدعم والشكاوى" },
+    { key: "safety.manage", description: "إدارة بلاغات السلامة وSOS" },
     { key: "reports.read", description: "التقارير والإحصائيات" },
     { key: "settings.manage", description: "إدارة الإعدادات" },
     { key: "staff.manage", description: "إدارة الموظفين والأدوار" },
@@ -58,6 +59,7 @@ async function main(): Promise<void> {
         "pricing.manage",
         "coupons.manage",
         "notifications.send",
+        "safety.manage",
         "reports.read",
         "funding.read",
         "funding.manage",
@@ -70,7 +72,7 @@ async function main(): Promise<void> {
     {
       name: "SUPPORT",
       description: "دعم فني",
-      keys: ["support.manage", "passengers.read", "trips.read"],
+      keys: ["support.manage", "safety.manage", "passengers.read", "trips.read"],
     },
     {
       name: "SUPERVISOR",
@@ -81,6 +83,7 @@ async function main(): Promise<void> {
         "trips.read",
         "reports.read",
         "notifications.send",
+        "safety.manage",
         "funding.read",
         "qr.read",
         "transfer.read",
