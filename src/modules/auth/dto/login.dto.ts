@@ -6,8 +6,9 @@ export class LoginDto {
   @IsString()
   declare phone: string;
 
+  @IsOptional()
   @IsString()
-  declare password: string;
+  password?: string;
 
   @IsOptional()
   @ValidateNested()

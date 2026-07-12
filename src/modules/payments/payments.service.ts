@@ -234,6 +234,7 @@ export class PaymentsService {
     const checkout = await this.createCheckoutForTrip(tripId, {
       method,
       reference,
+      idempotencyKey: `payment:record:${tripId}:${method}`,
     });
     return checkout.payment;
   }
