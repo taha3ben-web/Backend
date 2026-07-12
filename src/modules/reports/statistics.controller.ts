@@ -21,6 +21,21 @@ export class StatisticsController {
     return this.stats.revenue(range);
   }
 
+  @Get("payment-ops")
+  paymentOps(@Query() range: DateRangeDto) {
+    return this.stats.paymentOps(range);
+  }
+
+  @Get("settlement-ops")
+  settlementOps(@Query() range: DateRangeDto) {
+    return this.stats.settlementOps(range);
+  }
+
+  @Get("withdrawal-ops")
+  withdrawalOps(@Query() range: DateRangeDto) {
+    return this.stats.withdrawalOps(range);
+  }
+
   @Get("timeseries")
   timeseries(@Query() range: DateRangeDto) {
     return this.stats.timeseries(range);

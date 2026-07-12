@@ -14,7 +14,6 @@ import { RedisService } from "../redis/redis.service";
 import { PaginationDto } from "../../common/dto/pagination.dto";
 import { FinancialService } from "../financial/financial.service";
 import { canTransition } from "./trip-transitions";
-import { computeSettlement } from "./settlement.util";
 
 @Injectable()
 export class TripsService {
@@ -27,8 +26,27 @@ export class TripsService {
     private readonly config: ConfigService,
   ) {}
 
-  async findAll(q: PaginationDto, status?: TripStatus) {
-    const where: Prisma.TripWhereInput = status ? { status } : {};
+  async findAll(
+    q: PaginationDto,
+    status?: TripStatus,
+    unsettledOnly = false,
+    search?: string,
+  ) {
+    const where: Prisma.TripWhereInput = {
+      ...(status ? { status } : {}),
+      ...(unsettledOnly ? { status: "COMPLETED", settledAt: null } : {}),
+      ...(search
+        ? {
+            OR: [
+              { id: { contains: search, mode: "insensitive" } },
+              { passenger: { name: { contains: search, mode: "insensitive" } } },
+              { passenger: { phone: { contains: search, mode: "insensitive" } } },
+              { driver: { user: { name: { contains: search, mode: "insensitive" } } } },
+              { driver: { user: { phone: { contains: search, mode: "insensitive" } } } },
+            ],
+          }
+        : {}),
+    };
     const [items, total] = await this.prisma.$transaction([
       this.prisma.trip.findMany({
         where,
@@ -79,10 +97,6 @@ export class TripsService {
       );
     }
 
-    // انتقال ذري: لا نحدّث إلا إن بقيت الحالة كما قرأناها (compare-and-set).
-    // يمنع تسابق انتقالين متزامنين من نفس الحالة
-    // (مثل COMPLETED من السائق وCANCELLED من الموظف) من النجاح معًا.
-    // ملاحظة: undefined يعني "لا تغيّر" في Prisma — فيحافظ على القيم السابقة.
     const guard = await this.prisma.trip.updateMany({
       where: { id, status: trip.status },
       data: {
@@ -94,7 +108,6 @@ export class TripsService {
       },
     });
     if (guard.count === 0) {
-      // خسرنا التسابق: تغيّرت الحالة بين القراءة والكتابة.
       throw new BadRequestException(
         `Invalid transition ${trip.status} -> ${to}`,
       );
@@ -103,12 +116,10 @@ export class TripsService {
       data: { tripId: id, type: `status:${to}`, actor },
     });
 
-    // تسوية الرحلة ماليًا عند الاكتمال
     if (to === "COMPLETED") {
       await this.settleCompletedTrip(id);
     }
 
-    // تحرير السائق عند انتهاء الرحلة (اكتمال أو إلغاء)
     if (to === "COMPLETED" || to === "CANCELLED") {
       await this.releaseDriver(trip.driverId);
     }
@@ -118,10 +129,28 @@ export class TripsService {
     return updated ?? trip;
   }
 
-  /**
-   * تغيير حالة الرحلة من طرف السائق المكلّف بها (عبر WebSocket).
-   * يتحقق من ملكية الرحلة قبل السماح بالانتقال، ويسجّل الفاعل DRIVER.
-   */
+  async retrySettlement(id: string) {
+    const trip = await this.prisma.trip.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        status: true,
+        settledAt: true,
+        settlementAttempts: true,
+        settlementError: true,
+      },
+    });
+    if (!trip) throw new NotFoundException("Trip not found");
+    if (trip.status !== "COMPLETED") {
+      throw new BadRequestException("لا يمكن تسوية رحلة غير مكتملة");
+    }
+    if (trip.settledAt) {
+      return { ok: true, alreadySettled: true };
+    }
+    await this.settleCompletedTrip(id);
+    return this.findOne(id);
+  }
+
   async driverChangeStatus(
     driverUserId: string,
     tripId: string,
@@ -139,11 +168,6 @@ export class TripsService {
     return this.changeStatus(tripId, to, reason, "DRIVER");
   }
 
-  /**
-   * هل المستخدم طرفٌ في الرحلة (الراكب أو السائق المكلّف)؟
-   * استعلام خفيف يُستخدم لحماية الانضمام إلى غرف WebSocket (trip:{id})
-   * من الوصول غير المصرّح (IDOR).
-   */
   async isParticipant(tripId: string, userId: string): Promise<boolean> {
     const trip = await this.prisma.trip.findUnique({
       where: { id: tripId },
@@ -153,7 +177,6 @@ export class TripsService {
     return trip.passengerId === userId || trip.driver?.userId === userId;
   }
 
-  /** يعيد السائق إلى حالة ONLINE ويحرّر مفتاح رحلته في Redis */
   private async releaseDriver(driverId: string | null): Promise<void> {
     if (!driverId) return;
     const driver = await this.prisma.driver
@@ -170,12 +193,6 @@ export class TripsService {
     }
   }
 
-  /**
-   * توزيع الأرباح عند اكتمال الرحلة (ذريًا ومرة واحدة):
-   * - تسجيل الدفعة (إن لم توجد) حسب طريقة دفع الرحلة.
-   * - حساب عمولة الشركة وصافي السائق.
-   * - إضافة صافي السائق إلى محفظته (منها يطلب السحب).
-   */
   private async settleCompletedTrip(tripId: string): Promise<void> {
     await this.financial.settleTrip(tripId);
   }

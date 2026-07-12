@@ -25,18 +25,27 @@ import {
 export class WithdrawalsController {
   constructor(private readonly withdrawals: WithdrawalsService) {}
 
-  /** السائق ينشئ طلب سحب */
   @Post()
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateWithdrawDto) {
     return this.withdrawals.createForDriver(user.userId, dto.amount, dto.note);
   }
 
-  /** قائمة الطلبات (للموظفين) */
   @UseGuards(RolesGuard)
   @Roles("STAFF")
   @Get()
-  findAll(@Query() q: PaginationDto, @Query("status") status?: WithdrawStatus) {
-    return this.withdrawals.findAll(q, status);
+  findAll(
+    @Query() q: PaginationDto,
+    @Query("status") status?: WithdrawStatus,
+    @Query("search") search?: string,
+  ) {
+    return this.withdrawals.findAll(q, status, search);
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles("STAFF")
+  @Get("summary")
+  summary(@Query("status") status?: WithdrawStatus, @Query("search") search?: string) {
+    return this.withdrawals.summary(status, search);
   }
 
   @UseGuards(RolesGuard)

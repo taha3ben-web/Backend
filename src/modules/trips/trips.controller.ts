@@ -4,6 +4,7 @@ import {
   Get,
   Param,
   Patch,
+  Post,
   Query,
   UseGuards,
 } from "@nestjs/common";
@@ -21,8 +22,13 @@ export class TripsController {
   constructor(private readonly trips: TripsService) {}
 
   @Get()
-  findAll(@Query() q: PaginationDto, @Query("status") status?: TripStatus) {
-    return this.trips.findAll(q, status);
+  findAll(
+    @Query() q: PaginationDto,
+    @Query("status") status?: TripStatus,
+    @Query("unsettledOnly") unsettledOnly?: string,
+    @Query("search") search?: string,
+  ) {
+    return this.trips.findAll(q, status, unsettledOnly === "true", search);
   }
 
   @Get(":id")
@@ -36,5 +42,10 @@ export class TripsController {
     @Body() body: { status: TripStatus; reason?: string },
   ) {
     return this.trips.changeStatus(id, body.status, body.reason);
+  }
+
+  @Post(":id/retry-settlement")
+  retrySettlement(@Param("id") id: string) {
+    return this.trips.retrySettlement(id);
   }
 }

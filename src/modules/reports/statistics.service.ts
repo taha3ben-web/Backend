@@ -11,7 +11,6 @@ export interface DateRange {
 export class StatisticsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  /** يحوّل نطاقًا اختياريًا إلى فلتر createdAt (افتراضي: آخر 30 يومًا) */
   range(r: DateRange): { gte: Date; lte: Date } {
     const to = r.to ? new Date(r.to) : new Date();
     const from = r.from
@@ -20,7 +19,6 @@ export class StatisticsService {
     return { gte: from, lte: to };
   }
 
-  /** ملخص عام للفترة */
   async overview(r: DateRange) {
     const createdAt = this.range(r);
     const [
@@ -49,7 +47,6 @@ export class StatisticsService {
     };
   }
 
-  /** ملخص الإيرادات والعمولات للفترة */
   async revenue(r: DateRange) {
     const createdAt = this.range(r);
     const [company, driver, payments, withdrawals] =
@@ -63,7 +60,7 @@ export class StatisticsService {
           _sum: { gross: true, commission: true, net: true },
         }),
         this.prisma.payment.aggregate({
-          where: { createdAt, status: "PAID" },
+          where: { createdAt, status: { in: ["PAID", "CAPTURED"] } },
           _sum: { amount: true },
         }),
         this.prisma.withdrawRequest.aggregate({
@@ -81,7 +78,92 @@ export class StatisticsService {
     };
   }
 
-  /** أفضل السائقين حسب صافي الأرباح في الفترة */
+  async paymentOps(r: DateRange) {
+    const createdAt = this.range(r);
+    const [totalCount, totalAmount, capturedAmount, pendingCount, failedCount, refundedCount] =
+      await this.prisma.$transaction([
+        this.prisma.payment.count({ where: { createdAt } }),
+        this.prisma.payment.aggregate({ where: { createdAt }, _sum: { amount: true } }),
+        this.prisma.payment.aggregate({
+          where: { createdAt, status: { in: ["CAPTURED", "PAID"] } },
+          _sum: { amount: true },
+        }),
+        this.prisma.payment.count({
+          where: { createdAt, status: { in: ["PENDING", "AUTHORIZED"] } },
+        }),
+        this.prisma.payment.count({ where: { createdAt, status: "FAILED" } }),
+        this.prisma.payment.count({ where: { createdAt, status: "REFUNDED" } }),
+      ]);
+
+    return {
+      totalCount,
+      totalAmount: this.num(totalAmount._sum.amount),
+      capturedAmount: this.num(capturedAmount._sum.amount),
+      pendingCount,
+      failedCount,
+      refundedCount,
+    };
+  }
+
+  async settlementOps(r: DateRange) {
+    const completedAt = this.range(r);
+    const [completedTrips, settledTrips, unsettledTrips, failedSettlements, attempts] =
+      await this.prisma.$transaction([
+        this.prisma.trip.count({ where: { completedAt, status: "COMPLETED" } }),
+        this.prisma.trip.count({
+          where: { completedAt, status: "COMPLETED", settledAt: { not: null } },
+        }),
+        this.prisma.trip.count({
+          where: { completedAt, status: "COMPLETED", settledAt: null },
+        }),
+        this.prisma.trip.count({
+          where: {
+            completedAt,
+            status: "COMPLETED",
+            settledAt: null,
+            settlementError: { not: null },
+          },
+        }),
+        this.prisma.trip.aggregate({
+          where: { completedAt, status: "COMPLETED" },
+          _sum: { settlementAttempts: true },
+        }),
+      ]);
+
+    return {
+      completedTrips,
+      settledTrips,
+      unsettledTrips,
+      failedSettlements,
+      settlementAttempts: Number(attempts._sum.settlementAttempts ?? 0),
+    };
+  }
+
+  async withdrawalOps(r: DateRange) {
+    const createdAt = this.range(r);
+    const [totalCount, totalAmount, pendingCount, approvedCount, paidCount, rejectedCount] =
+      await this.prisma.$transaction([
+        this.prisma.withdrawRequest.count({ where: { createdAt } }),
+        this.prisma.withdrawRequest.aggregate({
+          where: { createdAt },
+          _sum: { amount: true },
+        }),
+        this.prisma.withdrawRequest.count({ where: { createdAt, status: "PENDING" } }),
+        this.prisma.withdrawRequest.count({ where: { createdAt, status: "APPROVED" } }),
+        this.prisma.withdrawRequest.count({ where: { createdAt, status: "PAID" } }),
+        this.prisma.withdrawRequest.count({ where: { createdAt, status: "REJECTED" } }),
+      ]);
+
+    return {
+      totalCount,
+      totalAmount: this.num(totalAmount._sum.amount),
+      pendingCount,
+      approvedCount,
+      paidCount,
+      rejectedCount,
+    };
+  }
+
   async topDrivers(r: DateRange, limit = 10) {
     const createdAt = this.range(r);
     const grouped = await this.prisma.driverEarning.groupBy({
@@ -108,7 +190,6 @@ export class StatisticsService {
     }));
   }
 
-  /** أكثر المدن نشاطًا (عدد الرحلات) */
   async topCities(r: DateRange, limit = 10) {
     const createdAt = this.range(r);
     const grouped = await this.prisma.trip.groupBy({
@@ -133,7 +214,6 @@ export class StatisticsService {
     }));
   }
 
-  /** سلسلة زمنية يومية للرحلات والإيرادات (للرسوم البيانية) */
   async timeseries(r: DateRange) {
     const { gte, lte } = this.range(r);
     const rows = await this.prisma.$queryRaw<

@@ -5,11 +5,36 @@ import {
   IsOptional,
   IsPositive,
   IsString,
+  MaxLength,
   Min,
 } from "class-validator";
 import { PaymentMethod, PaymentStatus, WalletTxType } from "@prisma/client";
 
-/** تسجيل دفعة لرحلة (عادة عند إنهاء الرحلة) */
+/** إنشاء/تهيئة دفعة أو جلسة Checkout لرحلة */
+export class CreatePaymentCheckoutDto {
+  @IsEnum(PaymentMethod)
+  @IsOptional()
+  method?: PaymentMethod;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(100)
+  provider?: string;
+
+  @IsString()
+  @IsOptional()
+  reference?: string;
+
+  @IsString()
+  @IsOptional()
+  returnUrl?: string;
+
+  @IsString()
+  @IsOptional()
+  cancelUrl?: string;
+}
+
+/** تسجيل دفعة لرحلة (للتوافق الخلفي) */
 export class CreatePaymentDto {
   @IsString()
   declare tripId: string;
@@ -23,7 +48,7 @@ export class CreatePaymentDto {
   reference?: string;
 }
 
-/** تحديث حالة الدفعة (دفع/استرداد/فشل) */
+/** تحديث حالة الدفعة */
 export class UpdatePaymentStatusDto {
   @IsEnum(PaymentStatus)
   declare status: PaymentStatus;
@@ -31,6 +56,23 @@ export class UpdatePaymentStatusDto {
   @IsString()
   @IsOptional()
   reference?: string;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(500)
+  reason?: string;
+}
+
+/** تنفيذ إجراء تشغيلي على الدفعة */
+export class PaymentActionDto {
+  @IsString()
+  @IsOptional()
+  reference?: string;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(500)
+  reason?: string;
 }
 
 /** تعديل رصيد المحفظة يدويًا من اللوحة (إضافة/خصم) */

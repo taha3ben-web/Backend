@@ -29,8 +29,14 @@ export class PaymentsService {
     private readonly provider: PaymentProviderService,
   ) {}
 
-  async findAll(q: PaginationDto, status?: PaymentStatus) {
-    const where: Prisma.PaymentWhereInput = status ? { status } : {};
+  async findAll(
+    q: PaginationDto,
+    status?: PaymentStatus,
+    method?: PaymentMethod,
+    provider?: string,
+    search?: string,
+  ) {
+    const where = this.buildWhere(status, method, provider, search);
     const [items, total] = await this.prisma.$transaction([
       this.prisma.payment.findMany({
         where,
@@ -45,6 +51,54 @@ export class PaymentsService {
       this.prisma.payment.count({ where }),
     ]);
     return { items, total, page: q.page, limit: q.limit };
+  }
+
+  async summary(
+    status?: PaymentStatus,
+    method?: PaymentMethod,
+    provider?: string,
+    search?: string,
+  ) {
+    const where = this.buildWhere(status, method, provider, search);
+    const [totalCount, totalAmount, capturedAmount, pendingCount, failedCount, refundedCount] =
+      await this.prisma.$transaction([
+        this.prisma.payment.count({ where }),
+        this.prisma.payment.aggregate({ where, _sum: { amount: true } }),
+        this.prisma.payment.aggregate({
+          where: {
+            ...where,
+            status: { in: ["CAPTURED", "PAID"] },
+          },
+          _sum: { amount: true },
+        }),
+        this.prisma.payment.count({
+          where: {
+            ...where,
+            status: { in: ["PENDING", "AUTHORIZED"] },
+          },
+        }),
+        this.prisma.payment.count({
+          where: {
+            ...where,
+            status: "FAILED",
+          },
+        }),
+        this.prisma.payment.count({
+          where: {
+            ...where,
+            status: "REFUNDED",
+          },
+        }),
+      ]);
+
+    return {
+      totalCount,
+      totalAmount: Number(totalAmount._sum.amount ?? 0),
+      capturedAmount: Number(capturedAmount._sum.amount ?? 0),
+      pendingCount,
+      failedCount,
+      refundedCount,
+    };
   }
 
   async findOne(id: string) {
@@ -105,13 +159,13 @@ export class PaymentsService {
       };
     }
 
-    const method = dto.method ?? trip.paymentMethod;
+    const methodValue = dto.method ?? trip.paymentMethod;
     const amount = Number(trip.fare);
     const bootstrapPaymentId = existing?.id ?? `${tripId}-bootstrap`;
     const checkout = await this.provider.createCheckout({
       paymentId: bootstrapPaymentId,
       tripId,
-      method,
+      method: methodValue,
       amount,
       currency: trip.currency,
       provider: dto.provider,
@@ -127,31 +181,31 @@ export class PaymentsService {
           tripId,
           userId: trip.passengerId,
           amount,
-          method,
+          method: methodValue,
           provider: checkout.provider,
           providerPaymentId: checkout.providerPaymentId,
           providerStatus: checkout.providerStatus,
-          status: method === "WALLET" ? "PAID" : "PENDING",
+          status: methodValue === "WALLET" ? "PAID" : "PENDING",
           reference: dto.reference,
           metadata: checkout.payload,
-          authorizedAt: method === "WALLET" ? now : null,
-          capturedAt: method === "WALLET" ? now : null,
+          authorizedAt: methodValue === "WALLET" ? now : null,
+          capturedAt: methodValue === "WALLET" ? now : null,
         },
         update: {
           amount,
-          method,
+          method: methodValue,
           provider: checkout.provider,
           providerPaymentId: checkout.providerPaymentId,
           providerStatus: checkout.providerStatus,
           reference: dto.reference ?? undefined,
           metadata: checkout.payload,
-          status: method === "WALLET" ? "PAID" : "PENDING",
+          status: methodValue === "WALLET" ? "PAID" : "PENDING",
           statusReason: null,
           failedAt: null,
           canceledAt: null,
           refundedAt: null,
-          authorizedAt: method === "WALLET" ? now : null,
-          capturedAt: method === "WALLET" ? now : null,
+          authorizedAt: methodValue === "WALLET" ? now : null,
+          capturedAt: methodValue === "WALLET" ? now : null,
         },
         include: {
           user: { select: { name: true, phone: true } },
@@ -492,5 +546,30 @@ export class PaymentsService {
         payload: input.payload,
       },
     });
+  }
+
+  private buildWhere(
+    status?: PaymentStatus,
+    method?: PaymentMethod,
+    provider?: string,
+    search?: string,
+  ): Prisma.PaymentWhereInput {
+    return {
+      ...(status ? { status } : {}),
+      ...(method ? { method } : {}),
+      ...(provider ? { provider: { equals: provider, mode: "insensitive" } } : {}),
+      ...(search
+        ? {
+            OR: [
+              { reference: { contains: search, mode: "insensitive" } },
+              { providerPaymentId: { contains: search, mode: "insensitive" } },
+              { providerStatus: { contains: search, mode: "insensitive" } },
+              { user: { name: { contains: search, mode: "insensitive" } } },
+              { user: { phone: { contains: search, mode: "insensitive" } } },
+              { trip: { id: { contains: search, mode: "insensitive" } } },
+            ],
+          }
+        : {}),
+    };
   }
 }

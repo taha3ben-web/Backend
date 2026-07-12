@@ -22,7 +22,7 @@ CREATE TYPE "ActorKind" AS ENUM ('PASSENGER', 'DRIVER', 'SYSTEM', 'STAFF');
 
 CREATE TYPE "PaymentMethod" AS ENUM ('CASH', 'CARD', 'WALLET');
 
-CREATE TYPE "PaymentStatus" AS ENUM ('PENDING', 'PAID', 'FAILED', 'REFUNDED');
+CREATE TYPE "PaymentStatus" AS ENUM ('PENDING', 'AUTHORIZED', 'CAPTURED', 'PAID', 'FAILED', 'REFUNDED', 'CANCELED');
 
 CREATE TYPE "WithdrawStatus" AS ENUM ('PENDING', 'APPROVED', 'REJECTED', 'PAID');
 
@@ -227,8 +227,31 @@ CREATE TABLE "Payment" (
   "userId" TEXT NOT NULL,
   "amount" DECIMAL(12, 2) NOT NULL,
   "method" "PaymentMethod" DEFAULT 'CASH' NOT NULL,
+  "provider" TEXT DEFAULT 'manual' NOT NULL,
+  "providerPaymentId" TEXT,
+  "providerStatus" TEXT,
   "status" "PaymentStatus" DEFAULT 'PENDING' NOT NULL,
+  "statusReason" TEXT,
   "reference" TEXT,
+  "metadata" JSONB,
+  "authorizedAt" TIMESTAMP(3),
+  "capturedAt" TIMESTAMP(3),
+  "failedAt" TIMESTAMP(3),
+  "refundedAt" TIMESTAMP(3),
+  "canceledAt" TIMESTAMP(3),
+  "createdAt" TIMESTAMP(3) DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  "updatedAt" TIMESTAMP(3) NOT NULL
+);
+
+CREATE TABLE "PaymentEvent" (
+  "id" TEXT DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+  "paymentId" TEXT NOT NULL,
+  "type" TEXT NOT NULL,
+  "status" TEXT,
+  "provider" TEXT,
+  "idempotencyKey" TEXT UNIQUE,
+  "reference" TEXT,
+  "payload" JSONB,
   "createdAt" TIMESTAMP(3) DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 
@@ -702,6 +725,8 @@ ALTER TABLE "Payment" ADD CONSTRAINT "Payment_tripId_fkey" FOREIGN KEY ("tripId"
 
 ALTER TABLE "Payment" ADD CONSTRAINT "Payment_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE NO ACTION ON UPDATE CASCADE;
 
+ALTER TABLE "PaymentEvent" ADD CONSTRAINT "PaymentEvent_paymentId_fkey" FOREIGN KEY ("paymentId") REFERENCES "Payment" ("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
 ALTER TABLE "Wallet" ADD CONSTRAINT "Wallet_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 ALTER TABLE "WalletTransaction" ADD CONSTRAINT "WalletTransaction_walletId_fkey" FOREIGN KEY ("walletId") REFERENCES "Wallet" ("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -820,7 +845,13 @@ CREATE INDEX "DriverEarning_driverId_idx" ON "DriverEarning" ("driverId");
 
 CREATE INDEX "Payment_userId_idx" ON "Payment" ("userId");
 
+CREATE INDEX "Payment_provider_status_createdAt_idx" ON "Payment" ("provider", "status", "createdAt");
+
 CREATE INDEX "Payment_status_createdAt_idx" ON "Payment" ("status", "createdAt");
+
+CREATE INDEX "PaymentEvent_paymentId_createdAt_idx" ON "PaymentEvent" ("paymentId", "createdAt");
+
+CREATE INDEX "PaymentEvent_type_createdAt_idx" ON "PaymentEvent" ("type", "createdAt");
 
 CREATE INDEX "WalletTransaction_walletId_createdAt_idx" ON "WalletTransaction" ("walletId", "createdAt");
 

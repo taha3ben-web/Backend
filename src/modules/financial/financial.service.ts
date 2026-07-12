@@ -56,7 +56,11 @@ export class FinancialService {
         const gross = Number(trip.fare); const commission = Math.round(gross * 0.15 * 100) / 100; const net = Math.round((gross - commission) * 100) / 100;
         const driver = await this.userAccount(tx, trip.driver.userId, trip.currency);
         const revenue = await this.platformAccount(tx, "COMMISSION", "REVENUE", trip.currency);
-        const debit = trip.paymentMethod === "WALLET" ? await this.userAccount(tx, trip.passengerId, trip.currency) : await this.platformAccount(tx, "CASH_CLEARING", "ASSET", trip.currency);
+        const debit = trip.paymentMethod === "WALLET"
+          ? await this.userAccount(tx, trip.passengerId, trip.currency)
+          : trip.paymentMethod === "CARD"
+            ? await this.platformAccount(tx, "CARD_RECEIVABLE", "ASSET", trip.currency)
+            : await this.platformAccount(tx, "CASH_CLEARING", "ASSET", trip.currency);
         await this.post(tx, { command: "settleTrip", idempotencyKey: `trip:settle:${tripId}`, currency: trip.currency, referenceType: "TRIP", referenceId: tripId, lines: [
           { accountId: debit.id, direction: "DEBIT", amount: gross }, { accountId: driver.id, direction: "CREDIT", amount: net }, { accountId: revenue.id, direction: "CREDIT", amount: commission },
         ] });
@@ -87,7 +91,34 @@ export class FinancialService {
   }
 
   async releaseWithdrawal(id: string): Promise<void> { const original = await this.byKey(`withdrawal:reserve:${id}`); await this.reverseTransaction(original.id, `withdrawal:release:${id}`, "releaseWithdrawal"); }
-  async refundPayment(id: string): Promise<void> { const original = await this.prisma.ledgerTransaction.findFirst({ where: { referenceType: "PAYMENT", referenceId: id, status: "POSTED" }, orderBy: { createdAt: "desc" } }); if (!original) throw new NotFoundException("Posted payment ledger transaction not found"); await this.reverseTransaction(original.id, `payment:refund:${id}`, "refundPayment"); }
+  async captureCardPayment(paymentId: string): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      const payment = await tx.payment.findUnique({ where: { id: paymentId }, include: { trip: true } });
+      if (!payment || payment.method !== "CARD") throw new NotFoundException("Card payment not found");
+      if (!payment.trip || !payment.trip.settledAt) return;
+      const cash = await this.platformAccount(tx, "CASH", "ASSET", payment.trip.currency);
+      const receivable = await this.platformAccount(tx, "CARD_RECEIVABLE", "ASSET", payment.trip.currency);
+      await this.post(tx, {
+        command: "captureCardPayment",
+        idempotencyKey: `payment:capture:${paymentId}`,
+        currency: payment.trip.currency,
+        referenceType: "PAYMENT",
+        referenceId: paymentId,
+        lines: [
+          { accountId: cash.id, direction: "DEBIT", amount: Number(payment.amount) },
+          { accountId: receivable.id, direction: "CREDIT", amount: Number(payment.amount) },
+        ],
+      });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }
+  async refundPayment(id: string): Promise<void> {
+    const original = await this.prisma.ledgerTransaction.findFirst({ where: { referenceType: "PAYMENT", referenceId: id, status: "POSTED" }, orderBy: { createdAt: "desc" } });
+    if (!original) {
+      this.logger.warn(`No posted payment ledger transaction found for refund ${id}`);
+      return;
+    }
+    await this.reverseTransaction(original.id, `payment:refund:${id}`, "refundPayment");
+  }
   async completeWithdrawal(id: string): Promise<void> {
     await this.prisma.$transaction(async (tx) => { const request = await tx.withdrawRequest.findUnique({ where: { id } }); if (!request) throw new NotFoundException("Withdrawal not found"); const reserve = await this.platformAccount(tx, "WITHDRAWAL_RESERVE", "LIABILITY", "DZD"); const cash = await this.platformAccount(tx, "CASH", "ASSET", "DZD"); await this.post(tx, { command: "completeWithdrawal", idempotencyKey: `withdrawal:complete:${id}`, currency: "DZD", referenceType: "WITHDRAWAL", referenceId: id, lines: [{ accountId: reserve.id, direction: "DEBIT", amount: Number(request.amount) }, { accountId: cash.id, direction: "CREDIT", amount: Number(request.amount) }] }); });
   }
