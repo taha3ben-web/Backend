@@ -180,6 +180,420 @@ export class FinancialService {
       });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
+  async reconciliationSummary(from?: string, to?: string) {
+    const completedAt = this.buildRange(from, to);
+    const [
+      completedTrips,
+      settledTrips,
+      unsettledTrips,
+      missingPayments,
+      missingDriverEarnings,
+      missingCompanyEarnings,
+      cardPayments,
+      paidWithdrawals,
+      fundedRequests,
+      completedTransfers,
+    ] = await this.prisma.$transaction([
+      this.prisma.trip.count({ where: { status: "COMPLETED", completedAt } }),
+      this.prisma.trip.count({
+        where: { status: "COMPLETED", completedAt, settledAt: { not: null } },
+      }),
+      this.prisma.trip.count({
+        where: { status: "COMPLETED", completedAt, settledAt: null },
+      }),
+      this.prisma.trip.count({
+        where: { status: "COMPLETED", completedAt, payment: { is: null } },
+      }),
+      this.prisma.trip.count({
+        where: {
+          status: "COMPLETED",
+          completedAt,
+          settledAt: { not: null },
+          driverEarning: { is: null },
+        },
+      }),
+      this.prisma.trip.count({
+        where: {
+          status: "COMPLETED",
+          completedAt,
+          settledAt: { not: null },
+          companyEarning: { is: null },
+        },
+      }),
+      this.prisma.payment.findMany({
+        where: { createdAt: completedAt, method: "CARD", status: { in: ["CAPTURED", "PAID"] } },
+        select: { id: true },
+      }),
+      this.prisma.withdrawRequest.findMany({
+        where: { createdAt: completedAt, status: "PAID" },
+        select: { id: true },
+      }),
+      this.prisma.driverFundingRequest.findMany({
+        where: { createdAt: completedAt, status: "FUNDED" },
+        select: { id: true },
+      }),
+      this.prisma.driverTransfer.findMany({
+        where: { createdAt: completedAt, status: "COMPLETED" },
+        select: { id: true },
+      }),
+    ]);
+
+    const [paymentLedgerMismatch, withdrawalLedgerMismatch, fundingLedgerMismatch, transferLedgerMismatch] =
+      await Promise.all([
+        this.countMissingPostedReferences("PAYMENT", cardPayments.map((row) => row.id)),
+        this.countMissingPostedReferences("WITHDRAWAL", paidWithdrawals.map((row) => row.id)),
+        this.countMissingPostedReferences("DRIVER_FUNDING", fundedRequests.map((row) => row.id)),
+        this.countMissingPostedReferences("DRIVER_TRANSFER", completedTransfers.map((row) => row.id)),
+      ]);
+
+    return {
+      completedTrips,
+      settledTrips,
+      unsettledTrips,
+      missingPayments,
+      missingDriverEarnings,
+      missingCompanyEarnings,
+      paymentLedgerMismatch,
+      withdrawalLedgerMismatch,
+      fundingLedgerMismatch,
+      transferLedgerMismatch,
+    };
+  }
+
+  async reconciliationItems(
+    page: number,
+    limit: number,
+    type?: string,
+    search?: string,
+    from?: string,
+    to?: string,
+  ) {
+    const completedAt = this.buildRange(from, to);
+    const [
+      unsettledTrips,
+      tripsMissingPayment,
+      tripsMissingDriverEarning,
+      tripsMissingCompanyEarning,
+      cardPayments,
+      paidWithdrawals,
+      fundedRequests,
+      completedTransfers,
+    ] = await this.prisma.$transaction([
+      this.prisma.trip.findMany({
+        where: { status: "COMPLETED", completedAt, settledAt: null },
+        take: 50,
+        orderBy: { completedAt: "desc" },
+        include: {
+          passenger: { select: { name: true, phone: true } },
+          driver: { include: { user: { select: { name: true, phone: true } } } },
+        },
+      }),
+      this.prisma.trip.findMany({
+        where: { status: "COMPLETED", completedAt, payment: { is: null } },
+        take: 50,
+        orderBy: { completedAt: "desc" },
+        include: {
+          passenger: { select: { name: true, phone: true } },
+          driver: { include: { user: { select: { name: true, phone: true } } } },
+        },
+      }),
+      this.prisma.trip.findMany({
+        where: {
+          status: "COMPLETED",
+          completedAt,
+          settledAt: { not: null },
+          driverEarning: { is: null },
+        },
+        take: 50,
+        orderBy: { completedAt: "desc" },
+        include: {
+          passenger: { select: { name: true, phone: true } },
+          driver: { include: { user: { select: { name: true, phone: true } } } },
+        },
+      }),
+      this.prisma.trip.findMany({
+        where: {
+          status: "COMPLETED",
+          completedAt,
+          settledAt: { not: null },
+          companyEarning: { is: null },
+        },
+        take: 50,
+        orderBy: { completedAt: "desc" },
+        include: {
+          passenger: { select: { name: true, phone: true } },
+          driver: { include: { user: { select: { name: true, phone: true } } } },
+        },
+      }),
+      this.prisma.payment.findMany({
+        where: { createdAt: completedAt, method: "CARD", status: { in: ["CAPTURED", "PAID"] } },
+        take: 50,
+        orderBy: { createdAt: "desc" },
+        include: {
+          user: { select: { name: true, phone: true } },
+          trip: { select: { id: true, status: true } },
+        },
+      }),
+      this.prisma.withdrawRequest.findMany({
+        where: { createdAt: completedAt, status: "PAID" },
+        take: 50,
+        orderBy: { processedAt: "desc" },
+        include: { user: { select: { name: true, phone: true } } },
+      }),
+      this.prisma.driverFundingRequest.findMany({
+        where: { createdAt: completedAt, status: "FUNDED" },
+        take: 50,
+        orderBy: { fundedAt: "desc" },
+        include: {
+          driver: { include: { user: { select: { name: true, phone: true } } } },
+          requestedBy: { select: { name: true, phone: true } },
+        },
+      }),
+      this.prisma.driverTransfer.findMany({
+        where: { createdAt: completedAt, status: "COMPLETED" },
+        take: 50,
+        orderBy: { completedAt: "desc" },
+        include: {
+          fromDriver: { include: { user: { select: { name: true, phone: true } } } },
+          toDriver: { include: { user: { select: { name: true, phone: true } } } },
+        },
+      }),
+    ]);
+
+    const [paymentRefs, withdrawalRefs, fundingRefs, transferRefs] = await Promise.all([
+      this.postedReferenceSet("PAYMENT", cardPayments.map((row) => row.id)),
+      this.postedReferenceSet("WITHDRAWAL", paidWithdrawals.map((row) => row.id)),
+      this.postedReferenceSet("DRIVER_FUNDING", fundedRequests.map((row) => row.id)),
+      this.postedReferenceSet("DRIVER_TRANSFER", completedTransfers.map((row) => row.id)),
+    ]);
+
+    const items = [
+      ...unsettledTrips.map((trip) => ({
+        id: `UNSETTLED_TRIP:${trip.id}`,
+        type: "UNSETTLED_TRIP",
+        referenceId: trip.id,
+        title: "رحلة مكتملة غير مسوّاة",
+        detail: `${trip.passenger?.name ?? "-"} / ${trip.driver?.user?.name ?? "-"}`,
+        createdAt: trip.completedAt ?? trip.createdAt,
+        severity: "high" as const,
+      })),
+      ...tripsMissingPayment.map((trip) => ({
+        id: `MISSING_PAYMENT:${trip.id}`,
+        type: "MISSING_PAYMENT",
+        referenceId: trip.id,
+        title: "رحلة بلا سجل دفع",
+        detail: `${trip.paymentMethod} / ${trip.passenger?.name ?? "-"}`,
+        createdAt: trip.completedAt ?? trip.createdAt,
+        severity: "high" as const,
+      })),
+      ...tripsMissingDriverEarning.map((trip) => ({
+        id: `MISSING_DRIVER_EARNING:${trip.id}`,
+        type: "MISSING_DRIVER_EARNING",
+        referenceId: trip.id,
+        title: "رحلة بلا مستحق سائق",
+        detail: `${trip.driver?.user?.name ?? "-"} / ${trip.passenger?.name ?? "-"}`,
+        createdAt: trip.completedAt ?? trip.createdAt,
+        severity: "medium" as const,
+      })),
+      ...tripsMissingCompanyEarning.map((trip) => ({
+        id: `MISSING_COMPANY_EARNING:${trip.id}`,
+        type: "MISSING_COMPANY_EARNING",
+        referenceId: trip.id,
+        title: "رحلة بلا قيد إيراد شركة",
+        detail: `${trip.driver?.user?.name ?? "-"} / ${trip.passenger?.name ?? "-"}`,
+        createdAt: trip.completedAt ?? trip.createdAt,
+        severity: "medium" as const,
+      })),
+      ...cardPayments
+        .filter((payment) => !paymentRefs.has(payment.id))
+        .map((payment) => ({
+          id: `PAYMENT_LEDGER_GAP:${payment.id}`,
+          type: "PAYMENT_LEDGER_GAP",
+          referenceId: payment.id,
+          title: "دفعة بطاقة بلا قيد تحصيل",
+          detail: `${payment.user.name} / ${payment.trip?.id ?? "-"}`,
+          createdAt: payment.createdAt,
+          severity: "high" as const,
+        })),
+      ...paidWithdrawals
+        .filter((row) => !withdrawalRefs.has(row.id))
+        .map((row) => ({
+          id: `WITHDRAWAL_LEDGER_GAP:${row.id}`,
+          type: "WITHDRAWAL_LEDGER_GAP",
+          referenceId: row.id,
+          title: "سحب مدفوع بلا قيد دفتر",
+          detail: `${row.user.name} / ${Number(row.amount)} DZD`,
+          createdAt: row.processedAt ?? row.createdAt,
+          severity: "high" as const,
+        })),
+      ...fundedRequests
+        .filter((row) => !fundingRefs.has(row.id))
+        .map((row) => ({
+          id: `FUNDING_LEDGER_GAP:${row.id}`,
+          type: "FUNDING_LEDGER_GAP",
+          referenceId: row.id,
+          title: "شحن منفذ بلا قيد دفتر",
+          detail: `${row.driver.user.name} / ${Number(row.amount)} DZD`,
+          createdAt: row.fundedAt ?? row.createdAt,
+          severity: "medium" as const,
+        })),
+      ...completedTransfers
+        .filter((row) => !transferRefs.has(row.id))
+        .map((row) => ({
+          id: `TRANSFER_LEDGER_GAP:${row.id}`,
+          type: "TRANSFER_LEDGER_GAP",
+          referenceId: row.id,
+          title: "تحويل مكتمل بلا قيد دفتر",
+          detail: `${row.fromDriver.user.name} → ${row.toDriver.user.name}`,
+          createdAt: row.completedAt ?? row.createdAt,
+          severity: "medium" as const,
+        })),
+    ];
+
+    const q = search?.trim().toLowerCase();
+    const filtered = items
+      .filter((item) => (type ? item.type === type : true))
+      .filter((item) => {
+        if (!q) return true;
+        return [item.referenceId, item.title, item.detail, item.type]
+          .join(" ")
+          .toLowerCase()
+          .includes(q);
+      })
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+    return {
+      items: filtered.slice((page - 1) * limit, (page - 1) * limit + limit),
+      total: filtered.length,
+      page,
+      limit,
+    };
+  }
+
+  async settlementQueue(
+    page: number,
+    limit: number,
+    onlyFailed = false,
+    search?: string,
+    from?: string,
+    to?: string,
+  ) {
+    const completedAt = this.buildRange(from, to);
+    const where: Prisma.TripWhereInput = {
+      status: "COMPLETED",
+      settledAt: null,
+      completedAt,
+      ...(onlyFailed ? { settlementError: { not: null } } : {}),
+      ...(search
+        ? {
+            OR: [
+              { id: { contains: search, mode: "insensitive" } },
+              { passenger: { name: { contains: search, mode: "insensitive" } } },
+              { passenger: { phone: { contains: search, mode: "insensitive" } } },
+              { driver: { user: { name: { contains: search, mode: "insensitive" } } } },
+              { driver: { user: { phone: { contains: search, mode: "insensitive" } } } },
+            ],
+          }
+        : {}),
+    };
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.trip.findMany({
+        where,
+        include: {
+          passenger: { select: { name: true, phone: true } },
+          driver: { include: { user: { select: { name: true, phone: true } } } },
+          payment: { select: { method: true, status: true } },
+        },
+        orderBy: [{ settlementAttempts: "desc" }, { completedAt: "asc" }],
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.trip.count({ where }),
+    ]);
+    return { items, total, page, limit };
+  }
+
+  async runSettlementBatch(
+    limit = 25,
+    onlyFailed = false,
+    search?: string,
+    from?: string,
+    to?: string,
+  ) {
+    const completedAt = this.buildRange(from, to);
+    const trips = await this.prisma.trip.findMany({
+      where: {
+        status: "COMPLETED",
+        settledAt: null,
+        completedAt,
+        ...(onlyFailed ? { settlementError: { not: null } } : {}),
+        ...(search
+          ? {
+              OR: [
+                { id: { contains: search, mode: "insensitive" } },
+                { passenger: { name: { contains: search, mode: "insensitive" } } },
+                { passenger: { phone: { contains: search, mode: "insensitive" } } },
+                { driver: { user: { name: { contains: search, mode: "insensitive" } } } },
+                { driver: { user: { phone: { contains: search, mode: "insensitive" } } } },
+              ],
+            }
+          : {}),
+      },
+      orderBy: [{ settlementAttempts: "desc" }, { completedAt: "asc" }],
+      select: { id: true },
+      take: limit,
+    });
+
+    const errors: Array<{ tripId: string; error: string }> = [];
+    let succeeded = 0;
+    for (const trip of trips) {
+      try {
+        await this.settleTrip(trip.id);
+        succeeded += 1;
+      } catch (error) {
+        errors.push({
+          tripId: trip.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    return {
+      requested: limit,
+      processed: trips.length,
+      succeeded,
+      failed: errors.length,
+      errors,
+    };
+  }
+
+  private buildRange(from?: string, to?: string) {
+    const lte = to ? new Date(to) : new Date();
+    const gte = from
+      ? new Date(from)
+      : new Date(lte.getTime() - 30 * 24 * 60 * 60 * 1000);
+    return { gte, lte };
+  }
+
+  private async postedReferenceSet(referenceType: string, ids: string[]) {
+    if (ids.length === 0) return new Set<string>();
+    const rows = await this.prisma.ledgerTransaction.findMany({
+      where: {
+        referenceType,
+        referenceId: { in: ids },
+        status: "POSTED",
+      },
+      select: { referenceId: true },
+    });
+    return new Set(rows.map((row) => row.referenceId).filter((value): value is string => !!value));
+  }
+
+  private async countMissingPostedReferences(referenceType: string, ids: string[]) {
+    if (ids.length === 0) return 0;
+    const refs = await this.postedReferenceSet(referenceType, ids);
+    return ids.filter((id) => !refs.has(id)).length;
+  }
+
   private async byKey(key: string) { const row = await this.prisma.ledgerTransaction.findUnique({ where: { idempotencyKey: key } }); if (!row || row.status !== "POSTED") throw new NotFoundException("Posted ledger transaction not found"); return row; }
   async reverseTransaction(id: string, key: string, command = "reverseTransaction"): Promise<void> {
     await this.prisma.$transaction(async (tx) => { const original = await tx.ledgerTransaction.findUnique({ where: { id }, include: { entries: true, reversedBy: true } }); if (!original || original.status !== "POSTED") throw new BadRequestException("Only posted transactions can be reversed"); if (original.reversedBy) return; await this.post(tx, { command, idempotencyKey: key, currency: original.currency, referenceType: original.referenceType ?? undefined, referenceId: original.referenceId ?? undefined, reversalOfId: original.id, lines: original.entries.map((entry) => ({ accountId: entry.accountId, direction: entry.direction === "DEBIT" ? "CREDIT" : "DEBIT", amount: Number(entry.amount) })) }); }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
