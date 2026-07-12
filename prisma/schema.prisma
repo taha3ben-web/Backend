@@ -15,6 +15,7 @@ enum UserType {
   PASSENGER
   DRIVER
   STAFF
+  AGENT
 }
 
 enum UserStatus {
@@ -140,6 +141,12 @@ enum LedgerEntryDirection {
   CREDIT
 }
 
+enum AgentStatus {
+  ACTIVE
+  SUSPENDED
+  INVITED
+}
+
 
 enum DiscountType {
   PERCENT
@@ -191,6 +198,7 @@ model User {
   updatedAt    DateTime   @updatedAt
 
   driver             Driver?
+  agentProfile       AgentProfile?
   wallet             Wallet?
   financialParty     FinancialParty?
   passengerTrips     Trip[]             @relation("PassengerTrips")
@@ -211,6 +219,7 @@ model User {
   activityLogs       ActivityLog[]
   emergencyContacts  EmergencyContact[]
   reviewedDocuments  DriverDocument[]   @relation("DocumentReviewer")
+  createdAgents      AgentProfile[]     @relation("AgentCreator")
 
   @@index([type])
   @@index([status])
@@ -645,6 +654,25 @@ model Complaint {
 }
 
 // ---------- RBAC ----------
+model AgentProfile {
+  id          String      @id @default(uuid())
+  userId      String      @unique
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  agentCode   String      @unique
+  status      AgentStatus @default(ACTIVE)
+  cityId      String?
+  city        City?       @relation(fields: [cityId], references: [id], onDelete: SetNull)
+  notes       String?
+  createdById String?
+  createdBy   User?       @relation("AgentCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  lastLoginAt DateTime?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@index([status, cityId])
+  @@index([createdById])
+}
+
 model Role {
   id          String           @id @default(uuid())
   name        String           @unique
@@ -685,6 +713,7 @@ model City {
   zones        Zone[]
   pricingRules PricingRule[]
   drivers      Driver[]
+  agents       AgentProfile[]
   trips        Trip[]
 }
 

@@ -1,6 +1,6 @@
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
-CREATE TYPE "UserType" AS ENUM ('PASSENGER', 'DRIVER', 'STAFF');
+CREATE TYPE "UserType" AS ENUM ('PASSENGER', 'DRIVER', 'STAFF', 'AGENT');
 
 CREATE TYPE "UserStatus" AS ENUM ('ACTIVE', 'SUSPENDED', 'BANNED', 'PENDING');
 
@@ -35,6 +35,8 @@ CREATE TYPE "FinancialAccountType" AS ENUM ('ASSET', 'LIABILITY', 'EQUITY', 'REV
 CREATE TYPE "LedgerTransactionStatus" AS ENUM ('PENDING', 'POSTED', 'FAILED', 'REVERSED', 'CANCELLED');
 
 CREATE TYPE "LedgerEntryDirection" AS ENUM ('DEBIT', 'CREDIT');
+
+CREATE TYPE "AgentStatus" AS ENUM ('ACTIVE', 'SUSPENDED', 'INVITED');
 
 CREATE TYPE "DiscountType" AS ENUM ('PERCENT', 'FIXED');
 
@@ -364,6 +366,19 @@ CREATE TABLE "Complaint" (
   "resolvedAt" TIMESTAMP(3)
 );
 
+CREATE TABLE "AgentProfile" (
+  "id" TEXT DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+  "userId" TEXT NOT NULL UNIQUE,
+  "agentCode" TEXT NOT NULL UNIQUE,
+  "status" "AgentStatus" DEFAULT 'ACTIVE' NOT NULL,
+  "cityId" TEXT,
+  "notes" TEXT,
+  "createdById" TEXT,
+  "lastLoginAt" TIMESTAMP(3),
+  "createdAt" TIMESTAMP(3) DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  "updatedAt" TIMESTAMP(3) NOT NULL
+);
+
 CREATE TABLE "Role" (
   "id" TEXT DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
   "name" TEXT NOT NULL UNIQUE,
@@ -679,6 +694,12 @@ CREATE TABLE "Advertisement" (
 
 ALTER TABLE "User" ADD CONSTRAINT "User_staffRoleId_fkey" FOREIGN KEY ("staffRoleId") REFERENCES "Role" ("id") ON DELETE NO ACTION ON UPDATE CASCADE;
 
+ALTER TABLE "AgentProfile" ADD CONSTRAINT "AgentProfile_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+ALTER TABLE "AgentProfile" ADD CONSTRAINT "AgentProfile_cityId_fkey" FOREIGN KEY ("cityId") REFERENCES "City" ("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+ALTER TABLE "AgentProfile" ADD CONSTRAINT "AgentProfile_createdById_fkey" FOREIGN KEY ("createdById") REFERENCES "User" ("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
 ALTER TABLE "Driver" ADD CONSTRAINT "Driver_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 ALTER TABLE "Driver" ADD CONSTRAINT "Driver_cityId_fkey" FOREIGN KEY ("cityId") REFERENCES "City" ("id") ON DELETE NO ACTION ON UPDATE CASCADE;
@@ -842,6 +863,10 @@ CREATE INDEX "LedgerEntry_accountId_createdAt_idx" ON "LedgerEntry" ("accountId"
 CREATE INDEX "LedgerEntry_transactionId_idx" ON "LedgerEntry" ("transactionId");
 
 CREATE INDEX "DriverEarning_driverId_idx" ON "DriverEarning" ("driverId");
+
+CREATE INDEX "AgentProfile_status_cityId_idx" ON "AgentProfile" ("status", "cityId");
+
+CREATE INDEX "AgentProfile_createdById_idx" ON "AgentProfile" ("createdById");
 
 CREATE INDEX "Payment_userId_idx" ON "Payment" ("userId");
 
