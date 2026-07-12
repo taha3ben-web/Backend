@@ -111,6 +111,27 @@ export class FinancialService {
       });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
+  async refundPaymentAmount(paymentId: string, amount: number, idempotencyKey: string): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      const payment = await tx.payment.findUnique({ where: { id: paymentId }, include: { trip: true } });
+      if (!payment || payment.method !== "CARD") throw new NotFoundException("Card payment not found");
+      if (!Number.isFinite(amount) || amount <= 0 || amount > Number(payment.amount)) throw new BadRequestException("Invalid refund amount");
+      const cash = await this.platformAccount(tx, "CASH", "ASSET", payment.trip.currency);
+      const receivable = await this.platformAccount(tx, "CARD_RECEIVABLE", "ASSET", payment.trip.currency);
+      await this.post(tx, {
+        command: "refundCardPayment",
+        idempotencyKey: `payment:refund:${idempotencyKey}`,
+        currency: payment.trip.currency,
+        referenceType: "PAYMENT_REFUND",
+        referenceId: paymentId,
+        lines: [
+          { accountId: receivable.id, direction: "DEBIT", amount },
+          { accountId: cash.id, direction: "CREDIT", amount },
+        ],
+      });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }
+
   async refundPayment(id: string): Promise<void> {
     const original = await this.prisma.ledgerTransaction.findFirst({ where: { referenceType: "PAYMENT", referenceId: id, status: "POSTED" }, orderBy: { createdAt: "desc" } });
     if (!original) {
@@ -511,6 +532,20 @@ export class FinancialService {
       this.prisma.trip.count({ where }),
     ]);
     return { items, total, page, limit };
+  }
+
+  async settlementDeadLetter(page: number, limit: number) {
+    const where: Prisma.TripWhereInput = { status: "COMPLETED", settledAt: null, settlementAttempts: { gte: 20 } };
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.trip.findMany({ where, include: { passenger: { select: { name: true, phone: true } }, driver: { include: { user: { select: { name: true, phone: true } } } }, payment: true }, orderBy: { completedAt: "asc" }, skip: (page - 1) * limit, take: limit }),
+      this.prisma.trip.count({ where }),
+    ]);
+    return { items, total, page, limit };
+  }
+
+  async requeueSettlement(tripId: string): Promise<void> {
+    const result = await this.prisma.trip.updateMany({ where: { id: tripId, status: "COMPLETED", settledAt: null, settlementAttempts: { gte: 20 } }, data: { settlementAttempts: 0, settlementError: null } });
+    if (result.count !== 1) throw new NotFoundException("Dead-letter settlement not found");
   }
 
   async runSettlementBatch(

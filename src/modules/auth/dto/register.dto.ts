@@ -1,10 +1,13 @@
+import { Type } from "class-transformer";
 import {
   IsEmail,
   IsEnum,
   IsOptional,
   IsString,
   MinLength,
+  ValidateNested,
 } from "class-validator";
+import { DeviceContextDto } from "./device-context.dto";
 
 export enum RegisterRole {
   PASSENGER = "PASSENGER",
@@ -28,4 +31,9 @@ export class RegisterDto {
   @IsOptional()
   @IsEmail()
   email?: string;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => DeviceContextDto)
+  device?: DeviceContextDto;
 }

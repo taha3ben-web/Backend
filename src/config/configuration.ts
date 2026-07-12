@@ -24,6 +24,12 @@ export default () => ({
     storageBucket: process.env.GCS_BUCKET ?? "",
     useSecretManager: process.env.USE_SECRET_MANAGER === "true",
   },
+  payments: {
+    defaultProvider: process.env.PAYMENT_DEFAULT_PROVIDER ?? "",
+    gatewayBaseUrl: process.env.PAYMENT_GATEWAY_BASE_URL ?? "",
+    apiKey: process.env.PAYMENT_GATEWAY_API_KEY ?? "",
+    webhookSecret: process.env.PAYMENT_WEBHOOK_SECRET ?? "",
+  },
   notifications: {
     // Push — Firebase Cloud Messaging (legacy HTTP API)
     fcmServerKey: process.env.FCM_SERVER_KEY ?? "",

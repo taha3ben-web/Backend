@@ -67,16 +67,16 @@ export class PaymentsController {
 
   @Post(":id/capture")
   capture(@Param("id") id: string, @Body() dto: PaymentActionDto) {
-    return this.payments.capture(id, dto.reference, dto.reason);
+    return this.payments.capture(id, dto.idempotencyKey, dto.reference, dto.reason);
   }
 
   @Post(":id/refund")
   refund(@Param("id") id: string, @Body() dto: PaymentActionDto) {
-    return this.payments.refund(id, dto.reference, dto.reason);
+    return this.payments.refund(id, dto.idempotencyKey, dto.amount, dto.reference, dto.reason);
   }
 
   @Post(":id/cancel")
   cancel(@Param("id") id: string, @Body() dto: PaymentActionDto) {
-    return this.payments.cancel(id, dto.reference, dto.reason);
+    return this.payments.cancel(id, dto.idempotencyKey, dto.reference, dto.reason);
   }
 }

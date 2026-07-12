@@ -13,27 +13,21 @@ import {
 export class SessionsController {
   constructor(private readonly sessions: SessionsService) {}
 
-  /** جلسات المستخدم الحالي */
   @Get("me")
   mine(@CurrentUser() user: AuthUser) {
     return this.sessions.list(user.userId);
   }
 
-  /** إنهاء جلسة واحدة */
   @Delete(":id")
   revoke(@CurrentUser() user: AuthUser, @Param("id") id: string) {
     return this.sessions.revoke(user.userId, id);
   }
 
-  /** إنهاء كل الجلسات */
   @Delete()
   revokeAll(@CurrentUser() user: AuthUser) {
-    return this.sessions.revokeAll(user.userId);
+    return this.sessions.revokeAll(user.userId, user.sessionId);
   }
 
-  // ---------- إدارة (STAFF) ----------
-
-  /** جلسات مستخدم معيّن */
   @UseGuards(RolesGuard)
   @Roles("STAFF")
   @Get("user/:userId")

@@ -5,6 +5,7 @@ import {
   Get,
   Param,
   Post,
+  Put,
   Query,
   UseGuards,
 } from "@nestjs/common";
@@ -13,8 +14,11 @@ import { NotificationsService } from "./notifications.service";
 import { DeviceTokensService } from "./device-tokens.service";
 import { PaginationDto } from "../../common/dto/pagination.dto";
 import {
+  ListNotificationsQueryDto,
   SendNotificationDto,
   RegisterDeviceDto,
+  UpsertNotificationTemplateDto,
+  UpdateNotificationTemplateDto,
 } from "./dto/notifications.dto";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
 import { RolesGuard } from "../../common/guards/roles.guard";
@@ -32,7 +36,6 @@ export class NotificationsController {
     private readonly deviceTokens: DeviceTokensService,
   ) {}
 
-  /** تسجيل توكن جهاز (أي مستخدم) */
   @Post("devices")
   registerDevice(
     @CurrentUser() user: AuthUser,
@@ -41,13 +44,11 @@ export class NotificationsController {
     return this.deviceTokens.register(user.userId, dto.token, dto.platform);
   }
 
-  /** إزالة توكن جهاز */
   @Delete("devices/:token")
   removeDevice(@Param("token") token: string) {
     return this.deviceTokens.remove(token);
   }
 
-  /** إشعارات المستخدم الحالي */
   @Get("me")
   myNotifications(@CurrentUser() user: AuthUser, @Query() q: PaginationDto) {
     const targets: NotificationTarget[] =
@@ -59,9 +60,37 @@ export class NotificationsController {
     return this.notifications.forUser(user.userId, targets, q);
   }
 
-  // ---------- إدارة (STAFF) ----------
+  @UseGuards(RolesGuard)
+  @Roles("STAFF")
+  @Get("templates")
+  templates() {
+    return this.notifications.listTemplates();
+  }
 
-  /** إرسال إشعار (للجميع/السائقين/الركاب/مستخدم) — فوري أو مجدول */
+  @UseGuards(RolesGuard)
+  @Roles("STAFF")
+  @Post("templates")
+  upsertTemplate(@Body() dto: UpsertNotificationTemplateDto) {
+    return this.notifications.upsertTemplate(dto);
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles("STAFF")
+  @Put("templates/:key")
+  updateTemplate(
+    @Param("key") key: string,
+    @Body() dto: UpdateNotificationTemplateDto,
+  ) {
+    return this.notifications.updateTemplate(key, dto);
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles("STAFF")
+  @Delete("templates/:key")
+  removeTemplate(@Param("key") key: string) {
+    return this.notifications.removeTemplate(key);
+  }
+
   @UseGuards(RolesGuard)
   @Roles("STAFF")
   @Post()
@@ -69,18 +98,13 @@ export class NotificationsController {
     return this.notifications.send(dto);
   }
 
-  /** سجل الإشعارات */
   @UseGuards(RolesGuard)
   @Roles("STAFF")
   @Get()
-  findAll(
-    @Query() q: PaginationDto,
-    @Query("target") target?: NotificationTarget,
-  ) {
-    return this.notifications.findAll(q, target);
+  findAll(@Query() q: ListNotificationsQueryDto) {
+    return this.notifications.findAll(q);
   }
 
-  /** إلغاء إشعار مجدول لم يُرسل بعد */
   @UseGuards(RolesGuard)
   @Roles("STAFF")
   @Delete(":id")

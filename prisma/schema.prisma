@@ -186,6 +186,14 @@ enum NotificationChannel {
   IN_APP
 }
 
+enum NotificationDeliveryStatus {
+  PENDING
+  PROCESSING
+  SENT
+  FAILED
+  CANCELED
+}
+
 enum TicketStatus {
   OPEN
   PENDING
@@ -525,6 +533,7 @@ model Payment {
   capturedAt        DateTime?
   failedAt          DateTime?
   refundedAt        DateTime?
+  refundedAmount    Decimal        @default(0) @db.Decimal(12, 2)
   canceledAt        DateTime?
   createdAt         DateTime       @default(now())
   updatedAt         DateTime       @updatedAt
@@ -674,20 +683,45 @@ model PromoCode {
 
 // ---------- Communication ----------
 model Notification {
-  id          String              @id @default(uuid())
-  target      NotificationTarget  @default(USER)
-  channel     NotificationChannel @default(PUSH)
-  userId      String?
-  user        User?               @relation(fields: [userId], references: [id])
-  title       String
-  body        String
-  data        Json?
-  scheduledAt DateTime?
-  sentAt      DateTime?
-  createdAt   DateTime            @default(now())
+  id             String                     @id @default(uuid())
+  target         NotificationTarget         @default(USER)
+  channel        NotificationChannel        @default(PUSH)
+  status         NotificationDeliveryStatus @default(PENDING)
+  userId         String?
+  user           User?                      @relation(fields: [userId], references: [id])
+  title          String
+  body           String
+  templateKey    String?
+  variables      Json?
+  data           Json?
+  scheduledAt    DateTime?
+  nextAttemptAt  DateTime?
+  sentAt         DateTime?
+  lastAttemptAt  DateTime?
+  lastError      String?
+  attempts       Int                        @default(0)
+  maxAttempts    Int                        @default(5)
+  sentCount      Int                        @default(0)
+  failedCount    Int                        @default(0)
+  idempotencyKey String?                    @unique
+  createdAt      DateTime                   @default(now())
 
   @@index([userId])
   @@index([target])
+  @@index([status, nextAttemptAt])
+  @@index([templateKey])
+}
+
+model NotificationTemplate {
+  id            String              @id @default(uuid())
+  key           String              @unique
+  name          String
+  channel       NotificationChannel @default(PUSH)
+  titleTemplate String
+  bodyTemplate  String
+  enabled       Boolean             @default(true)
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
 }
 
 model SupportTicket {
@@ -905,29 +939,43 @@ model DeviceToken {
 }
 
 model RefreshToken {
-  id        String   @id @default(uuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  tokenHash String
-  revoked   Boolean  @default(false)
-  expiresAt DateTime?
-  createdAt DateTime @default(now())
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessionId  String?
+  session    Session? @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  tokenHash  String
+  revoked    Boolean  @default(false)
+  expiresAt  DateTime?
+  lastUsedAt DateTime?
+  createdAt  DateTime @default(now())
 
   @@index([userId])
+  @@index([sessionId])
   @@index([userId, revoked])
   @@index([expiresAt])
 }
 
 model Session {
-  id         String   @id @default(uuid())
-  userId     String
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  ip         String?
-  userAgent  String?
-  lastSeenAt DateTime @default(now())
-  createdAt  DateTime @default(now())
+  id             String         @id @default(uuid())
+  userId         String
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ip             String?
+  userAgent      String?
+  deviceKey      String?
+  installationId String?
+  platform       String?
+  deviceName     String?
+  appVersion     String?
+  revokedAt      DateTime?
+  revokeReason   String?
+  lastSeenAt     DateTime       @default(now())
+  createdAt      DateTime       @default(now())
+  refreshTokens  RefreshToken[]
 
   @@index([userId])
+  @@index([revokedAt])
+  @@index([deviceKey])
 }
 
 model AuditLog {

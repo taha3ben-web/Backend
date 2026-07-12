@@ -86,6 +86,16 @@ export class FinancialController {
     );
   }
 
+  @Get("settlement/dead-letter")
+  deadLetter(@Query("page") page = "1", @Query("limit") limit = "20") {
+    return this.financial.settlementDeadLetter(Math.max(1, Number(page) || 1), Math.min(100, Math.max(1, Number(limit) || 20)));
+  }
+
+  @Post("settlement/dead-letter/requeue")
+  requeue(@Body() body: { tripId: string }) {
+    return this.financial.requeueSettlement(body.tripId);
+  }
+
   @Post("settlement/run")
   runSettlement(
     @Body()
