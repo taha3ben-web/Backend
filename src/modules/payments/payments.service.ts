@@ -187,7 +187,7 @@ export class PaymentsService {
           providerStatus: checkout.providerStatus,
           status: methodValue === "WALLET" ? "PAID" : "PENDING",
           reference: dto.reference,
-          metadata: checkout.payload,
+          metadata: this.toJsonValue(checkout.payload),
           authorizedAt: methodValue === "WALLET" ? now : null,
           capturedAt: methodValue === "WALLET" ? now : null,
         },
@@ -198,7 +198,7 @@ export class PaymentsService {
           providerPaymentId: checkout.providerPaymentId,
           providerStatus: checkout.providerStatus,
           reference: dto.reference ?? undefined,
-          metadata: checkout.payload,
+          metadata: this.toJsonValue(checkout.payload),
           status: methodValue === "WALLET" ? "PAID" : "PENDING",
           statusReason: null,
           failedAt: null,
@@ -543,9 +543,16 @@ export class PaymentsService {
         provider: input.provider,
         idempotencyKey: input.idempotencyKey,
         reference: input.reference,
-        payload: input.payload,
+        payload: this.toJsonValue(input.payload),
       },
     });
+  }
+
+  private toJsonValue(
+    value?: Record<string, unknown>,
+  ): Prisma.InputJsonValue | undefined {
+    if (value === undefined) return undefined;
+    return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
   }
 
   private buildWhere(

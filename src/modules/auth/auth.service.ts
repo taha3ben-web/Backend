@@ -17,7 +17,7 @@ export interface AuthUserResponse {
   name: string;
   phone: string;
   email?: string;
-  type: "PASSENGER" | "DRIVER" | "STAFF";
+  type: "PASSENGER" | "DRIVER" | "STAFF" | "AGENT";
   status: string;
 }
 
