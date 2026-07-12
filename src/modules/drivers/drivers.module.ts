@@ -7,6 +7,9 @@ import { DocumentsService } from "./documents.service";
 import { DocumentsController } from "./documents.controller";
 import { DriverSelfService } from "./driver-self.service";
 import { DriverSelfController } from "./driver-self.controller";
+import { DriverQrService } from "./driver-qr.service";
+import { DriverQrController } from "./driver-qr.controller";
+import { DriverQrPublicController } from "./driver-qr-public.controller";
 
 @Module({
   providers: [
@@ -14,13 +17,22 @@ import { DriverSelfController } from "./driver-self.controller";
     VehiclesService,
     DocumentsService,
     DriverSelfService,
+    DriverQrService,
   ],
   controllers: [
     DriversController,
     VehiclesController,
     DocumentsController,
     DriverSelfController,
+    DriverQrController,
+    DriverQrPublicController,
   ],
-  exports: [DriversService, VehiclesService, DocumentsService, DriverSelfService],
+  exports: [
+    DriversService,
+    VehiclesService,
+    DocumentsService,
+    DriverSelfService,
+    DriverQrService,
+  ],
 })
 export class DriversModule {}

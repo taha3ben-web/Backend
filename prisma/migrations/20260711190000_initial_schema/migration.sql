@@ -28,6 +28,8 @@ CREATE TYPE "WithdrawStatus" AS ENUM ('PENDING', 'APPROVED', 'REJECTED', 'PAID')
 
 CREATE TYPE "FundingRequestStatus" AS ENUM ('PENDING', 'APPROVED', 'REJECTED', 'FUNDED');
 
+CREATE TYPE "DriverTransferStatus" AS ENUM ('PENDING', 'APPROVED', 'REJECTED', 'COMPLETED');
+
 CREATE TYPE "WalletTxType" AS ENUM ('CREDIT', 'DEBIT');
 
 CREATE TYPE "FinancialPartyType" AS ENUM ('USER', 'AGENT', 'PLATFORM', 'EXTERNAL');
@@ -39,6 +41,8 @@ CREATE TYPE "LedgerTransactionStatus" AS ENUM ('PENDING', 'POSTED', 'FAILED', 'R
 CREATE TYPE "LedgerEntryDirection" AS ENUM ('DEBIT', 'CREDIT');
 
 CREATE TYPE "AgentStatus" AS ENUM ('ACTIVE', 'SUSPENDED', 'INVITED');
+
+CREATE TYPE "DriverQrStatus" AS ENUM ('ACTIVE', 'REVOKED');
 
 CREATE TYPE "DiscountType" AS ENUM ('PERCENT', 'FIXED');
 
@@ -79,6 +83,19 @@ CREATE TABLE "Driver" (
   "currentLat" DOUBLE PRECISION,
   "currentLng" DOUBLE PRECISION,
   "lastSeenAt" TIMESTAMP(3),
+  "createdAt" TIMESTAMP(3) DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  "updatedAt" TIMESTAMP(3) NOT NULL
+);
+
+CREATE TABLE "DriverQrCode" (
+  "id" TEXT DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+  "driverId" TEXT NOT NULL,
+  "publicIdentifier" TEXT NOT NULL UNIQUE,
+  "status" "DriverQrStatus" DEFAULT 'ACTIVE' NOT NULL,
+  "issuedById" TEXT,
+  "revokedById" TEXT,
+  "expiresAt" TIMESTAMP(3),
+  "revokedAt" TIMESTAMP(3),
   "createdAt" TIMESTAMP(3) DEFAULT CURRENT_TIMESTAMP NOT NULL,
   "updatedAt" TIMESTAMP(3) NOT NULL
 );
@@ -290,6 +307,24 @@ CREATE TABLE "DriverFundingRequest" (
   "approvedAt" TIMESTAMP(3),
   "fundedAt" TIMESTAMP(3),
   "rejectedAt" TIMESTAMP(3),
+  "createdAt" TIMESTAMP(3) DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  "updatedAt" TIMESTAMP(3) NOT NULL
+);
+
+CREATE TABLE "DriverTransfer" (
+  "id" TEXT DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+  "fromDriverId" TEXT NOT NULL,
+  "toDriverId" TEXT NOT NULL,
+  "requestedById" TEXT NOT NULL,
+  "reviewedById" TEXT,
+  "amount" DECIMAL(12, 2) NOT NULL,
+  "status" "DriverTransferStatus" DEFAULT 'PENDING' NOT NULL,
+  "note" TEXT,
+  "idempotencyKey" TEXT NOT NULL UNIQUE,
+  "riskFlags" JSONB,
+  "approvedAt" TIMESTAMP(3),
+  "rejectedAt" TIMESTAMP(3),
+  "completedAt" TIMESTAMP(3),
   "createdAt" TIMESTAMP(3) DEFAULT CURRENT_TIMESTAMP NOT NULL,
   "updatedAt" TIMESTAMP(3) NOT NULL
 );
@@ -722,6 +757,12 @@ ALTER TABLE "Driver" ADD CONSTRAINT "Driver_userId_fkey" FOREIGN KEY ("userId") 
 
 ALTER TABLE "Driver" ADD CONSTRAINT "Driver_cityId_fkey" FOREIGN KEY ("cityId") REFERENCES "City" ("id") ON DELETE NO ACTION ON UPDATE CASCADE;
 
+ALTER TABLE "DriverQrCode" ADD CONSTRAINT "DriverQrCode_driverId_fkey" FOREIGN KEY ("driverId") REFERENCES "Driver" ("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+ALTER TABLE "DriverQrCode" ADD CONSTRAINT "DriverQrCode_issuedById_fkey" FOREIGN KEY ("issuedById") REFERENCES "User" ("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+ALTER TABLE "DriverQrCode" ADD CONSTRAINT "DriverQrCode_revokedById_fkey" FOREIGN KEY ("revokedById") REFERENCES "User" ("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
 ALTER TABLE "Vehicle" ADD CONSTRAINT "Vehicle_driverId_fkey" FOREIGN KEY ("driverId") REFERENCES "Driver" ("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 ALTER TABLE "Vehicle" ADD CONSTRAINT "Vehicle_vehicleTypeId_fkey" FOREIGN KEY ("vehicleTypeId") REFERENCES "VehicleType" ("id") ON DELETE SET NULL ON UPDATE CASCADE;
@@ -775,6 +816,14 @@ ALTER TABLE "DriverFundingRequest" ADD CONSTRAINT "DriverFundingRequest_driverId
 ALTER TABLE "DriverFundingRequest" ADD CONSTRAINT "DriverFundingRequest_requestedById_fkey" FOREIGN KEY ("requestedById") REFERENCES "User" ("id") ON DELETE NO ACTION ON UPDATE CASCADE;
 
 ALTER TABLE "DriverFundingRequest" ADD CONSTRAINT "DriverFundingRequest_approvedById_fkey" FOREIGN KEY ("approvedById") REFERENCES "User" ("id") ON DELETE NO ACTION ON UPDATE CASCADE;
+
+ALTER TABLE "DriverTransfer" ADD CONSTRAINT "DriverTransfer_fromDriverId_fkey" FOREIGN KEY ("fromDriverId") REFERENCES "Driver" ("id") ON DELETE NO ACTION ON UPDATE CASCADE;
+
+ALTER TABLE "DriverTransfer" ADD CONSTRAINT "DriverTransfer_toDriverId_fkey" FOREIGN KEY ("toDriverId") REFERENCES "Driver" ("id") ON DELETE NO ACTION ON UPDATE CASCADE;
+
+ALTER TABLE "DriverTransfer" ADD CONSTRAINT "DriverTransfer_requestedById_fkey" FOREIGN KEY ("requestedById") REFERENCES "User" ("id") ON DELETE NO ACTION ON UPDATE CASCADE;
+
+ALTER TABLE "DriverTransfer" ADD CONSTRAINT "DriverTransfer_reviewedById_fkey" FOREIGN KEY ("reviewedById") REFERENCES "User" ("id") ON DELETE NO ACTION ON UPDATE CASCADE;
 
 ALTER TABLE "WithdrawRequest" ADD CONSTRAINT "WithdrawRequest_driverId_fkey" FOREIGN KEY ("driverId") REFERENCES "Driver" ("id") ON DELETE NO ACTION ON UPDATE CASCADE;
 
@@ -870,6 +919,10 @@ CREATE INDEX "Trip_createdAt_idx" ON "Trip" ("createdAt");
 
 CREATE INDEX "Trip_status_settledAt_completedAt_idx" ON "Trip" ("status", "settledAt", "completedAt");
 
+CREATE INDEX "DriverQrCode_driverId_status_idx" ON "DriverQrCode" ("driverId", "status");
+
+CREATE INDEX "DriverQrCode_status_expiresAt_idx" ON "DriverQrCode" ("status", "expiresAt");
+
 CREATE INDEX "TripTracking_tripId_recordedAt_idx" ON "TripTracking" ("tripId", "recordedAt");
 
 CREATE INDEX "TripEvent_tripId_createdAt_idx" ON "TripEvent" ("tripId", "createdAt");
@@ -909,6 +962,14 @@ CREATE INDEX "DriverFundingRequest_driverId_status_idx" ON "DriverFundingRequest
 CREATE INDEX "DriverFundingRequest_requestedById_createdAt_idx" ON "DriverFundingRequest" ("requestedById", "createdAt");
 
 CREATE INDEX "DriverFundingRequest_status_createdAt_idx" ON "DriverFundingRequest" ("status", "createdAt");
+
+CREATE INDEX "DriverTransfer_fromDriverId_status_idx" ON "DriverTransfer" ("fromDriverId", "status");
+
+CREATE INDEX "DriverTransfer_toDriverId_status_idx" ON "DriverTransfer" ("toDriverId", "status");
+
+CREATE INDEX "DriverTransfer_requestedById_createdAt_idx" ON "DriverTransfer" ("requestedById", "createdAt");
+
+CREATE INDEX "DriverTransfer_status_createdAt_idx" ON "DriverTransfer" ("status", "createdAt");
 
 CREATE INDEX "WithdrawRequest_driverId_idx" ON "WithdrawRequest" ("driverId");
 

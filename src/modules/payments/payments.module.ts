@@ -10,6 +10,8 @@ import { PaymentProviderService } from "./payment-provider.service";
 import { PaymentWebhooksController } from "./payment-webhooks.controller";
 import { DriverFundingService } from "./driver-funding.service";
 import { DriverFundingController } from "./driver-funding.controller";
+import { DriverTransfersService } from "./driver-transfers.service";
+import { DriverTransfersController } from "./driver-transfers.controller";
 
 @Module({
   imports: [FinancialModule],
@@ -19,6 +21,7 @@ import { DriverFundingController } from "./driver-funding.controller";
     WithdrawalsService,
     PaymentProviderService,
     DriverFundingService,
+    DriverTransfersService,
   ],
   controllers: [
     WalletController,
@@ -26,6 +29,7 @@ import { DriverFundingController } from "./driver-funding.controller";
     WithdrawalsController,
     PaymentWebhooksController,
     DriverFundingController,
+    DriverTransfersController,
   ],
   exports: [
     WalletService,
@@ -33,6 +37,7 @@ import { DriverFundingController } from "./driver-funding.controller";
     WithdrawalsService,
     PaymentProviderService,
     DriverFundingService,
+    DriverTransfersService,
   ],
 })
 export class PaymentsModule {}

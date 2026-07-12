@@ -115,6 +115,13 @@ enum FundingRequestStatus {
   FUNDED
 }
 
+enum DriverTransferStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  COMPLETED
+}
+
 enum WalletTxType {
   CREDIT
   DEBIT
@@ -152,6 +159,11 @@ enum AgentStatus {
   ACTIVE
   SUSPENDED
   INVITED
+}
+
+enum DriverQrStatus {
+  ACTIVE
+  REVOKED
 }
 
 
@@ -229,6 +241,10 @@ model User {
   emergencyContacts  EmergencyContact[]
   reviewedDocuments  DriverDocument[]   @relation("DocumentReviewer")
   createdAgents      AgentProfile[]     @relation("AgentCreator")
+  issuedDriverQrCodes DriverQrCode[]     @relation("DriverQrIssuer")
+  revokedDriverQrCodes DriverQrCode[]    @relation("DriverQrRevoker")
+  requestedDriverTransfers DriverTransfer[] @relation("DriverTransferRequester")
+  reviewedDriverTransfers  DriverTransfer[] @relation("DriverTransferReviewer")
 
   @@index([type])
   @@index([status])
@@ -256,11 +272,33 @@ model Driver {
   earnings         DriverEarning[]
   withdrawRequests WithdrawRequest[]
   fundingRequests  DriverFundingRequest[]
+  qrCodes          DriverQrCode[]
+  outgoingTransfers DriverTransfer[]      @relation("OutgoingDriverTransfers")
+  incomingTransfers DriverTransfer[]      @relation("IncomingDriverTransfers")
 
   @@index([status])
   @@index([availability])
   @@index([availability, status])
   @@index([cityId])
+}
+
+model DriverQrCode {
+  id               String         @id @default(uuid())
+  driverId         String
+  driver           Driver         @relation(fields: [driverId], references: [id], onDelete: Cascade)
+  publicIdentifier String         @unique
+  status           DriverQrStatus @default(ACTIVE)
+  issuedById       String?
+  issuedBy         User?          @relation("DriverQrIssuer", fields: [issuedById], references: [id], onDelete: SetNull)
+  revokedById      String?
+  revokedBy        User?          @relation("DriverQrRevoker", fields: [revokedById], references: [id], onDelete: SetNull)
+  expiresAt        DateTime?
+  revokedAt        DateTime?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  @@index([driverId, status])
+  @@index([status, expiresAt])
 }
 
 model Vehicle {
@@ -557,6 +595,33 @@ model DriverFundingRequest {
   updatedAt     DateTime             @updatedAt
 
   @@index([driverId, status])
+  @@index([requestedById, createdAt])
+  @@index([status, createdAt])
+}
+
+model DriverTransfer {
+  id             String               @id @default(uuid())
+  fromDriverId   String
+  fromDriver     Driver               @relation("OutgoingDriverTransfers", fields: [fromDriverId], references: [id])
+  toDriverId     String
+  toDriver       Driver               @relation("IncomingDriverTransfers", fields: [toDriverId], references: [id])
+  requestedById  String
+  requestedBy    User                 @relation("DriverTransferRequester", fields: [requestedById], references: [id])
+  reviewedById   String?
+  reviewedBy     User?                @relation("DriverTransferReviewer", fields: [reviewedById], references: [id])
+  amount         Decimal              @db.Decimal(12, 2)
+  status         DriverTransferStatus @default(PENDING)
+  note           String?
+  idempotencyKey String               @unique
+  riskFlags      Json?
+  approvedAt     DateTime?
+  rejectedAt     DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  @@index([fromDriverId, status])
+  @@index([toDriverId, status])
   @@index([requestedById, createdAt])
   @@index([status, createdAt])
 }

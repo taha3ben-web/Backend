@@ -148,6 +148,38 @@ export class FinancialService {
       });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
+  async transferDriverFunds(transferId: string): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      const transfer = await tx.driverTransfer.findUnique({
+        where: { id: transferId },
+        include: {
+          fromDriver: { select: { userId: true } },
+          toDriver: { select: { userId: true } },
+        },
+      });
+      if (!transfer) throw new NotFoundException("Driver transfer not found");
+      if (transfer.status === "COMPLETED") return;
+      if (transfer.status !== "APPROVED") {
+        throw new BadRequestException("Driver transfer must be approved first");
+      }
+      const sender = await this.userAccount(tx, transfer.fromDriver.userId, "DZD");
+      const receiver = await this.userAccount(tx, transfer.toDriver.userId, "DZD");
+      if (Number(sender.balanceCache) < Number(transfer.amount)) {
+        throw new BadRequestException("Insufficient funds for driver transfer");
+      }
+      await this.post(tx, {
+        command: "transferDriverFunds",
+        idempotencyKey: `driverTransfer:complete:${transferId}`,
+        currency: "DZD",
+        referenceType: "DRIVER_TRANSFER",
+        referenceId: transferId,
+        lines: [
+          { accountId: sender.id, direction: "DEBIT", amount: Number(transfer.amount) },
+          { accountId: receiver.id, direction: "CREDIT", amount: Number(transfer.amount) },
+        ],
+      });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }
   private async byKey(key: string) { const row = await this.prisma.ledgerTransaction.findUnique({ where: { idempotencyKey: key } }); if (!row || row.status !== "POSTED") throw new NotFoundException("Posted ledger transaction not found"); return row; }
   async reverseTransaction(id: string, key: string, command = "reverseTransaction"): Promise<void> {
     await this.prisma.$transaction(async (tx) => { const original = await tx.ledgerTransaction.findUnique({ where: { id }, include: { entries: true, reversedBy: true } }); if (!original || original.status !== "POSTED") throw new BadRequestException("Only posted transactions can be reversed"); if (original.reversedBy) return; await this.post(tx, { command, idempotencyKey: key, currency: original.currency, referenceType: original.referenceType ?? undefined, referenceId: original.referenceId ?? undefined, reversalOfId: original.id, lines: original.entries.map((entry) => ({ accountId: entry.accountId, direction: entry.direction === "DEBIT" ? "CREDIT" : "DEBIT", amount: Number(entry.amount) })) }); }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
