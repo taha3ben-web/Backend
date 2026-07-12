@@ -19,6 +19,7 @@ export const DOC_TYPES = [
 /** تحديث ملف السائق ومركبته النشطة */
 export class UpdateDriverProfileDto {
   @IsOptional() @IsString() @MaxLength(120) name?: string;
+  @IsOptional() @IsString() @MaxLength(24) phone?: string;
   @IsOptional() @IsString() @MaxLength(60) carMake?: string;
   @IsOptional() @IsString() @MaxLength(60) carModel?: string;
   @IsOptional() @IsString() @MaxLength(30) carColor?: string;

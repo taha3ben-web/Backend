@@ -101,10 +101,10 @@ export class DriverSelfService {
   async updateProfile(userId: string, dto: UpdateDriverProfileDto) {
     const driver = await this.requireDriver(userId);
 
-    if (dto.name) {
+    if (dto.name || dto.phone) {
       await this.prisma.user.update({
         where: { id: userId },
-        data: { name: dto.name },
+        data: { name: dto.name, phone: dto.phone },
       });
     }
 
