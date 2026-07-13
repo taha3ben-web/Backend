@@ -21,38 +21,38 @@ import { RequirePermissions } from "../../common/decorators/permissions.decorato
 export class UsersController {
   constructor(private readonly users: UsersService) {}
 
-  @Get()
   @RequirePermissions("passengers.read", "passengers.manage")
+  @Get()
   findAll(@Query() q: PaginationDto) {
     return this.users.findAll(q, UserType.PASSENGER);
   }
 
-  @Get(":id")
   @RequirePermissions("passengers.read", "passengers.manage")
+  @Get(":id")
   findOne(@Param("id") id: string) {
     return this.users.findOne(id);
   }
 
+  @RequirePermissions("passengers.read", "passengers.manage")
   @Get(":id/trips")
-  @RequirePermissions("passengers.read", "passengers.manage", "trips.read")
   trips(@Param("id") id: string, @Query() q: PaginationDto) {
     return this.users.trips(id, q);
   }
 
-  @Patch(":id/suspend")
   @RequirePermissions("passengers.manage")
+  @Patch(":id/suspend")
   suspend(@Param("id") id: string) {
     return this.users.setStatus(id, "SUSPENDED");
   }
 
-  @Patch(":id/ban")
   @RequirePermissions("passengers.manage")
+  @Patch(":id/ban")
   ban(@Param("id") id: string) {
     return this.users.setStatus(id, "BANNED");
   }
 
-  @Patch(":id/activate")
   @RequirePermissions("passengers.manage")
+  @Patch(":id/activate")
   activate(@Param("id") id: string) {
     return this.users.setStatus(id, "ACTIVE");
   }

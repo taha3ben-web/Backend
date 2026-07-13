@@ -34,27 +34,24 @@ export class AppVersionsController {
 
   // ---------- إدارة (STAFF) ----------
 
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
   @Roles("STAFF")
-  @UseGuards(PermissionsGuard)
   @RequirePermissions("settings.manage")
   @Post()
   create(@Body() dto: CreateAppVersionDto) {
     return this.appVersions.create(dto);
   }
 
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
   @Roles("STAFF")
-  @UseGuards(PermissionsGuard)
   @RequirePermissions("settings.manage")
   @Get()
   findAll(@Query("platform") platform?: string) {
     return this.appVersions.findAll(platform);
   }
 
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
   @Roles("STAFF")
-  @UseGuards(PermissionsGuard)
   @RequirePermissions("settings.manage")
   @Delete(":id")
   remove(@Param("id") id: string) {

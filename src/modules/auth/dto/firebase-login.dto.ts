@@ -1,6 +1,4 @@
-import { Type } from "class-transformer";
-import { IsEnum, IsOptional, IsString, ValidateNested } from "class-validator";
-import { DeviceContextDto } from "./device-context.dto";
+import { IsEnum, IsOptional, IsString } from "class-validator";
 
 export enum FirebaseRole {
   PASSENGER = "PASSENGER",
@@ -14,10 +12,12 @@ export class FirebaseLoginDto {
   @IsString()
   declare idToken: string;
 
+  // الدور المطلوب عند إنشاء المستخدم لأول مرة (افتراضي: PASSENGER).
   @IsOptional()
   @IsEnum(FirebaseRole)
   role?: FirebaseRole;
 
+  // اسم/هاتف احتياطيّان إذا لم يحتوِ رمز Firebase عليهما.
   @IsOptional()
   @IsString()
   name?: string;
@@ -25,9 +25,4 @@ export class FirebaseLoginDto {
   @IsOptional()
   @IsString()
   phone?: string;
-
-  @IsOptional()
-  @ValidateNested()
-  @Type(() => DeviceContextDto)
-  device?: DeviceContextDto;
 }

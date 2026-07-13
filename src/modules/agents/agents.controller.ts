@@ -33,6 +33,11 @@ import {
 export class AgentsController {
   constructor(private readonly agents: AgentsService) {}
 
+  @Get("options")
+  managementOptions() {
+    return this.agents.managementOptions();
+  }
+
   @Get()
   list(
     @Query() q: PaginationDto,

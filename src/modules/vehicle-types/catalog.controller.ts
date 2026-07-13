@@ -49,7 +49,7 @@ export class CatalogController {
   /**
    * سجل التعديلات (Audit Log) للوحة (STAFF فقط).
    * مثال: /api/catalog/audit?entity=VehicleType&entityId=<id>&page=1&limit=20
-   */
+  */
   @Get("audit")
   @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
   @Roles("STAFF")

@@ -3,7 +3,6 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { Prisma, UserStatus } from "@prisma/client";
 import * as bcrypt from "bcryptjs";
 import { PrismaService } from "../../prisma/prisma.service";
 import { PaginationDto } from "../../common/dto/pagination.dto";
@@ -11,7 +10,6 @@ import {
   AssignRoleDto,
   CreateStaffDto,
   UpdateStaffPasswordDto,
-  UpdateStaffProfileDto,
   UpdateStaffStatusDto,
 } from "./dto/rbac.dto";
 
@@ -21,8 +19,10 @@ export class StaffService {
 
   /** إنشاء موظف (STAFF) وتعيين دور له */
   async createStaff(dto: CreateStaffDto) {
-    const normalized = this.normalizeProfile(dto);
-    await this.ensureIdentifiersAvailable(normalized);
+    const phoneTaken = await this.prisma.user.findUnique({
+      where: { phone: dto.phone },
+    });
+    if (phoneTaken) throw new BadRequestException("رقم الهاتف مستخدم مسبقًا");
 
     const role = await this.prisma.role.findUnique({
       where: { id: dto.roleId },
@@ -32,14 +32,11 @@ export class StaffService {
     const passwordHash = await bcrypt.hash(dto.password, 10);
     const user = await this.prisma.user.create({
       data: {
-        name: normalized.name!,
-        username: normalized.username!,
-        phone: normalized.phone!,
-        email: normalized.email,
+        name: dto.name,
+        phone: dto.phone,
         passwordHash,
         type: "STAFF",
         staffRoleId: dto.roleId,
-        status: dto.status ?? UserStatus.ACTIVE,
       },
       select: this.staffSelect(),
     });
@@ -54,9 +51,7 @@ export class StaffService {
         ? {
             OR: [
               { name: { contains: q.search, mode: "insensitive" as const } },
-              { username: { contains: q.search, mode: "insensitive" as const } },
               { phone: { contains: q.search } },
-              { email: { contains: q.search, mode: "insensitive" as const } },
             ],
           }
         : {}),
@@ -91,31 +86,9 @@ export class StaffService {
     });
   }
 
-  async updateStaff(userId: string, dto: UpdateStaffProfileDto) {
-    await this.getStaffOrThrow(userId);
-
-    const normalized = this.normalizeProfile(dto);
-    await this.ensureIdentifiersAvailable(normalized, userId);
-
-    try {
-      return await this.prisma.user.update({
-        where: { id: userId },
-        data: {
-          name: normalized.name,
-          username: normalized.username,
-          phone: normalized.phone,
-          email: normalized.email,
-        },
-        select: this.staffSelect(),
-      });
-    } catch (error) {
-      this.rethrowUniqueError(error);
-      throw error;
-    }
-  }
-
+  /** تغيير كلمة مرور موظف وإبطال رموز التحديث المفتوحة. */
   async updatePassword(userId: string, dto: UpdateStaffPasswordDto) {
-    await this.getStaffOrThrow(userId);
+    await this.ensureStaff(userId);
     const passwordHash = await bcrypt.hash(dto.password, 10);
 
     await this.prisma.$transaction([
@@ -125,19 +98,24 @@ export class StaffService {
       }),
       this.prisma.refreshToken.updateMany({
         where: { userId, revoked: false },
-        data: { revoked: true, lastUsedAt: new Date() },
+        data: { revoked: true },
       }),
-      this.prisma.session.updateMany({
-        where: { userId, revokedAt: null },
-        data: { revokedAt: new Date(), revokeReason: "STAFF_PASSWORD_CHANGED" },
-      }),
+      this.prisma.session.deleteMany({ where: { userId } }),
     ]);
 
     return { ok: true };
   }
 
-  async updateStatus(userId: string, dto: UpdateStaffStatusDto) {
-    await this.getStaffOrThrow(userId);
+  /** تفعيل/تعليق/حظر موظف مع إبطال جلساته عند تعطيله. */
+  async updateStatus(
+    userId: string,
+    dto: UpdateStaffStatusDto,
+    actorId?: string,
+  ) {
+    await this.ensureStaff(userId);
+    if (actorId === userId && dto.status !== "ACTIVE") {
+      throw new BadRequestException("لا يمكنك تعطيل حسابك الحالي");
+    }
 
     const updated = await this.prisma.user.update({
       where: { id: userId },
@@ -145,102 +123,32 @@ export class StaffService {
       select: this.staffSelect(),
     });
 
-    if (dto.status !== UserStatus.ACTIVE) {
+    if (dto.status !== "ACTIVE") {
       await this.prisma.$transaction([
         this.prisma.refreshToken.updateMany({
           where: { userId, revoked: false },
-          data: { revoked: true, lastUsedAt: new Date() },
+          data: { revoked: true },
         }),
-        this.prisma.session.updateMany({
-          where: { userId, revokedAt: null },
-          data: { revokedAt: new Date(), revokeReason: `STAFF_STATUS_${dto.status}` },
-        }),
+        this.prisma.session.deleteMany({ where: { userId } }),
       ]);
     }
 
     return updated;
   }
 
-  private async getStaffOrThrow(userId: string) {
+  private async ensureStaff(userId: string) {
     const staff = await this.prisma.user.findFirst({
       where: { id: userId, type: "STAFF" },
+      select: { id: true },
     });
     if (!staff) throw new NotFoundException("الموظف غير موجود");
-    return staff;
-  }
-
-  private normalizeProfile(
-    dto: Partial<CreateStaffDto & UpdateStaffProfileDto>,
-  ): {
-    name?: string;
-    username?: string;
-    phone?: string;
-    email?: string | null;
-  } {
-    const name = dto.name?.trim();
-    const username = dto.username?.trim().toLowerCase();
-    const phone = dto.phone?.trim();
-    const emailValue = dto.email?.trim().toLowerCase();
-    const email = emailValue === "" ? null : emailValue;
-
-    if (username !== undefined && !/^[a-z0-9._-]+$/.test(username)) {
-      throw new BadRequestException(
-        "اسم الدخول يجب أن يحتوي على أحرف إنجليزية أو أرقام أو . أو _ أو - فقط",
-      );
-    }
-
-    return { name, username, phone, email };
-  }
-
-  private async ensureIdentifiersAvailable(
-    identifiers: {
-      username?: string;
-      phone?: string;
-      email?: string | null;
-    },
-    excludeUserId?: string,
-  ) {
-    const checks: Array<{ field: "username" | "phone" | "email"; value: string }> = [];
-    if (identifiers.username) checks.push({ field: "username", value: identifiers.username });
-    if (identifiers.phone) checks.push({ field: "phone", value: identifiers.phone });
-    if (identifiers.email) checks.push({ field: "email", value: identifiers.email });
-
-    for (const check of checks) {
-      const existing = await this.prisma.user.findFirst({
-        where: {
-          [check.field]: check.value,
-          ...(excludeUserId ? { NOT: { id: excludeUserId } } : {}),
-        },
-        select: { id: true },
-      });
-      if (!existing) continue;
-
-      if (check.field === "username") {
-        throw new BadRequestException("اسم الدخول مستخدم مسبقًا");
-      }
-      if (check.field === "phone") {
-        throw new BadRequestException("رقم الهاتف مستخدم مسبقًا");
-      }
-      throw new BadRequestException("البريد الإلكتروني مستخدم مسبقًا");
-    }
-  }
-
-  private rethrowUniqueError(error: unknown): void {
-    if (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === "P2002"
-    ) {
-      throw new BadRequestException("يوجد تعارض في اسم الدخول أو الهاتف أو البريد الإلكتروني");
-    }
   }
 
   private staffSelect() {
     return {
       id: true,
       name: true,
-      username: true,
       phone: true,
-      email: true,
       type: true,
       status: true,
       createdAt: true,

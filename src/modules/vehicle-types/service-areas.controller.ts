@@ -28,25 +28,28 @@ import {
 @Controller("service-areas")
 @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 @Roles("STAFF")
-@RequirePermissions("pricing.manage")
 export class ServiceAreasController {
   constructor(private readonly areas: ServiceAreasService) {}
 
+  @RequirePermissions("pricing.manage", "settings.manage")
   @Get()
   findAll(@Query() query: ListQueryDto) {
     return this.areas.findAll(query);
   }
 
+  @RequirePermissions("pricing.manage", "settings.manage")
   @Get(":id")
   findOne(@Param("id") id: string) {
     return this.areas.findOne(id);
   }
 
+  @RequirePermissions("pricing.manage", "settings.manage")
   @Post()
   create(@Body() dto: CreateServiceAreaDto, @CurrentUser() user: AuthUser) {
     return this.areas.create(dto, user?.userId);
   }
 
+  @RequirePermissions("pricing.manage", "settings.manage")
   @Patch(":id")
   update(
     @Param("id") id: string,
@@ -56,6 +59,7 @@ export class ServiceAreasController {
     return this.areas.update(id, dto, user?.userId);
   }
 
+  @RequirePermissions("pricing.manage", "settings.manage")
   @Patch(":id/active")
   setActive(
     @Param("id") id: string,
@@ -65,11 +69,13 @@ export class ServiceAreasController {
     return this.areas.setActive(id, isActive, user?.userId);
   }
 
+  @RequirePermissions("pricing.manage", "settings.manage")
   @Post(":id/restore")
   restore(@Param("id") id: string, @CurrentUser() user: AuthUser) {
     return this.areas.restore(id, user?.userId);
   }
 
+  @RequirePermissions("pricing.manage", "settings.manage")
   @Delete(":id")
   remove(@Param("id") id: string, @CurrentUser() user: AuthUser) {
     return this.areas.remove(id, user?.userId);

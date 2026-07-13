@@ -44,9 +44,8 @@ export class SupportController {
   }
 
   /** كل التذاكر (الدعم) */
-  @UseGuards(RolesGuard)
+  @UseGuards(RolesGuard, PermissionsGuard)
   @Roles("STAFF")
-  @UseGuards(PermissionsGuard)
   @RequirePermissions("support.manage")
   @Get()
   all(@Query() q: PaginationDto, @Query("status") status?: TicketStatus) {
@@ -70,9 +69,8 @@ export class SupportController {
   }
 
   /** تغيير الحالة (حل/إغلاق) — الدعم فقط */
-  @UseGuards(RolesGuard)
+  @UseGuards(RolesGuard, PermissionsGuard)
   @Roles("STAFF")
-  @UseGuards(PermissionsGuard)
   @RequirePermissions("support.manage")
   @Patch(":id/status")
   updateStatus(@Param("id") id: string, @Body() dto: UpdateTicketStatusDto) {

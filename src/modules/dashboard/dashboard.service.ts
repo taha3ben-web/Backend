@@ -1,14 +1,12 @@
 import { Injectable } from "@nestjs/common";
 import { PrismaService } from "../../prisma/prisma.service";
 import { RedisService } from "../redis/redis.service";
-import { MetricsService } from "../metrics/metrics.service";
 
 @Injectable()
 export class DashboardService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
-    private readonly metrics: MetricsService,
   ) {}
 
   async summary() {
@@ -78,49 +76,39 @@ export class DashboardService {
     };
   }
 
-  /** آخر النشاطات لبطاقات اللوحة */
   async latest() {
-    const [trips, users, complaints, withdrawals] =
-      await this.prisma.$transaction([
-        this.prisma.trip.findMany({
-          take: 8,
-          orderBy: { createdAt: "desc" },
-          include: { passenger: { select: { name: true } } },
-        }),
-        this.prisma.user.findMany({
-          take: 8,
-          orderBy: { createdAt: "desc" },
-          select: { id: true, name: true, type: true, createdAt: true },
-        }),
-        this.prisma.complaint.findMany({
-          take: 8,
-          orderBy: { createdAt: "desc" },
-        }),
-        this.prisma.withdrawRequest.findMany({
-          take: 8,
-          orderBy: { createdAt: "desc" },
-        }),
-      ]);
+    const [trips, users, complaints, withdrawals] = await this.prisma.$transaction([
+      this.prisma.trip.findMany({
+        take: 8,
+        orderBy: { createdAt: "desc" },
+        include: { passenger: { select: { name: true } } },
+      }),
+      this.prisma.user.findMany({
+        take: 8,
+        orderBy: { createdAt: "desc" },
+        select: { id: true, name: true, type: true, createdAt: true },
+      }),
+      this.prisma.complaint.findMany({
+        take: 8,
+        orderBy: { createdAt: "desc" },
+      }),
+      this.prisma.withdrawRequest.findMany({
+        take: 8,
+        orderBy: { createdAt: "desc" },
+      }),
+    ]);
     return { trips, users, complaints, withdrawals };
   }
 
-  /** السائقون المتصلون حاليًا مع مواقعهم (خريطة حية) */
   async liveMap() {
     const ids = await this.redis.client.zrange("drivers:geo", 0, -1);
     if (ids.length === 0) return { drivers: [], count: 0 };
 
-    // جلب دفعي لمواقع كل السائقين عبر خط أنابيب واحد
-    // بدل hgetall منفصل لكل سائق (N+1) — الخريطة الحية تُستعلم بتكرار.
     const pipeline = this.redis.client.pipeline();
     for (const id of ids) pipeline.hgetall(`driver:${id}`);
     const res = await pipeline.exec();
 
-    const drivers: Array<{
-      id: string;
-      lat: number;
-      lng: number;
-      heading: number;
-    }> = [];
+    const drivers: Array<{ id: string; lat: number; lng: number; heading: number }> = [];
     ids.forEach((id, i) => {
       const h = res?.[i]?.[1] as Record<string, string> | null | undefined;
       if (h?.lat) {
@@ -136,104 +124,67 @@ export class DashboardService {
   }
 
   async operations() {
-    const [
-      db,
-      redis,
-      driversWithGeo,
-      driversOnline,
-      activeTrips,
-      openSafetyIncidents,
-      openSupportTickets,
-      openComplaints,
-      pendingWithdrawals,
-      pendingPayments,
-      failedSettlements,
-      failedNotifications,
-      recentSafetyIncidents,
-      recentFailedSettlements,
-      recentComplaints,
-    ] = await Promise.all([
+    const [db, redis, driversWithGeo] = await Promise.all([
       this.checkDb(),
       this.checkRedis(),
       this.countGeoDrivers(),
-      this.prisma.driver.count({ where: { availability: "ONLINE" } }),
-      this.prisma.trip.count({
-        where: { status: { in: ["ACCEPTED", "ARRIVING", "IN_PROGRESS"] } },
-      }),
-      this.prisma.safetyIncident.count({ where: { status: { in: ["OPEN", "ACKNOWLEDGED"] } } }),
-      this.prisma.supportTicket.count({ where: { status: "OPEN" } }),
-      this.prisma.complaint.count({ where: { status: { in: ["OPEN", "REVIEWING"] } } }),
-      this.prisma.withdrawRequest.count({ where: { status: "PENDING" } }),
-      this.prisma.payment.count({ where: { status: { in: ["PENDING", "PROCESSING"] } } }),
-      this.prisma.trip.count({
-        where: {
-          status: "COMPLETED",
-          settledAt: null,
-          settlementAttempts: { gte: 3 },
-        },
-      }),
-      this.prisma.notification.count({ where: { status: "FAILED" } }),
-      this.prisma.safetyIncident.findMany({
-        take: 8,
-        orderBy: { createdAt: "desc" },
-        include: {
-          user: { select: { name: true, phone: true } },
-          trip: { select: { id: true, status: true } },
-        },
-      }),
-      this.prisma.trip.findMany({
-        take: 8,
-        orderBy: [{ settlementAttempts: "desc" }, { completedAt: "desc" }],
-        where: {
-          status: "COMPLETED",
-          settledAt: null,
-          settlementAttempts: { gte: 1 },
-        },
-        include: {
-          passenger: { select: { name: true } },
-          driver: { select: { user: { select: { name: true } } } },
-        },
-      }),
-      this.prisma.complaint.findMany({
-        take: 8,
-        orderBy: { createdAt: "desc" },
-        where: { status: { in: ["OPEN", "REVIEWING"] } },
-        include: {
-          fromUser: { select: { name: true, phone: true } },
-          againstUser: { select: { name: true } },
-        },
-      }),
     ]);
 
-    const mem = process.memoryUsage();
+    const [onlineDrivers, busyDrivers, activeTrips, openTickets, openComplaints, pendingWithdrawals, recentComplaints, recentWithdrawals, recentTrips] =
+      await this.prisma.$transaction([
+        this.prisma.driver.count({ where: { availability: "ONLINE" } }),
+        this.prisma.driver.count({ where: { availability: "ON_TRIP" } }),
+        this.prisma.trip.count({ where: { status: { in: ["ACCEPTED", "ARRIVING", "IN_PROGRESS"] } } }),
+        this.prisma.supportTicket.count({ where: { status: { in: ["OPEN", "PENDING"] } } }),
+        this.prisma.complaint.count({ where: { status: { in: ["OPEN", "REVIEWING"] } } }),
+        this.prisma.withdrawRequest.count({ where: { status: "PENDING" } }),
+        this.prisma.complaint.findMany({
+          take: 8,
+          orderBy: { createdAt: "desc" },
+          where: { status: { in: ["OPEN", "REVIEWING"] } },
+          include: {
+            fromUser: { select: { name: true, phone: true } },
+            againstUser: { select: { name: true, phone: true } },
+          },
+        }),
+        this.prisma.withdrawRequest.findMany({
+          take: 8,
+          orderBy: { createdAt: "desc" },
+          include: { user: { select: { name: true, phone: true } } },
+        }),
+        this.prisma.trip.findMany({
+          take: 8,
+          orderBy: { createdAt: "desc" },
+          include: {
+            passenger: { select: { name: true } },
+            driver: { select: { user: { select: { name: true } } } },
+          },
+        }),
+      ]);
+
+    const memory = process.memoryUsage();
+
     return {
       ts: new Date().toISOString(),
       uptimeSec: Math.round(process.uptime()),
       memory: {
-        rssMB: this.round2(mem.rss / 1048576),
-        heapUsedMB: this.round2(mem.heapUsed / 1048576),
-        heapTotalMB: this.round2(mem.heapTotal / 1048576),
-      },
-      websocket: {
-        ...this.metrics.wsSnapshot(),
-        ...this.metrics.counters(),
+        rssMB: this.round2(memory.rss / 1048576),
+        heapUsedMB: this.round2(memory.heapUsed / 1048576),
+        heapTotalMB: this.round2(memory.heapTotal / 1048576),
       },
       health: { db, redis },
       queues: {
         driversWithGeo,
-        driversOnline,
+        onlineDrivers,
+        busyDrivers,
         activeTrips,
-        openSafetyIncidents,
-        openSupportTickets,
+        openTickets,
         openComplaints,
         pendingWithdrawals,
-        pendingPayments,
-        failedSettlements,
-        failedNotifications,
       },
-      recentSafetyIncidents,
-      recentFailedSettlements,
       recentComplaints,
+      recentWithdrawals,
+      recentTrips,
     };
   }
 

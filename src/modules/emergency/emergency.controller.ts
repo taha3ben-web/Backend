@@ -15,7 +15,9 @@ import {
 } from "./dto/emergency.dto";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
 import { RolesGuard } from "../../common/guards/roles.guard";
+import { PermissionsGuard } from "../../common/guards/permissions.guard";
 import { Roles } from "../../common/decorators/roles.decorator";
+import { RequirePermissions } from "../../common/decorators/permissions.decorator";
 import {
   CurrentUser,
   AuthUser,
@@ -57,8 +59,9 @@ export class EmergencyController {
   // ---------- إدارة (STAFF) ----------
 
   /** جهات طوارئ مستخدم معيّن (للدعم/الأمان) */
-  @UseGuards(RolesGuard)
+  @UseGuards(RolesGuard, PermissionsGuard)
   @Roles("STAFF")
+  @RequirePermissions("safety.manage", "support.manage")
   @Get("user/:userId")
   forUser(@Param("userId") userId: string) {
     return this.emergency.listForUser(userId);

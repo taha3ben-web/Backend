@@ -39,45 +39,40 @@ export class CouponsController {
 
   // ---------- إدارة (STAFF) ----------
 
-  @UseGuards(RolesGuard)
+  @UseGuards(RolesGuard, PermissionsGuard)
   @Roles("STAFF")
-  @UseGuards(PermissionsGuard)
   @RequirePermissions("coupons.manage")
   @Post()
   create(@Body() dto: CreateCouponDto) {
     return this.coupons.create(dto);
   }
 
-  @UseGuards(RolesGuard)
+  @UseGuards(RolesGuard, PermissionsGuard)
   @Roles("STAFF")
-  @UseGuards(PermissionsGuard)
   @RequirePermissions("coupons.manage")
   @Get()
   findAll(@Query() q: PaginationDto) {
     return this.coupons.findAll(q);
   }
 
-  @UseGuards(RolesGuard)
+  @UseGuards(RolesGuard, PermissionsGuard)
   @Roles("STAFF")
-  @UseGuards(PermissionsGuard)
   @RequirePermissions("coupons.manage")
   @Get(":id")
   findOne(@Param("id") id: string) {
     return this.coupons.findOne(id);
   }
 
-  @UseGuards(RolesGuard)
+  @UseGuards(RolesGuard, PermissionsGuard)
   @Roles("STAFF")
-  @UseGuards(PermissionsGuard)
   @RequirePermissions("coupons.manage")
   @Patch(":id")
   update(@Param("id") id: string, @Body() dto: UpdateCouponDto) {
     return this.coupons.update(id, dto);
   }
 
-  @UseGuards(RolesGuard)
+  @UseGuards(RolesGuard, PermissionsGuard)
   @Roles("STAFF")
-  @UseGuards(PermissionsGuard)
   @RequirePermissions("coupons.manage")
   @Delete(":id")
   deactivate(@Param("id") id: string) {

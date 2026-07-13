@@ -12,7 +12,9 @@ import { PaginationDto } from "../../common/dto/pagination.dto";
 import { CreateRatingDto } from "./dto/support.dto";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
 import { RolesGuard } from "../../common/guards/roles.guard";
+import { PermissionsGuard } from "../../common/guards/permissions.guard";
 import { Roles } from "../../common/decorators/roles.decorator";
+import { RequirePermissions } from "../../common/decorators/permissions.decorator";
 import {
   CurrentUser,
   AuthUser,
@@ -25,8 +27,9 @@ export class RatingsController {
 
   /** قائمة إدارية بكل التقييمات (STAFF فقط) */
   @Get()
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
   @Roles("STAFF")
+  @RequirePermissions("support.manage")
   adminList(@Query() q: PaginationDto, @Query("stars") stars?: string) {
     return this.ratings.adminList(q, stars ? Number(stars) : undefined);
   }

@@ -9,7 +9,7 @@ import { RequirePermissions } from "../../common/decorators/permissions.decorato
 
 @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 @Roles("STAFF")
-@RequirePermissions("audit.read")
+@RequirePermissions("audit.read", "staff.manage")
 @Controller("logs")
 export class AuditController {
   constructor(private readonly audit: AuditService) {}

@@ -4,7 +4,6 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { PaymentMethod, PaymentStatus, Prisma } from "@prisma/client";
-import { randomUUID } from "crypto";
 import { PrismaService } from "../../prisma/prisma.service";
 import { PaginationDto } from "../../common/dto/pagination.dto";
 import { FinancialService } from "../financial/financial.service";
@@ -162,7 +161,7 @@ export class PaymentsService {
 
     const methodValue = dto.method ?? trip.paymentMethod;
     const amount = Number(trip.fare);
-    const bootstrapPaymentId = existing?.id ?? randomUUID();
+    const bootstrapPaymentId = existing?.id ?? `${tripId}-bootstrap`;
     const checkout = await this.provider.createCheckout({
       paymentId: bootstrapPaymentId,
       tripId,
@@ -172,7 +171,6 @@ export class PaymentsService {
       provider: dto.provider,
       returnUrl: dto.returnUrl,
       cancelUrl: dto.cancelUrl,
-      idempotencyKey: dto.idempotencyKey,
     });
 
     const created = await this.prisma.$transaction(async (tx) => {
@@ -180,7 +178,6 @@ export class PaymentsService {
       const payment = await tx.payment.upsert({
         where: { tripId },
         create: {
-          id: bootstrapPaymentId,
           tripId,
           userId: trip.passengerId,
           amount,
@@ -234,20 +231,17 @@ export class PaymentsService {
     const checkout = await this.createCheckoutForTrip(tripId, {
       method,
       reference,
-      idempotencyKey: `payment:record:${tripId}:${method}`,
     });
     return checkout.payment;
   }
 
-  async capture(id: string, idempotencyKey: string, reference?: string, reason?: string) {
+  async capture(id: string, reference?: string, reason?: string) {
     const payment = await this.findMutable(id);
     const operation = await this.provider.capture({
       paymentId: payment.id,
       provider: payment.provider,
-      providerPaymentId: payment.providerPaymentId,
       amount: Number(payment.amount),
       currency: payment.trip.currency,
-      idempotencyKey,
     });
     return this.updateStatus(
       id,
@@ -258,52 +252,28 @@ export class PaymentsService {
     );
   }
 
-  async refund(id: string, idempotencyKey: string, requestedAmount?: number, reference?: string, reason?: string) {
+  async refund(id: string, reference?: string, reason?: string) {
     const payment = await this.findMutable(id);
-    if (payment.status !== "CAPTURED" && payment.status !== "PAID") throw new BadRequestException("Only captured payments can be refunded");
-    const alreadyRefunded = Number(payment.refundedAmount);
-    const remaining = Number(payment.amount) - alreadyRefunded;
-    const amount = requestedAmount ?? remaining;
-    if (!Number.isFinite(amount) || amount <= 0 || amount > remaining) throw new BadRequestException("Refund exceeds remaining captured amount");
-
-    const duplicate = await this.prisma.paymentEvent.findUnique({ where: { idempotencyKey } });
-    if (duplicate) return this.findOne(payment.id);
-
     const operation = await this.provider.refund({
-      paymentId: payment.id, providerPaymentId: payment.providerPaymentId,
-      provider: payment.provider, amount, currency: payment.trip.currency,
-      idempotencyKey, reason,
+      paymentId: payment.id,
+      provider: payment.provider,
+      amount: Number(payment.amount),
+      currency: payment.trip.currency,
     });
-    await this.financial.refundPaymentAmount(payment.id, amount, idempotencyKey);
-    const isFull = amount === remaining;
-    return this.prisma.$transaction(async (tx) => {
-      const updated = await tx.payment.update({
-        where: { id: payment.id },
-        data: {
-          refundedAmount: { increment: amount },
-          status: isFull ? "REFUNDED" : payment.status,
-          refundedAt: isFull ? new Date() : payment.refundedAt,
-          providerStatus: operation.providerStatus,
-          reference: reference ?? operation.reference ?? payment.reference,
-          statusReason: reason ?? operation.statusReason ?? null,
-        },
-        include: { user: { select: { name: true, phone: true } }, trip: true, events: { orderBy: { createdAt: "desc" }, take: 20 } },
-      });
-      await this.appendEvent(tx, payment.id, isFull ? "refund_completed" : "refund_partial", {
-        status: updated.status, provider: payment.provider, reference,
-        idempotencyKey, payload: { ...operation.payload, refundAmount: amount, totalRefunded: alreadyRefunded + amount },
-      });
-      return updated;
-    });
+    return this.updateStatus(
+      id,
+      "REFUNDED",
+      reference ?? operation.reference,
+      reason ?? operation.statusReason,
+      operation,
+    );
   }
 
-  async cancel(id: string, idempotencyKey: string, reference?: string, reason?: string) {
+  async cancel(id: string, reference?: string, reason?: string) {
     const payment = await this.findMutable(id);
     const operation = await this.provider.cancel({
       paymentId: payment.id,
-      providerPaymentId: payment.providerPaymentId,
       provider: payment.provider,
-      idempotencyKey,
     });
     return this.updateStatus(
       id,
@@ -312,10 +282,6 @@ export class PaymentsService {
       reason ?? operation.statusReason,
       operation,
     );
-  }
-
-  verifyWebhook(rawBody: string, signature?: string): boolean {
-    return this.provider.verifyWebhook(rawBody, signature);
   }
 
   async processWebhook(
@@ -352,7 +318,7 @@ export class PaymentsService {
         payment.method === "CARD" &&
         (payment.status === "CAPTURED" || payment.status === "PAID")
       ) {
-        await this.financial.refundPaymentAmount(payment.id, Number(payment.amount) - Number(payment.refundedAmount), `status-refund:${payment.id}`);
+        await this.financial.refundPayment(payment.id);
       }
     }
 
@@ -426,7 +392,7 @@ export class PaymentsService {
       payment.method === "CARD" &&
       (payment.status === "CAPTURED" || payment.status === "PAID")
     ) {
-      await this.financial.refundPaymentAmount(payment.id, Number(payment.amount) - Number(payment.refundedAmount), `status-refund:${payment.id}`);
+      await this.financial.refundPayment(payment.id);
     }
 
     return this.prisma.$transaction(async (tx) => {
@@ -483,7 +449,6 @@ export class PaymentsService {
     }
     if (status === "REFUNDED") {
       data.refundedAt = now;
-      data.refundedAmount = payment.amount;
     }
     if (status === "CANCELED") {
       data.canceledAt = now;

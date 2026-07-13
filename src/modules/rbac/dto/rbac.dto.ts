@@ -1,13 +1,11 @@
 import {
-  IsEmail,
   IsArray,
-  IsEnum,
+  IsIn,
   IsOptional,
   IsString,
   MaxLength,
   MinLength,
 } from "class-validator";
-import { UserStatus } from "@prisma/client";
 
 // ---------- الأدوار ----------
 
@@ -60,17 +58,8 @@ export class CreateStaffDto {
   declare name: string;
 
   @IsString()
-  @MinLength(3)
-  @MaxLength(40)
-  declare username: string;
-
-  @IsString()
   @MinLength(6)
   declare phone: string;
-
-  @IsOptional()
-  @IsEmail()
-  email?: string;
 
   @IsString()
   @MinLength(6)
@@ -78,10 +67,6 @@ export class CreateStaffDto {
 
   @IsString()
   declare roleId: string;
-
-  @IsOptional()
-  @IsEnum(UserStatus)
-  status?: UserStatus;
 }
 
 export class AssignRoleDto {
@@ -89,37 +74,17 @@ export class AssignRoleDto {
   declare roleId: string;
 }
 
-export class UpdateStaffProfileDto {
-  @IsOptional()
-  @IsString()
-  @MinLength(2)
-  name?: string;
-
-  @IsOptional()
-  @IsString()
-  @MinLength(3)
-  @MaxLength(40)
-  username?: string;
-
-  @IsOptional()
-  @IsString()
-  @MinLength(6)
-  phone?: string;
-
-  @IsOptional()
-  @IsEmail()
-  email?: string;
-}
-
 export class UpdateStaffPasswordDto {
   @IsString()
   @MinLength(6)
+  @MaxLength(128)
   declare password: string;
 }
 
 export class UpdateStaffStatusDto {
-  @IsEnum(UserStatus)
-  declare status: UserStatus;
+  @IsString()
+  @IsIn(["ACTIVE", "SUSPENDED", "BANNED"])
+  declare status: "ACTIVE" | "SUSPENDED" | "BANNED";
 }
 
 export class SetRolePermissionsDto {

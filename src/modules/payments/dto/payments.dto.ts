@@ -12,10 +12,6 @@ import { PaymentMethod, PaymentStatus, WalletTxType } from "@prisma/client";
 
 /** إنشاء/تهيئة دفعة أو جلسة Checkout لرحلة */
 export class CreatePaymentCheckoutDto {
-  @IsString()
-  @MaxLength(160)
-  declare idempotencyKey: string;
-
   @IsEnum(PaymentMethod)
   @IsOptional()
   method?: PaymentMethod;
@@ -69,16 +65,6 @@ export class UpdatePaymentStatusDto {
 
 /** تنفيذ إجراء تشغيلي على الدفعة */
 export class PaymentActionDto {
-  @IsString()
-  @MaxLength(160)
-  declare idempotencyKey: string;
-
-  @Type(() => Number)
-  @IsNumber()
-  @IsPositive()
-  @IsOptional()
-  amount?: number;
-
   @IsString()
   @IsOptional()
   reference?: string;

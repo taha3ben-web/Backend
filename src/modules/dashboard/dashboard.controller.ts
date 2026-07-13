@@ -8,32 +8,36 @@ import { RequirePermissions } from "../../common/decorators/permissions.decorato
 
 @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 @Roles("STAFF")
-@RequirePermissions("reports.read", "drivers.read", "passengers.read", "trips.read")
 @Controller("dashboard")
 export class DashboardController {
   constructor(private readonly dashboard: DashboardService) {}
 
   @Get("summary")
+  @RequirePermissions("reports.read", "drivers.read", "trips.read")
   summary() {
     return this.dashboard.summary();
   }
 
   @Get("earnings")
+  @RequirePermissions("reports.read", "payments.read")
   earnings() {
     return this.dashboard.earnings();
   }
 
   @Get("latest")
+  @RequirePermissions("reports.read", "trips.read", "support.manage")
   latest() {
     return this.dashboard.latest();
   }
 
   @Get("live-map")
+  @RequirePermissions("reports.read", "drivers.read")
   liveMap() {
     return this.dashboard.liveMap();
   }
 
   @Get("operations")
+  @RequirePermissions("reports.read", "support.manage", "safety.manage")
   operations() {
     return this.dashboard.operations();
   }

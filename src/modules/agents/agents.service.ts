@@ -17,6 +17,23 @@ import {
 export class AgentsService {
   constructor(private readonly prisma: PrismaService) {}
 
+  async managementOptions() {
+    const [roles, cities] = await this.prisma.$transaction([
+      this.prisma.role.findMany({
+        where: { name: { not: "SUPER_ADMIN" } },
+        orderBy: { name: "asc" },
+        select: { id: true, name: true },
+      }),
+      this.prisma.city.findMany({
+        where: { isActive: true },
+        orderBy: { name: "asc" },
+        select: { id: true, name: true },
+      }),
+    ]);
+
+    return { roles, cities };
+  }
+
   async listAgents(
     q: PaginationDto,
     status?: AgentStatus,
@@ -181,7 +198,9 @@ export class AgentsService {
   }
 
   private async ensureRoleExists(roleId: string) {
-    const role = await this.prisma.role.findUnique({ where: { id: roleId } });
+    const role = await this.prisma.role.findFirst({
+      where: { id: roleId, name: { not: "SUPER_ADMIN" } },
+    });
     if (!role) throw new NotFoundException("الدور غير موجود");
   }
 

@@ -14,7 +14,6 @@ import {
   AssignRoleDto,
   CreateStaffDto,
   UpdateStaffPasswordDto,
-  UpdateStaffProfileDto,
   UpdateStaffStatusDto,
 } from "./dto/rbac.dto";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
@@ -22,6 +21,10 @@ import { RolesGuard } from "../../common/guards/roles.guard";
 import { PermissionsGuard } from "../../common/guards/permissions.guard";
 import { Roles } from "../../common/decorators/roles.decorator";
 import { RequirePermissions } from "../../common/decorators/permissions.decorator";
+import {
+  CurrentUser,
+  AuthUser,
+} from "../../common/decorators/current-user.decorator";
 
 @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 @Roles("STAFF")
@@ -45,11 +48,6 @@ export class StaffController {
     return this.staff.assignRole(id, dto);
   }
 
-  @Patch(":id")
-  update(@Param("id") id: string, @Body() dto: UpdateStaffProfileDto) {
-    return this.staff.updateStaff(id, dto);
-  }
-
   @Patch(":id/password")
   updatePassword(
     @Param("id") id: string,
@@ -62,7 +60,8 @@ export class StaffController {
   updateStatus(
     @Param("id") id: string,
     @Body() dto: UpdateStaffStatusDto,
+    @CurrentUser() actor: AuthUser,
   ) {
-    return this.staff.updateStatus(id, dto);
+    return this.staff.updateStatus(id, dto, actor.userId);
   }
 }

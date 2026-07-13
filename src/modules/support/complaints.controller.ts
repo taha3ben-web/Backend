@@ -38,10 +38,9 @@ export class ComplaintsController {
 
   // ---------- إدارة (STAFF) ----------
 
-  @UseGuards(RolesGuard)
+  @UseGuards(RolesGuard, PermissionsGuard)
   @Roles("STAFF")
-  @UseGuards(PermissionsGuard)
-  @RequirePermissions("support.manage")
+  @RequirePermissions("support.manage", "safety.manage")
   @Get()
   findAll(
     @Query() q: PaginationDto,
@@ -50,19 +49,17 @@ export class ComplaintsController {
     return this.complaints.findAll(q, status);
   }
 
-  @UseGuards(RolesGuard)
+  @UseGuards(RolesGuard, PermissionsGuard)
   @Roles("STAFF")
-  @UseGuards(PermissionsGuard)
-  @RequirePermissions("support.manage")
+  @RequirePermissions("support.manage", "safety.manage")
   @Get(":id")
   findOne(@Param("id") id: string) {
     return this.complaints.findOne(id);
   }
 
-  @UseGuards(RolesGuard)
+  @UseGuards(RolesGuard, PermissionsGuard)
   @Roles("STAFF")
-  @UseGuards(PermissionsGuard)
-  @RequirePermissions("support.manage")
+  @RequirePermissions("support.manage", "safety.manage")
   @Patch(":id/status")
   updateStatus(
     @CurrentUser() user: AuthUser,

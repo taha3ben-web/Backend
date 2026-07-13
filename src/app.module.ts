@@ -28,6 +28,8 @@ import { AppVersionsModule } from "./modules/app-versions/app-versions.module";
 import { SessionsModule } from "./modules/sessions/sessions.module";
 import { VehicleTypesModule } from "./modules/vehicle-types/vehicle-types.module";
 import { AdsModule } from "./modules/ads/ads.module";
+import { AgentsModule } from "./modules/agents/agents.module";
+import { AssetsModule } from "./modules/assets/assets.module";
 import { MetricsModule } from "./modules/metrics/metrics.module";
 import { HealthController } from "./modules/health/health.controller";
 import { FinancialModule } from "./modules/financial/financial.module";
@@ -62,6 +64,8 @@ import { FinancialModule } from "./modules/financial/financial.module";
     SessionsModule,
     VehicleTypesModule,
     AdsModule,
+    AgentsModule,
+    AssetsModule,
     MetricsModule,
   ],
   controllers: [HealthController],

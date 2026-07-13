@@ -31,30 +31,34 @@ import {
 @Controller("vehicle-categories")
 @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 @Roles("STAFF")
-@RequirePermissions("pricing.manage")
 export class VehicleCategoriesController {
   constructor(private readonly categories: VehicleCategoriesService) {}
 
+  @RequirePermissions("pricing.manage", "settings.manage")
   @Get()
   findAll(@Query() query: ListQueryDto) {
     return this.categories.findAll(query);
   }
 
+  @RequirePermissions("pricing.manage", "settings.manage")
   @Patch("reorder")
   reorder(@Body() dto: ReorderDto, @CurrentUser() user: AuthUser) {
     return this.categories.reorder(dto, user?.userId);
   }
 
+  @RequirePermissions("pricing.manage", "settings.manage")
   @Get(":id")
   findOne(@Param("id") id: string) {
     return this.categories.findOne(id);
   }
 
+  @RequirePermissions("pricing.manage", "settings.manage")
   @Post()
   create(@Body() dto: CreateVehicleCategoryDto, @CurrentUser() user: AuthUser) {
     return this.categories.create(dto, user?.userId);
   }
 
+  @RequirePermissions("pricing.manage", "settings.manage")
   @Patch(":id")
   update(
     @Param("id") id: string,
@@ -64,6 +68,7 @@ export class VehicleCategoriesController {
     return this.categories.update(id, dto, user?.userId);
   }
 
+  @RequirePermissions("pricing.manage", "settings.manage")
   @Patch(":id/active")
   setActive(
     @Param("id") id: string,
@@ -73,6 +78,7 @@ export class VehicleCategoriesController {
     return this.categories.setActive(id, isActive, user?.userId);
   }
 
+  @RequirePermissions("pricing.manage", "settings.manage")
   @Patch(":id/status")
   setStatus(
     @Param("id") id: string,
@@ -86,11 +92,13 @@ export class VehicleCategoriesController {
     );
   }
 
+  @RequirePermissions("pricing.manage", "settings.manage")
   @Post(":id/restore")
   restore(@Param("id") id: string, @CurrentUser() user: AuthUser) {
     return this.categories.restore(id, user?.userId);
   }
 
+  @RequirePermissions("pricing.manage", "settings.manage")
   @Delete(":id")
   remove(@Param("id") id: string, @CurrentUser() user: AuthUser) {
     return this.categories.remove(id, user?.userId);

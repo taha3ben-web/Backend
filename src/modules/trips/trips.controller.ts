@@ -23,8 +23,8 @@ import { RequirePermissions } from "../../common/decorators/permissions.decorato
 export class TripsController {
   constructor(private readonly trips: TripsService) {}
 
-  @Get()
   @RequirePermissions("trips.read", "trips.manage")
+  @Get()
   findAll(
     @Query() q: PaginationDto,
     @Query("status") status?: TripStatus,
@@ -34,14 +34,14 @@ export class TripsController {
     return this.trips.findAll(q, status, unsettledOnly === "true", search);
   }
 
-  @Get(":id")
   @RequirePermissions("trips.read", "trips.manage")
+  @Get(":id")
   findOne(@Param("id") id: string) {
     return this.trips.findOne(id);
   }
 
-  @Patch(":id/status")
   @RequirePermissions("trips.manage")
+  @Patch(":id/status")
   changeStatus(
     @Param("id") id: string,
     @Body() body: { status: TripStatus; reason?: string },
@@ -49,8 +49,8 @@ export class TripsController {
     return this.trips.changeStatus(id, body.status, body.reason);
   }
 
-  @Post(":id/retry-settlement")
   @RequirePermissions("trips.manage", "payments.manage")
+  @Post(":id/retry-settlement")
   retrySettlement(@Param("id") id: string) {
     return this.trips.retrySettlement(id);
   }

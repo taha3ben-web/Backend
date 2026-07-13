@@ -10,7 +10,6 @@ import { RequirePermissions } from "../../common/decorators/permissions.decorato
 
 @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 @Roles("STAFF")
-@RequirePermissions("reports.read")
 @Controller("reports")
 export class ReportsController {
   constructor(private readonly reports: ReportsService) {}
@@ -20,6 +19,7 @@ export class ReportsController {
    * مثال: GET /api/reports/revenue?format=excel&from=2026-01-01&to=2026-02-01
    * الأنواع: revenue | trips | drivers | passengers | top-drivers | top-cities
    */
+  @RequirePermissions("reports.read")
   @Get(":type")
   async download(
     @Param("type") type: ReportType,

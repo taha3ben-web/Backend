@@ -1,7 +1,7 @@
 import { NestFactory } from "@nestjs/core";
 import { ValidationPipe, Logger } from "@nestjs/common";
 import helmet from "helmet";
-import { json, urlencoded, type Request } from "express";
+import { json, urlencoded } from "express";
 import { AppModule } from "./app.module";
 import { loadSecretsIntoEnv } from "./config/secrets";
 import { RedisIoAdapter } from "./realtime-redis.adapter";
@@ -44,15 +44,7 @@ async function bootstrap(): Promise<void> {
   app.use(helmet());
 
   // حدود حجم الطلب (تحمي من الحمولات الضخمة)
-  app.use(json({
-    limit: "1mb",
-    verify: (request, _response, buffer) => {
-      const rawRequest = request as Request & { rawBody?: Buffer };
-      if (rawRequest.originalUrl.includes("/payments/webhooks/")) {
-        rawRequest.rawBody = Buffer.from(buffer);
-      }
-    },
-  }));
+  app.use(json({ limit: "1mb" }));
   app.use(urlencoded({ extended: true, limit: "1mb" }));
 
   // CORS — قائمة سماح من البيئة (CORS_ORIGINS مفصولة بفواصل).

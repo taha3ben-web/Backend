@@ -8,11 +8,11 @@ import { FinancialService } from "./financial.service";
 
 @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 @Roles("STAFF")
-@RequirePermissions("payments.read", "payments.manage", "reports.read")
 @Controller("financial")
 export class FinancialController {
   constructor(private readonly financial: FinancialService) {}
 
+  @RequirePermissions("payments.read", "reports.read")
   @Get("accounts")
   accounts(
     @Query("page") page = "1",
@@ -26,6 +26,7 @@ export class FinancialController {
     );
   }
 
+  @RequirePermissions("payments.read", "reports.read")
   @Get("transactions")
   transactions(
     @Query("page") page = "1",
@@ -43,6 +44,7 @@ export class FinancialController {
     );
   }
 
+  @RequirePermissions("payments.read", "reports.read")
   @Get("reconciliation/summary")
   reconciliationSummary(
     @Query("from") from?: string,
@@ -51,6 +53,7 @@ export class FinancialController {
     return this.financial.reconciliationSummary(from, to);
   }
 
+  @RequirePermissions("payments.read", "reports.read")
   @Get("reconciliation/items")
   reconciliationItems(
     @Query("page") page = "1",
@@ -70,6 +73,7 @@ export class FinancialController {
     );
   }
 
+  @RequirePermissions("payments.read", "payments.manage")
   @Get("settlement/queue")
   settlementQueue(
     @Query("page") page = "1",
@@ -89,16 +93,7 @@ export class FinancialController {
     );
   }
 
-  @Get("settlement/dead-letter")
-  deadLetter(@Query("page") page = "1", @Query("limit") limit = "20") {
-    return this.financial.settlementDeadLetter(Math.max(1, Number(page) || 1), Math.min(100, Math.max(1, Number(limit) || 20)));
-  }
-
-  @Post("settlement/dead-letter/requeue")
-  requeue(@Body() body: { tripId: string }) {
-    return this.financial.requeueSettlement(body.tripId);
-  }
-
+  @RequirePermissions("payments.manage")
   @Post("settlement/run")
   runSettlement(
     @Body()

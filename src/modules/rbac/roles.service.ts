@@ -131,12 +131,14 @@ export class RolesService {
     keys: string[],
   ): Promise<void> {
     const permissionIds = await this.resolvePermissionIds(keys);
-    await this.prisma.$transaction([
-      this.prisma.rolePermission.deleteMany({ where: { roleId } }),
-      this.prisma.rolePermission.createMany({
-        data: permissionIds.map((permissionId) => ({ roleId, permissionId })),
-        skipDuplicates: true,
-      }),
-    ]);
+    await this.prisma.$transaction(async (tx) => {
+      await tx.rolePermission.deleteMany({ where: { roleId } });
+      if (permissionIds.length > 0) {
+        await tx.rolePermission.createMany({
+          data: permissionIds.map((permissionId) => ({ roleId, permissionId })),
+          skipDuplicates: true,
+        });
+      }
+    });
   }
 }

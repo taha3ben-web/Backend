@@ -32,9 +32,8 @@ export class WithdrawalsController {
     return this.withdrawals.createForDriver(user.userId, dto.amount, dto.note);
   }
 
-  @UseGuards(RolesGuard)
+  @UseGuards(RolesGuard, PermissionsGuard)
   @Roles("STAFF")
-  @UseGuards(PermissionsGuard)
   @RequirePermissions("payments.read", "payments.manage")
   @Get()
   findAll(
@@ -45,18 +44,16 @@ export class WithdrawalsController {
     return this.withdrawals.findAll(q, status, search);
   }
 
-  @UseGuards(RolesGuard)
+  @UseGuards(RolesGuard, PermissionsGuard)
   @Roles("STAFF")
-  @UseGuards(PermissionsGuard)
-  @RequirePermissions("payments.read", "payments.manage", "reports.read")
+  @RequirePermissions("payments.read", "payments.manage")
   @Get("summary")
   summary(@Query("status") status?: WithdrawStatus, @Query("search") search?: string) {
     return this.withdrawals.summary(status, search);
   }
 
-  @UseGuards(RolesGuard)
+  @UseGuards(RolesGuard, PermissionsGuard)
   @Roles("STAFF")
-  @UseGuards(PermissionsGuard)
   @RequirePermissions("payments.manage")
   @Patch(":id/approve")
   approve(
@@ -67,9 +64,8 @@ export class WithdrawalsController {
     return this.withdrawals.approve(id, user.userId, dto.note);
   }
 
-  @UseGuards(RolesGuard)
+  @UseGuards(RolesGuard, PermissionsGuard)
   @Roles("STAFF")
-  @UseGuards(PermissionsGuard)
   @RequirePermissions("payments.manage")
   @Patch(":id/paid")
   markPaid(
@@ -80,9 +76,8 @@ export class WithdrawalsController {
     return this.withdrawals.markPaid(id, user.userId, dto.note);
   }
 
-  @UseGuards(RolesGuard)
+  @UseGuards(RolesGuard, PermissionsGuard)
   @Roles("STAFF")
-  @UseGuards(PermissionsGuard)
   @RequirePermissions("payments.manage")
   @Patch(":id/reject")
   reject(

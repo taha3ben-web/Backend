@@ -26,44 +26,44 @@ import {
 export class DriversController {
   constructor(private readonly drivers: DriversService) {}
 
-  @Get()
   @RequirePermissions("drivers.read", "drivers.manage")
+  @Get()
   findAll(@Query() q: PaginationDto, @Query("status") status?: DriverStatus) {
     return this.drivers.findAll(q, status);
   }
 
-  @Get(":id")
   @RequirePermissions("drivers.read", "drivers.manage")
+  @Get(":id")
   findOne(@Param("id") id: string) {
     return this.drivers.findOne(id);
   }
 
-  @Patch(":id/approve")
   @RequirePermissions("drivers.manage")
+  @Patch(":id/approve")
   approve(@Param("id") id: string) {
     return this.drivers.setStatus(id, "APPROVED");
   }
 
-  @Patch(":id/reject")
   @RequirePermissions("drivers.manage")
+  @Patch(":id/reject")
   reject(@Param("id") id: string) {
     return this.drivers.setStatus(id, "REJECTED");
   }
 
-  @Patch(":id/suspend")
   @RequirePermissions("drivers.manage")
+  @Patch(":id/suspend")
   suspend(@Param("id") id: string) {
     return this.drivers.setStatus(id, "SUSPENDED");
   }
 
-  @Patch(":id/ban")
   @RequirePermissions("drivers.manage")
+  @Patch(":id/ban")
   ban(@Param("id") id: string) {
     return this.drivers.setStatus(id, "BANNED");
   }
 
-  @Patch("documents/:docId/review")
   @RequirePermissions("drivers.documents", "drivers.manage")
+  @Patch("documents/:docId/review")
   reviewDocument(
     @Param("docId") docId: string,
     @Body() body: { status: "APPROVED" | "REJECTED"; note?: string },

@@ -36,7 +36,6 @@ import {
 @Controller("vehicle-types")
 @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 @Roles("STAFF")
-@RequirePermissions("pricing.manage")
 export class VehicleTypesController {
   constructor(
     private readonly vehicleTypes: VehicleTypesService,
@@ -44,26 +43,31 @@ export class VehicleTypesController {
     private readonly requirements: RequirementsService,
   ) {}
 
+  @RequirePermissions("pricing.manage", "settings.manage")
   @Get()
   findAll(@Query() query: ListQueryDto) {
     return this.vehicleTypes.findAll(query);
   }
 
+  @RequirePermissions("pricing.manage", "settings.manage")
   @Patch("reorder")
   reorder(@Body() dto: ReorderDto, @CurrentUser() user: AuthUser) {
     return this.vehicleTypes.reorder(dto, user?.userId);
   }
 
+  @RequirePermissions("pricing.manage", "settings.manage")
   @Get(":id")
   findOne(@Param("id") id: string) {
     return this.vehicleTypes.findOne(id);
   }
 
+  @RequirePermissions("pricing.manage", "settings.manage")
   @Post()
   create(@Body() dto: CreateVehicleTypeDto, @CurrentUser() user: AuthUser) {
     return this.vehicleTypes.create(dto, user?.userId);
   }
 
+  @RequirePermissions("pricing.manage", "settings.manage")
   @Patch(":id")
   update(
     @Param("id") id: string,
@@ -73,6 +77,7 @@ export class VehicleTypesController {
     return this.vehicleTypes.update(id, dto, user?.userId);
   }
 
+  @RequirePermissions("pricing.manage", "settings.manage")
   @Patch(":id/active")
   setActive(
     @Param("id") id: string,
@@ -83,6 +88,7 @@ export class VehicleTypesController {
   }
 
   /** تغيير حالة دورة النشر (Draft/Pending/Published/Archived). */
+  @RequirePermissions("pricing.manage", "settings.manage")
   @Patch(":id/status")
   setStatus(
     @Param("id") id: string,
@@ -96,11 +102,13 @@ export class VehicleTypesController {
     );
   }
 
+  @RequirePermissions("pricing.manage", "settings.manage")
   @Post(":id/restore")
   restore(@Param("id") id: string, @CurrentUser() user: AuthUser) {
     return this.vehicleTypes.restore(id, user?.userId);
   }
 
+  @RequirePermissions("pricing.manage", "settings.manage")
   @Delete(":id")
   remove(@Param("id") id: string, @CurrentUser() user: AuthUser) {
     return this.vehicleTypes.remove(id, user?.userId);
@@ -108,11 +116,13 @@ export class VehicleTypesController {
 
   // ---- الحقول الديناميكية (Dynamic Forms) ----
 
+  @RequirePermissions("pricing.manage", "settings.manage")
   @Get(":id/fields")
   listFields(@Param("id") id: string) {
     return this.fields.findAll(id);
   }
 
+  @RequirePermissions("pricing.manage", "settings.manage")
   @Post(":id/fields")
   createField(
     @Param("id") id: string,
@@ -122,6 +132,7 @@ export class VehicleTypesController {
     return this.fields.create({ ...dto, vehicleTypeId: id }, user?.userId);
   }
 
+  @RequirePermissions("pricing.manage", "settings.manage")
   @Patch("fields/:fieldId")
   updateField(
     @Param("fieldId") fieldId: string,
@@ -131,6 +142,7 @@ export class VehicleTypesController {
     return this.fields.update(fieldId, dto, user?.userId);
   }
 
+  @RequirePermissions("pricing.manage", "settings.manage")
   @Delete("fields/:fieldId")
   removeField(
     @Param("fieldId") fieldId: string,
@@ -141,6 +153,7 @@ export class VehicleTypesController {
 
   // ---- التحقق من المتطلبات ----
 
+  @RequirePermissions("pricing.manage", "settings.manage")
   @Get(":id/verify/:driverId")
   verify(@Param("id") id: string, @Param("driverId") driverId: string) {
     return this.requirements.verify(id, driverId);

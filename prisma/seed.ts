@@ -26,9 +26,10 @@ async function main(): Promise<void> {
     { key: "pricing.manage", description: "إدارة التسعير" },
     { key: "notifications.send", description: "إرسال الإشعارات" },
     { key: "support.manage", description: "إدارة الدعم والشكاوى" },
-    { key: "safety.manage", description: "إدارة بلاغات السلامة وSOS" },
+    { key: "safety.manage", description: "إدارة ملفات السلامة والطوارئ" },
     { key: "reports.read", description: "التقارير والإحصائيات" },
     { key: "settings.manage", description: "إدارة الإعدادات" },
+    { key: "agents.manage", description: "إدارة حسابات الوكلاء" },
     { key: "staff.manage", description: "إدارة الموظفين والأدوار" },
     { key: "audit.read", description: "عرض السجلات" },
   ];
@@ -59,14 +60,15 @@ async function main(): Promise<void> {
         "pricing.manage",
         "coupons.manage",
         "notifications.send",
-        "safety.manage",
         "reports.read",
+        "safety.manage",
         "funding.read",
         "funding.manage",
         "qr.read",
         "qr.manage",
         "transfer.read",
         "transfer.manage",
+        "agents.manage",
       ],
     },
     {
@@ -83,7 +85,6 @@ async function main(): Promise<void> {
         "trips.read",
         "reports.read",
         "notifications.send",
-        "safety.manage",
         "funding.read",
         "qr.read",
         "transfer.read",
@@ -97,11 +98,13 @@ async function main(): Promise<void> {
         "trips.read",
         "payments.read",
         "support.manage",
+        "safety.manage",
         "funding.read",
         "funding.manage",
         "qr.read",
         "transfer.read",
         "transfer.manage",
+        "agents.manage",
       ],
     },
     {
@@ -132,48 +135,21 @@ async function main(): Promise<void> {
   });
 
   // حساب مدير عام (STAFF) مربوط بدور SUPER_ADMIN
-  const adminLogin = "admin";
-  const passwordHash = await bcrypt.hash("1234", 10);
-  const existingAdmin = await prisma.user.findFirst({
-    where: {
-      OR: [
-        { phone: adminLogin },
-        { phone: "0000000000" },
-        { username: adminLogin },
-        { username: "superadmin" },
-        { email: "admin@novaride.app" },
-      ],
+  const adminPhone = "0000000000";
+  const passwordHash = await bcrypt.hash("admin1234", 10);
+  await prisma.user.upsert({
+    where: { phone: adminPhone },
+    update: { staffRoleId: superAdminRole?.id },
+    create: {
+      name: "Super Admin",
+      phone: adminPhone,
+      email: "admin@novaride.app",
+      passwordHash,
+      type: "STAFF",
+      status: "ACTIVE",
+      staffRoleId: superAdminRole?.id,
     },
   });
-
-  if (existingAdmin) {
-    await prisma.user.update({
-      where: { id: existingAdmin.id },
-      data: {
-        name: "Admin",
-        username: adminLogin,
-        phone: adminLogin,
-        email: "admin@novaride.app",
-        passwordHash,
-        status: "ACTIVE",
-        type: "STAFF",
-        staffRoleId: superAdminRole?.id,
-      },
-    });
-  } else {
-    await prisma.user.create({
-      data: {
-        name: "Admin",
-        username: adminLogin,
-        phone: adminLogin,
-        email: "admin@novaride.app",
-        passwordHash,
-        type: "STAFF",
-        status: "ACTIVE",
-        staffRoleId: superAdminRole?.id,
-      },
-    });
-  }
 
   // مدينة افتراضية + قاعدة تسعير
   const city = await prisma.city.upsert({
@@ -285,7 +261,7 @@ async function main(): Promise<void> {
   }
 
   console.log(
-    "Seed done. Admin login -> username: admin / password: 1234",
+    "Seed done. Admin login -> phone: 0000000000 / password: admin1234",
   );
 }
 

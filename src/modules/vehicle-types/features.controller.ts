@@ -25,25 +25,28 @@ import { CreateFeatureDto, UpdateFeatureDto } from "./dto/feature.dto";
 @Controller("features")
 @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 @Roles("STAFF")
-@RequirePermissions("pricing.manage")
 export class FeaturesController {
   constructor(private readonly features: FeaturesService) {}
 
+  @RequirePermissions("pricing.manage", "settings.manage")
   @Get()
   findAll(@Query() query: ListQueryDto) {
     return this.features.findAll(query);
   }
 
+  @RequirePermissions("pricing.manage", "settings.manage")
   @Get(":id")
   findOne(@Param("id") id: string) {
     return this.features.findOne(id);
   }
 
+  @RequirePermissions("pricing.manage", "settings.manage")
   @Post()
   create(@Body() dto: CreateFeatureDto, @CurrentUser() user: AuthUser) {
     return this.features.create(dto, user?.userId);
   }
 
+  @RequirePermissions("pricing.manage", "settings.manage")
   @Patch(":id")
   update(
     @Param("id") id: string,
@@ -53,6 +56,7 @@ export class FeaturesController {
     return this.features.update(id, dto, user?.userId);
   }
 
+  @RequirePermissions("pricing.manage", "settings.manage")
   @Patch(":id/active")
   setActive(
     @Param("id") id: string,
@@ -62,11 +66,13 @@ export class FeaturesController {
     return this.features.setActive(id, isActive, user?.userId);
   }
 
+  @RequirePermissions("pricing.manage", "settings.manage")
   @Post(":id/restore")
   restore(@Param("id") id: string, @CurrentUser() user: AuthUser) {
     return this.features.restore(id, user?.userId);
   }
 
+  @RequirePermissions("pricing.manage", "settings.manage")
   @Delete(":id")
   remove(@Param("id") id: string, @CurrentUser() user: AuthUser) {
     return this.features.remove(id, user?.userId);

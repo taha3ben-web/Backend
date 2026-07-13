@@ -5,29 +5,25 @@ import {
 } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
 import { ConfigService } from "@nestjs/config";
-import { Prisma } from "@prisma/client";
 import * as bcrypt from "bcryptjs";
 import { PrismaService } from "../../prisma/prisma.service";
 import { RegisterDto } from "./dto/register.dto";
 import { LoginDto } from "./dto/login.dto";
 import { FirebaseLoginDto } from "./dto/firebase-login.dto";
 import { FirebaseAdminService } from "./firebase-admin.service";
-import { DeviceContextDto } from "./dto/device-context.dto";
 
 export interface AuthUserResponse {
   id: string;
   name: string;
-  username?: string;
   phone: string;
   email?: string;
   type: "PASSENGER" | "DRIVER" | "STAFF" | "AGENT";
   status: string;
 }
 
-export interface AuthRoleSummary {
-  id?: string;
-  name?: string;
-  permissions: string[];
+export interface AuthRoleResponse {
+  id: string;
+  name: string;
 }
 
 export interface Tokens {
@@ -35,27 +31,18 @@ export interface Tokens {
   refreshToken: string;
   userId: string;
   role: string;
-  sessionId: string;
   user: AuthUserResponse;
-  staffRole?: AuthRoleSummary;
   permissions: string[];
+  staffRole?: AuthRoleResponse | null;
 }
 
-export interface SessionContext {
-  ip?: string | null;
-  userAgent?: string | null;
-  device?: DeviceContextDto;
-}
-
-interface RefreshPayload {
-  sub: string;
-  role: string;
-  sid?: string;
-}
-
+/**
+ * يحوّل مدّة JWT النصية (مثل "30d"، "15m"، "7d"، "3600s") إلى ميلي ثانية.
+ * يُستخدم لضبط expiresAt لرموز التحديث (إبطال فعلي بعد انتهاء المدة).
+ */
 function ttlToMs(ttl: string): number {
   const m = /^(\d+)\s*([smhd])?$/.exec(ttl.trim());
-  if (!m) return 30 * 24 * 60 * 60 * 1000;
+  if (!m) return 30 * 24 * 60 * 60 * 1000; // افتراضي 30 يومًا
   const n = Number(m[1]);
   const unit = m[2] ?? "s";
   const mult =
@@ -78,7 +65,7 @@ export class AuthService {
     private readonly firebase: FirebaseAdminService,
   ) {}
 
-  async register(dto: RegisterDto, ctx: SessionContext = {}): Promise<Tokens> {
+  async register(dto: RegisterDto): Promise<Tokens> {
     const existing = await this.prisma.user.findUnique({
       where: { phone: dto.phone },
     });
@@ -97,96 +84,45 @@ export class AuthService {
       },
     });
 
-    const session = await this.startSession(user.id, ctx);
-    const tokens = await this.issueTokens(user.id, user.type, session.id);
-    await this.recordActivity(user.id, "auth.register", ctx, {
-      role: dto.role,
-      sessionId: session.id,
-    });
-    return tokens;
+    return this.issueTokens(user.id);
   }
 
-  async login(dto: LoginDto, ctx: SessionContext = {}): Promise<Tokens> {
-    const rawIdentifier = dto.phone.trim();
-    const normalizedIdentifier = rawIdentifier.toLowerCase();
-    const developmentAdminAlias = ["admin", "0000000000"].includes(
-      normalizedIdentifier,
-    );
-
-    if (!rawIdentifier) {
-      throw new UnauthorizedException("Invalid credentials");
-    }
-
-    const user = await this.prisma.user.findFirst({
-      where: {
-        OR: [
-          { phone: rawIdentifier },
-          { username: { equals: normalizedIdentifier, mode: "insensitive" } },
-          { email: { equals: normalizedIdentifier, mode: "insensitive" } },
-          ...(developmentAdminAlias
-            ? [
-                {
-                  type: "STAFF" as const,
-                  staffRole: { is: { name: "SUPER_ADMIN" } },
-                },
-              ]
-            : []),
-        ],
-      },
+  async login(dto: LoginDto): Promise<Tokens> {
+    const user = await this.prisma.user.findUnique({
+      where: { phone: dto.phone },
     });
-    if (!user) {
-      await this.recordActivity(null, "auth.login_failed", ctx, {
-        identifier: rawIdentifier,
-      });
-      throw new UnauthorizedException("Invalid credentials");
-    }
+    if (!user) throw new UnauthorizedException("Invalid credentials");
 
-    // دخول تطوير مؤقت: حساب admin لا يحتاج كلمة مرور.
-    const passwordlessDevelopmentAdmin =
-      developmentAdminAlias && user.type === "STAFF";
-    const ok = passwordlessDevelopmentAdmin
-      ? true
-      : dto.password
-        ? await bcrypt.compare(dto.password, user.passwordHash)
-        : false;
-    if (!ok) {
-      await this.recordActivity(null, "auth.login_failed", ctx, {
-        identifier: rawIdentifier,
-      });
-      throw new UnauthorizedException("Invalid credentials");
-    }
-    if (user.status === "BANNED") {
-      throw new ForbiddenException("Account banned");
-    }
-    if (user.status === "SUSPENDED") {
-      throw new ForbiddenException("Account suspended");
-    }
-    if (user.status === "PENDING") {
-      throw new ForbiddenException("Account pending activation");
-    }
+    const ok = await bcrypt.compare(dto.password, user.passwordHash);
+    if (!ok) throw new UnauthorizedException("Invalid credentials");
+    if (user.status !== "ACTIVE")
+      throw new ForbiddenException("Account is not active");
 
-    const session = await this.startSession(user.id, ctx);
-    const tokens = await this.issueTokens(user.id, user.type, session.id);
-    await this.recordActivity(user.id, "auth.login", ctx, {
-      sessionId: session.id,
-    });
-    return tokens;
+    return this.issueTokens(user.id);
   }
 
-  async loginWithFirebase(
-    dto: FirebaseLoginDto,
-    ctx: SessionContext = {},
-  ): Promise<Tokens> {
+  /**
+   * جسر الهوية: يتحقّق من رمز Firebase ID، ثم يُنشئ/يجد المستخدم
+   * المقابل في PostgreSQL، ويُصدر جلسة JWT خاصة بالخادم.
+   * هذا يسمح للتطبيقين (اللذين يستخدمان Firebase Auth) بالاتصال
+   * بـ WebSocket و REST دون إدارة كلمة مرور منفصلة.
+   */
+  async loginWithFirebase(dto: FirebaseLoginDto): Promise<Tokens> {
     const decoded = await this.firebase.verifyIdToken(dto.idToken);
     const firebaseUid = decoded.uid;
     const email = decoded.email ?? undefined;
     const emailVerified = decoded.email_verified === true;
+    // الهاتف المُتحقَّق منه يأتي من Firebase فقط؛ dto.phone مُدخَل من
+    // العميل (غير موثوق) ولا يُستخدم لمطابقة حساب قائم.
     const verifiedPhone = decoded.phone_number ?? undefined;
     const phone = verifiedPhone ?? dto.phone ?? undefined;
     const name =
       decoded.name ?? dto.name ?? (email ? email.split("@")[0] : "مستخدم NOVA");
     const role = dto.role ?? "PASSENGER";
 
+    // 1) المطابقة مع حساب قائم تتم فقط عبر مُعرّفات موثوقة:
+    //    firebaseUid، أو بريد مُتحقَّق منه، أو هاتف مُتحقَّق من Firebase.
+    //    (منع الاستيلاء على الحساب عبر بريد/هاتف غير مُتحقَّق منه).
     let user = await this.prisma.user.findFirst({
       where: {
         OR: [
@@ -198,15 +134,9 @@ export class AuthService {
     });
 
     if (user) {
-      if (user.status === "BANNED") {
-        throw new ForbiddenException("Account banned");
-      }
-      if (user.status === "SUSPENDED") {
-        throw new ForbiddenException("Account suspended");
-      }
-      if (user.status === "PENDING") {
-        throw new ForbiddenException("Account pending activation");
-      }
+      if (user.status !== "ACTIVE")
+        throw new ForbiddenException("Account is not active");
+      // ربط firebaseUid إذا لم يكن مربوطًا بعد.
       if (!user.firebaseUid) {
         user = await this.prisma.user.update({
           where: { id: user.id },
@@ -214,7 +144,9 @@ export class AuthService {
         });
       }
     } else {
+      // 2) إنشاء مستخدم جديد. لا توجد كلمة مرور (المصادقة عبر Firebase).
       const placeholderHash = await bcrypt.hash(`firebase:${firebaseUid}`, 10);
+      // الهاتف حقل فريد وإلزامي → نولّد قيمة مؤقتة إذا لم يتوفر.
       const safePhone = phone ?? `fb_${firebaseUid.slice(0, 18)}`;
       user = await this.prisma.user.create({
         data: {
@@ -230,20 +162,11 @@ export class AuthService {
       });
     }
 
-    const session = await this.startSession(user.id, ctx);
-    const tokens = await this.issueTokens(user.id, user.type, session.id);
-    await this.recordActivity(user.id, "auth.firebase_login", ctx, {
-      role,
-      sessionId: session.id,
-    });
-    return tokens;
+    return this.issueTokens(user.id);
   }
 
-  async refresh(
-    refreshToken: string,
-    ctx: SessionContext = {},
-  ): Promise<Tokens> {
-    let payload: RefreshPayload;
+  async refresh(refreshToken: string): Promise<Tokens> {
+    let payload: { sub: string; role: string };
     try {
       payload = await this.jwt.verifyAsync(refreshToken, {
         secret: this.config.get<string>("jwt.refreshSecret"),
@@ -252,17 +175,16 @@ export class AuthService {
       throw new UnauthorizedException("Invalid refresh token");
     }
 
+    // نطابق الرمز المُقدّم مع أي رمز غير مُبطَل للمستخدم (وليس الأحدث
+    // فقط) حتى تعمل الجلسات المتعددة (عدة أجهزة) بشكل صحيح.
     const candidates = await this.prisma.refreshToken.findMany({
       where: {
         userId: payload.sub,
         revoked: false,
-        ...(payload.sid ? { sessionId: payload.sid } : {}),
         OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
       },
-      include: { session: true },
       orderBy: { createdAt: "desc" },
     });
-
     let stored: (typeof candidates)[number] | null = null;
     for (const candidate of candidates) {
       if (await bcrypt.compare(refreshToken, candidate.tokenHash)) {
@@ -271,56 +193,20 @@ export class AuthService {
       }
     }
     if (!stored) throw new UnauthorizedException("Invalid refresh token");
-    if (stored.session?.revokedAt) {
-      throw new UnauthorizedException("Session revoked");
-    }
 
-    const expectedDeviceKey = stored.session?.deviceKey ?? null;
-    const providedDeviceKey = ctx.device?.deviceKey ?? null;
-    if (
-      expectedDeviceKey &&
-      providedDeviceKey &&
-      expectedDeviceKey !== providedDeviceKey
-    ) {
-      if (stored.sessionId) {
-        await this.revokeSession(stored.sessionId, "DEVICE_MISMATCH");
-      }
-      await this.recordActivity(payload.sub, "security.refresh_device_mismatch", ctx, {
-        expectedDeviceKey,
-        providedDeviceKey,
-        sessionId: stored.sessionId,
-      });
-      throw new UnauthorizedException("Device verification failed");
-    }
-
+    // Rotate: revoke old token then issue a fresh pair
     await this.prisma.refreshToken.update({
       where: { id: stored.id },
-      data: { revoked: true, lastUsedAt: new Date() },
+      data: { revoked: true },
     });
-
-    const sessionId = stored.sessionId ?? (await this.startSession(payload.sub, ctx)).id;
-    await this.touchSession(sessionId, ctx);
-    const tokens = await this.issueTokens(payload.sub, payload.role, sessionId);
-    await this.recordActivity(payload.sub, "auth.refresh", ctx, { sessionId });
-    return tokens;
+    return this.issueTokens(payload.sub);
   }
 
-  async logout(userId: string, sessionId?: string): Promise<{ ok: boolean }> {
-    if (sessionId) {
-      await this.revokeSession(sessionId, "LOGOUT");
-      await this.recordActivity(userId, "auth.logout", {}, { sessionId });
-      return { ok: true };
-    }
-
+  async logout(userId: string): Promise<{ ok: boolean }> {
     await this.prisma.refreshToken.updateMany({
       where: { userId, revoked: false },
-      data: { revoked: true, lastUsedAt: new Date() },
+      data: { revoked: true },
     });
-    await this.prisma.session.updateMany({
-      where: { userId, revokedAt: null },
-      data: { revokedAt: new Date(), revokeReason: "LOGOUT_ALL" },
-    });
-    await this.recordActivity(userId, "auth.logout_all", {});
     return { ok: true };
   }
 
@@ -328,34 +214,41 @@ export class AuthService {
     userId: string;
     role: string;
     user: AuthUserResponse;
-    staffRole?: AuthRoleSummary;
     permissions: string[];
+    staffRole?: AuthRoleResponse | null;
   }> {
-    const auth = await this.loadAuthProfile(userId);
-    if (!auth) throw new UnauthorizedException("User no longer exists");
+    const authData = await this.loadAuthData(userId);
+    if (!authData) throw new UnauthorizedException("User no longer exists");
+    if (authData.user.status !== "ACTIVE") {
+      throw new UnauthorizedException("Account is not active");
+    }
+
     return {
-      userId: auth.user.id,
-      role: auth.user.type,
-      user: auth.user,
-      staffRole: auth.staffRole,
-      permissions: auth.permissions,
+      userId: authData.user.id,
+      role: authData.user.type,
+      user: authData.user,
+      permissions: authData.permissions,
+      staffRole: authData.staffRole,
     };
   }
 
-  private async issueTokens(
-    userId: string,
-    role: string,
-    sessionId: string,
-  ): Promise<Tokens> {
+  private async issueTokens(userId: string): Promise<Tokens> {
+    const authData = await this.loadAuthData(userId);
+    if (!authData) throw new UnauthorizedException("User no longer exists");
+    if (authData.user.status !== "ACTIVE") {
+      throw new UnauthorizedException("Account is not active");
+    }
+    const actualRole = authData.user.type;
+
     const accessToken = await this.jwt.signAsync(
-      { sub: userId, role, sid: sessionId },
+      { sub: userId, role: actualRole },
       {
         secret: this.config.get<string>("jwt.accessSecret"),
         expiresIn: this.config.get<string>("jwt.accessTtl"),
       },
     );
     const refreshToken = await this.jwt.signAsync(
-      { sub: userId, role, sid: sessionId },
+      { sub: userId, role: actualRole },
       {
         secret: this.config.get<string>("jwt.refreshSecret"),
         expiresIn: this.config.get<string>("jwt.refreshTtl"),
@@ -367,43 +260,32 @@ export class AuthService {
     await this.prisma.refreshToken.create({
       data: {
         userId,
-        sessionId,
         tokenHash,
         expiresAt: new Date(Date.now() + ttlToMs(refreshTtl)),
-        lastUsedAt: new Date(),
       },
     });
 
-    const auth = await this.loadAuthProfile(userId);
-    if (!auth) throw new UnauthorizedException("User no longer exists");
     return {
       accessToken,
       refreshToken,
       userId,
-      role,
-      sessionId,
-      user: auth.user,
-      staffRole: auth.staffRole,
-      permissions: auth.permissions,
+      role: actualRole,
+      user: authData.user,
+      permissions: authData.permissions,
+      staffRole: authData.staffRole,
     };
   }
 
-  private async loadAuthProfile(
-    userId: string,
-  ): Promise<
-    | {
-        user: AuthUserResponse;
-        staffRole?: AuthRoleSummary;
-        permissions: string[];
-      }
-    | null
-  > {
+  private async loadAuthData(userId: string): Promise<{
+    user: AuthUserResponse;
+    permissions: string[];
+    staffRole?: AuthRoleResponse | null;
+  } | null> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: {
         id: true,
         name: true,
-        username: true,
         phone: true,
         email: true,
         type: true,
@@ -419,92 +301,26 @@ export class AuthService {
         },
       },
     });
+
     if (!user) return null;
 
-    const permissions = (user.staffRole?.permissions ?? []).map(
-      (item) => item.permission.key,
-    );
+    const permissions = user.staffRole
+      ? user.staffRole.permissions.map((item) => item.permission.key)
+      : [];
 
     return {
       user: {
         id: user.id,
         name: user.name,
-        username: user.username ?? undefined,
         phone: user.phone,
         email: user.email ?? undefined,
         type: user.type,
         status: user.status,
       },
-      staffRole: user.staffRole
-        ? {
-            id: user.staffRole.id,
-            name: user.staffRole.name,
-            permissions,
-          }
-        : undefined,
       permissions,
+      staffRole: user.staffRole
+        ? { id: user.staffRole.id, name: user.staffRole.name }
+        : null,
     };
-  }
-
-  private async startSession(userId: string, ctx: SessionContext) {
-    return this.prisma.session.create({
-      data: {
-        userId,
-        ip: ctx.ip ?? null,
-        userAgent: ctx.userAgent ?? null,
-        deviceKey: ctx.device?.deviceKey ?? null,
-        installationId: ctx.device?.installationId ?? null,
-        platform: ctx.device?.platform ?? null,
-        deviceName: ctx.device?.deviceName ?? null,
-        appVersion: ctx.device?.appVersion ?? null,
-      },
-    });
-  }
-
-  private async touchSession(sessionId: string, ctx: SessionContext): Promise<void> {
-    await this.prisma.session.updateMany({
-      where: { id: sessionId },
-      data: {
-        lastSeenAt: new Date(),
-        ip: ctx.ip ?? null,
-        userAgent: ctx.userAgent ?? null,
-        deviceKey: ctx.device?.deviceKey ?? undefined,
-        installationId: ctx.device?.installationId ?? undefined,
-        platform: ctx.device?.platform ?? undefined,
-        deviceName: ctx.device?.deviceName ?? undefined,
-        appVersion: ctx.device?.appVersion ?? undefined,
-      },
-    });
-  }
-
-  private async revokeSession(sessionId: string, reason: string): Promise<void> {
-    await this.prisma.refreshToken.updateMany({
-      where: { sessionId, revoked: false },
-      data: { revoked: true, lastUsedAt: new Date() },
-    });
-    await this.prisma.session.updateMany({
-      where: { id: sessionId, revokedAt: null },
-      data: { revokedAt: new Date(), revokeReason: reason },
-    });
-  }
-
-  private async recordActivity(
-    userId: string | null,
-    action: string,
-    ctx: SessionContext,
-    meta?: Record<string, unknown>,
-  ): Promise<void> {
-    try {
-      await this.prisma.activityLog.create({
-        data: {
-          userId,
-          action,
-          ip: ctx.ip ?? null,
-          meta: (meta ?? undefined) as Prisma.InputJsonValue | undefined,
-        },
-      });
-    } catch {
-      // best-effort only
-    }
   }
 }

@@ -12,7 +12,9 @@ import {
 import { AdPlacement } from "@prisma/client";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
 import { RolesGuard } from "../../common/guards/roles.guard";
+import { PermissionsGuard } from "../../common/guards/permissions.guard";
 import { Roles } from "../../common/decorators/roles.decorator";
+import { RequirePermissions } from "../../common/decorators/permissions.decorator";
 import { AdsService } from "./ads.service";
 import { CreateAdDto, UpdateAdDto } from "./dto/ad.dto";
 
@@ -28,29 +30,33 @@ export class AdsController {
   }
 
   @Get()
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
   @Roles("STAFF")
+  @RequirePermissions("settings.manage")
   findAll(@Query("placement") placement?: AdPlacement) {
     return this.ads.findAll(placement);
   }
 
   @Post()
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
   @Roles("STAFF")
+  @RequirePermissions("settings.manage")
   create(@Body() dto: CreateAdDto) {
     return this.ads.create(dto);
   }
 
   @Patch(":id")
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
   @Roles("STAFF")
+  @RequirePermissions("settings.manage")
   update(@Param("id") id: string, @Body() dto: UpdateAdDto) {
     return this.ads.update(id, dto);
   }
 
   @Delete(":id")
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
   @Roles("STAFF")
+  @RequirePermissions("settings.manage")
   remove(@Param("id") id: string) {
     return this.ads.remove(id);
   }

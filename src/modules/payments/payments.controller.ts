@@ -28,8 +28,8 @@ import {
 export class PaymentsController {
   constructor(private readonly payments: PaymentsService) {}
 
-  @Get()
   @RequirePermissions("payments.read", "payments.manage")
+  @Get()
   findAll(
     @Query() q: PaginationDto,
     @Query("status") status?: PaymentStatus,
@@ -40,8 +40,8 @@ export class PaymentsController {
     return this.payments.findAll(q, status, method, provider, search);
   }
 
+  @RequirePermissions("payments.read", "payments.manage")
   @Get("summary")
-  @RequirePermissions("payments.read", "payments.manage", "reports.read")
   summary(
     @Query("status") status?: PaymentStatus,
     @Query("method") method?: PaymentMethod,
@@ -51,14 +51,14 @@ export class PaymentsController {
     return this.payments.summary(status, method, provider, search);
   }
 
-  @Get(":id")
   @RequirePermissions("payments.read", "payments.manage")
+  @Get(":id")
   findOne(@Param("id") id: string) {
     return this.payments.findOne(id);
   }
 
-  @Post("trip/:tripId/checkout")
   @RequirePermissions("payments.manage")
+  @Post("trip/:tripId/checkout")
   createCheckout(
     @Param("tripId") tripId: string,
     @Body() dto: CreatePaymentCheckoutDto,
@@ -66,27 +66,27 @@ export class PaymentsController {
     return this.payments.createCheckoutForTrip(tripId, dto);
   }
 
-  @Patch(":id/status")
   @RequirePermissions("payments.manage")
+  @Patch(":id/status")
   updateStatus(@Param("id") id: string, @Body() dto: UpdatePaymentStatusDto) {
     return this.payments.updateStatus(id, dto.status, dto.reference, dto.reason);
   }
 
+  @RequirePermissions("payments.manage")
   @Post(":id/capture")
-  @RequirePermissions("payments.manage")
   capture(@Param("id") id: string, @Body() dto: PaymentActionDto) {
-    return this.payments.capture(id, dto.idempotencyKey, dto.reference, dto.reason);
+    return this.payments.capture(id, dto.reference, dto.reason);
   }
 
+  @RequirePermissions("payments.manage")
   @Post(":id/refund")
-  @RequirePermissions("payments.manage")
   refund(@Param("id") id: string, @Body() dto: PaymentActionDto) {
-    return this.payments.refund(id, dto.idempotencyKey, dto.amount, dto.reference, dto.reason);
+    return this.payments.refund(id, dto.reference, dto.reason);
   }
 
-  @Post(":id/cancel")
   @RequirePermissions("payments.manage")
+  @Post(":id/cancel")
   cancel(@Param("id") id: string, @Body() dto: PaymentActionDto) {
-    return this.payments.cancel(id, dto.idempotencyKey, dto.reference, dto.reason);
+    return this.payments.cancel(id, dto.reference, dto.reason);
   }
 }

@@ -28,20 +28,22 @@ import {
 @Controller("vehicle-pricing")
 @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 @Roles("STAFF")
-@RequirePermissions("pricing.manage")
 export class VehiclePricingController {
   constructor(private readonly pricing: VehiclePricingService) {}
 
+  @RequirePermissions("pricing.manage")
   @Get()
   findAll(@Query() query: ListQueryDto) {
     return this.pricing.findAll(query);
   }
 
+  @RequirePermissions("pricing.manage")
   @Get(":id")
   findOne(@Param("id") id: string) {
     return this.pricing.findOne(id);
   }
 
+  @RequirePermissions("pricing.manage")
   @Post()
   create(
     @Body() dto: CreateVehiclePricingRuleDto,
@@ -50,6 +52,7 @@ export class VehiclePricingController {
     return this.pricing.create(dto, user?.userId);
   }
 
+  @RequirePermissions("pricing.manage")
   @Patch(":id")
   update(
     @Param("id") id: string,
@@ -59,11 +62,13 @@ export class VehiclePricingController {
     return this.pricing.update(id, dto, user?.userId);
   }
 
+  @RequirePermissions("pricing.manage")
   @Post(":id/restore")
   restore(@Param("id") id: string, @CurrentUser() user: AuthUser) {
     return this.pricing.restore(id, user?.userId);
   }
 
+  @RequirePermissions("pricing.manage")
   @Delete(":id")
   remove(@Param("id") id: string, @CurrentUser() user: AuthUser) {
     return this.pricing.remove(id, user?.userId);
