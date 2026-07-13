@@ -4,6 +4,7 @@
   "private": true,
   "description": "NOVA Ride production backend (NestJS + Prisma + PostgreSQL + Redis + WebSocket)",
   "scripts": {
+    "prebuild": "node scripts/cleanup-legacy-files.mjs",
     "build": "nest build",
     "start": "nest start",
     "start:dev": "nest start --watch",
