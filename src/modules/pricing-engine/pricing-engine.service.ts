@@ -28,9 +28,7 @@ export interface PricingContext {
 }
 
 export type PricingSource =
-  | "VEHICLE_PRICING_RULE"
-  | "LEGACY_PRICING_RULE"
-  | "DEFAULT";
+  "VEHICLE_PRICING_RULE" | "LEGACY_PRICING_RULE" | "DEFAULT";
 
 export interface PricingRuleUsed {
   source: PricingSource;
@@ -82,6 +80,8 @@ const DEFAULT_RULE = {
   maxFare: null as number | null,
   currency: "DZD",
 };
+
+const DEFAULT_COMMISSION_PCT = 15;
 
 /**
  * محرك التسعير المستقل (Pricing Engine).
@@ -181,7 +181,7 @@ export class PricingEngineService {
           maxFare: best.maxFare,
           currency: best.currency,
           peakMultiplier: best.peakMultiplier ?? 1,
-          commissionPct: best.commissionPct ?? 0,
+          commissionPct: best.commissionPct ?? DEFAULT_COMMISSION_PCT,
           negotiationMin:
             best.negotiationMin != null ? Number(best.negotiationMin) : null,
           negotiationMax:
@@ -196,7 +196,10 @@ export class PricingEngineService {
       }
     }
 
-    const legacy = await this.resolveLegacy(ctx.rideClass ?? "ECONOMY", ctx.cityId);
+    const legacy = await this.resolveLegacy(
+      ctx.rideClass ?? "ECONOMY",
+      ctx.cityId,
+    );
     const peakMultiplier = await this.currentPeakMultiplier(legacy.id, now);
     return {
       baseFare: legacy.baseFare,
@@ -206,7 +209,7 @@ export class PricingEngineService {
       maxFare: legacy.maxFare,
       currency: legacy.currency,
       peakMultiplier,
-      commissionPct: 0,
+      commissionPct: DEFAULT_COMMISSION_PCT,
       negotiationMin: null,
       negotiationMax: null,
       ruleUsed: {

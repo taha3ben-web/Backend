@@ -16,6 +16,7 @@
     "seed": "ts-node prisma/seed.ts",
     "lint": "eslint \"src/**/*.ts\" --fix",
     "test": "jest",
+    "test:logic": "ts-node --transpile-only scripts/logic-test.ts",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "smoke": "node scripts/smoke.mjs"

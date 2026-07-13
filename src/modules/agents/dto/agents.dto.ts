@@ -20,6 +20,7 @@ export class CreateAgentDto {
 
   @IsString()
   @MinLength(6)
+  @MaxLength(128)
   declare password: string;
 
   @IsString()
@@ -42,6 +43,24 @@ export class CreateAgentDto {
 
 export class UpdateAgentDto {
   @IsOptional()
+  @IsString()
+  @MinLength(2)
+  @MaxLength(120)
+  name?: string;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(6)
+  @MaxLength(40)
+  phone?: string;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(3)
+  @MaxLength(40)
+  agentCode?: string;
+
+  @IsOptional()
   @IsEnum(AgentStatus)
   status?: AgentStatus;
 
@@ -58,4 +77,11 @@ export class UpdateAgentDto {
 export class AssignAgentRoleDto {
   @IsString()
   declare roleId: string;
+}
+
+export class UpdateAgentPasswordDto {
+  @IsString()
+  @MinLength(6)
+  @MaxLength(128)
+  declare password: string;
 }

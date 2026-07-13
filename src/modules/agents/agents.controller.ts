@@ -15,6 +15,7 @@ import {
   AssignAgentRoleDto,
   CreateAgentDto,
   UpdateAgentDto,
+  UpdateAgentPasswordDto,
 } from "./dto/agents.dto";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
 import { RolesGuard } from "../../common/guards/roles.guard";
@@ -70,5 +71,10 @@ export class AgentsController {
   @Patch(":id/role")
   assignRole(@Param("id") id: string, @Body() dto: AssignAgentRoleDto) {
     return this.agents.assignRole(id, dto);
+  }
+
+  @Patch(":id/password")
+  updatePassword(@Param("id") id: string, @Body() dto: UpdateAgentPasswordDto) {
+    return this.agents.updatePassword(id, dto);
   }
 }

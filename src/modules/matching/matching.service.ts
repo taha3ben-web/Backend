@@ -126,7 +126,11 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
       dto.pickupLng,
       dto.destLat,
       dto.destLng,
-      { rideClass, cityId: dto.cityId, vehicleTypeId: vehicleTypeId ?? undefined },
+      {
+        rideClass,
+        cityId: dto.cityId,
+        vehicleTypeId: vehicleTypeId ?? undefined,
+      },
     );
 
     // تطبيق الكوبون (اختياري) — يتحقق ويحسب الخصم ويحجز الاستخدام
@@ -158,6 +162,7 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
         distanceKm: quote.distanceKm,
         durationSec: quote.durationSec,
         fare,
+        commissionPct: quote.commissionPct,
         currency: quote.currency,
         cityId: dto.cityId,
         couponId,
@@ -339,7 +344,10 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
         driverUserId?: string;
         accepted?: boolean;
       };
-      if (typeof msg.tripId === "string" && typeof msg.driverUserId === "string") {
+      if (
+        typeof msg.tripId === "string" &&
+        typeof msg.driverUserId === "string"
+      ) {
         this.resolvePending(
           `${msg.tripId}:${msg.driverUserId}`,
           msg.accepted === true,

@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Header,
   Param,
   Post,
   Put,
@@ -24,42 +25,48 @@ import {
 @Controller("settings")
 @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 @Roles("STAFF")
+@RequirePermissions("settings.manage")
 export class SettingsController {
   constructor(private readonly settings: SettingsService) {}
 
   @Get()
-  @RequirePermissions("settings.manage")
   findAll(@Query("group") group?: string) {
     return this.settings.findAll(group);
   }
 
   @Get(":key")
-  @RequirePermissions("settings.manage")
   findOne(@Param("key") key: string) {
     return this.settings.findOne(key);
   }
 
   @Post()
-  @RequirePermissions("settings.manage")
   upsert(@Body() dto: UpsertSettingDto) {
     return this.settings.upsert(dto);
   }
 
   @Post("bulk")
-  @RequirePermissions("settings.manage")
   bulkUpsert(@Body() dto: BulkUpsertSettingsDto) {
     return this.settings.bulkUpsert(dto);
   }
 
   @Put(":key")
-  @RequirePermissions("settings.manage")
   updateValue(@Param("key") key: string, @Body() dto: UpdateSettingValueDto) {
     return this.settings.updateValue(key, dto);
   }
 
   @Delete(":key")
-  @RequirePermissions("settings.manage")
   remove(@Param("key") key: string) {
     return this.settings.remove(key);
+  }
+}
+
+@Controller("public/config")
+export class PublicSettingsController {
+  constructor(private readonly settings: SettingsService) {}
+
+  @Get()
+  @Header("Cache-Control", "public, max-age=30, stale-while-revalidate=300")
+  getConfig() {
+    return this.settings.publicConfig();
   }
 }

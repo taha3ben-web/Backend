@@ -5,10 +5,9 @@ import { AuthService } from "./auth.service";
 import { AuthController } from "./auth.controller";
 import { JwtStrategy } from "./strategies/jwt.strategy";
 import { FirebaseAdminService } from "./firebase-admin.service";
-import { SessionsModule } from "../sessions/sessions.module";
 
 @Module({
-  imports: [PassportModule, JwtModule.register({}), SessionsModule],
+  imports: [PassportModule, JwtModule.register({})],
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy, FirebaseAdminService],
   exports: [AuthService, FirebaseAdminService],

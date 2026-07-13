@@ -13,7 +13,7 @@ async function bootstrap(): Promise<void> {
 
   const isProd = process.env.NODE_ENV === "production";
 
-  // في الإنتاج: ارفض الإقلاع بأسرار JWT افتراضية/ضعيفة (خطر أمني فادح).
+  // في الإنتاج: ارفض الإقلاع إذا غابت أسرار أو إعدادات الحماية الأساسية.
   if (isProd) {
     const weak = (
       [
@@ -25,10 +25,25 @@ async function bootstrap(): Promise<void> {
     );
     if (weak.length) {
       throw new Error(
-        `أسرار JWT غير مضبوطة في الإنتاج: ${weak
-          .map(([k]) => k)
-          .join(", ")}`,
+        `أسرار JWT غير مضبوطة في الإنتاج: ${weak.map(([k]) => k).join(", ")}`,
       );
+    }
+
+    const requiredProductionValues = [
+      "DATABASE_URL",
+      "REDIS_URL",
+      "CORS_ORIGINS",
+      "PAYMENT_WEBHOOK_TOKEN",
+      "METRICS_TOKEN",
+    ].filter((key) => !process.env[key]?.trim());
+    if (requiredProductionValues.length) {
+      throw new Error(
+        `إعدادات إنتاج إلزامية غير مضبوطة: ${requiredProductionValues.join(", ")}`,
+      );
+    }
+
+    if (process.env.CORS_ORIGINS?.trim() === "*") {
+      throw new Error("CORS_ORIGINS لا يمكن أن تكون * في الإنتاج");
     }
   }
 
@@ -84,10 +99,7 @@ async function bootstrap(): Promise<void> {
 
   const port = process.env.PORT ? Number(process.env.PORT) : 4000;
   await app.listen(port, "0.0.0.0");
-  Logger.log(
-    `NOVA backend running on port ${port} (prefix /api)`,
-    "Bootstrap",
-  );
+  Logger.log(`NOVA backend running on port ${port} (prefix /api)`, "Bootstrap");
 }
 
 void bootstrap();

@@ -5,11 +5,14 @@
 //   BASE_URL=https://nova-backend-xxxx.run.app node scripts/smoke.mjs
 //   (افتراضيًا http://localhost:4000)
 //
-// اختياري: SMOKE_EMAIL / SMOKE_PASSWORD لاختبار تسجيل الدخول.
+// اختياري: SMOKE_PHONE / SMOKE_PASSWORD لاختبار تسجيل الدخول الحقيقي.
 //
 // يخرج برمز 0 عند نجاح كل الفحوص، وبرمز 1 عند فشل أي فحص (مناسب لـ CI).
 
-const BASE = (process.env.BASE_URL ?? "http://localhost:4000").replace(/\/$/, "");
+const BASE = (process.env.BASE_URL ?? "http://localhost:4000").replace(
+  /\/$/,
+  "",
+);
 const API = BASE.endsWith("/api") ? BASE : `${BASE}/api`;
 const TIMEOUT_MS = Number(process.env.SMOKE_TIMEOUT_MS ?? 10000);
 
@@ -56,7 +59,8 @@ async function main() {
   // 1) Liveness
   try {
     const r = await req("/health/live");
-    if (r.status === 200 && r.data?.ok) ok("GET /health/live", `uptime=${r.data.uptimeSec}s`);
+    if (r.status === 200 && r.data?.ok)
+      ok("GET /health/live", `uptime=${r.data.uptimeSec}s`);
     else fail("GET /health/live", `status=${r.status}`);
   } catch (e) {
     fail("GET /health/live", e.message);
@@ -67,9 +71,15 @@ async function main() {
     const r = await req("/health/ready");
     const c = r.data?.checks;
     if (r.status === 200 && r.data?.ok) {
-      ok("GET /health/ready", `db=${c?.db?.latencyMs}ms redis=${c?.redis?.latencyMs}ms`);
+      ok(
+        "GET /health/ready",
+        `db=${c?.db?.latencyMs}ms redis=${c?.redis?.latencyMs}ms`,
+      );
     } else {
-      fail("GET /health/ready", `status=${r.status} checks=${JSON.stringify(c)}`);
+      fail(
+        "GET /health/ready",
+        `status=${r.status} checks=${JSON.stringify(c)}`,
+      );
     }
   } catch (e) {
     fail("GET /health/ready", e.message);
@@ -86,7 +96,10 @@ async function main() {
 
   // 4) التحقق من المدخلات — جسم خاطئ يجب أن يُرفض (400) وليس 500
   try {
-    const r = await req("/auth/login", { method: "POST", body: { bogus: true } });
+    const r = await req("/auth/login", {
+      method: "POST",
+      body: { bogus: true },
+    });
     if (r.status === 400) ok("POST /auth/login بجسم خاطئ → 400 (التحقق يعمل)");
     else if (r.status === 401) ok("POST /auth/login → 401 (مقبول)");
     else fail("POST /auth/login", `متوقع 400/401 لكن status=${r.status}`);
@@ -95,19 +108,27 @@ async function main() {
   }
 
   // 5) اختياري: تسجيل دخول حقيقي إن توفّرت البيانات
-  if (process.env.SMOKE_EMAIL && process.env.SMOKE_PASSWORD) {
+  if (process.env.SMOKE_PHONE && process.env.SMOKE_PASSWORD) {
     try {
       const r = await req("/auth/login", {
         method: "POST",
         body: {
-          email: process.env.SMOKE_EMAIL,
+          phone: process.env.SMOKE_PHONE,
           password: process.env.SMOKE_PASSWORD,
         },
       });
       if (r.status === 200 && r.data?.accessToken) {
         ok("POST /auth/login ببيانات صحيحة → 200 + توكن");
-        const me = await req("/auth/me", { token: r.data.accessToken }).catch(() => null);
-        if (me && me.status === 200) ok("GET /auth/me بالتوكن → 200");
+        const me = await req("/auth/me", {
+          method: "POST",
+          token: r.data.accessToken,
+        }).catch(() => null);
+        if (me && me.status === 200) ok("POST /auth/me بالتوكن → 200");
+        else
+          fail(
+            "POST /auth/me بالتوكن",
+            `status=${me?.status ?? "network_error"}`,
+          );
       } else {
         fail("POST /auth/login (حقيقي)", `status=${r.status}`);
       }

@@ -74,7 +74,12 @@ async function main(): Promise<void> {
     {
       name: "SUPPORT",
       description: "دعم فني",
-      keys: ["support.manage", "safety.manage", "passengers.read", "trips.read"],
+      keys: [
+        "support.manage",
+        "safety.manage",
+        "passengers.read",
+        "trips.read",
+      ],
     },
     {
       name: "SUPERVISOR",
@@ -186,10 +191,13 @@ async function main(): Promise<void> {
     key: string;
     group: string;
     value: unknown;
+    isPublic?: boolean;
+    isSensitive?: boolean;
   }> = [
     {
       key: "app.general",
       group: "general",
+      isPublic: true,
       value: {
         appName: "NOVA Ride",
         logoUrl: "",
@@ -202,6 +210,7 @@ async function main(): Promise<void> {
     {
       key: "app.theme",
       group: "appearance",
+      isPublic: true,
       value: {
         primaryColor: "#0EA5E9",
         secondaryColor: "#111827",
@@ -211,16 +220,19 @@ async function main(): Promise<void> {
     {
       key: "app.legal",
       group: "legal",
+      isPublic: true,
       value: { privacyPolicyUrl: "", termsUrl: "" },
     },
     {
       key: "integrations.firebase",
       group: "integrations",
+      isSensitive: true,
       value: { projectId: "", apiKey: "", messagingSenderId: "", appId: "" },
     },
     {
       key: "integrations.maps",
       group: "integrations",
+      isPublic: true,
       value: {
         provider: "osm",
         tileUrl: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
@@ -229,24 +241,37 @@ async function main(): Promise<void> {
     {
       key: "integrations.notifications",
       group: "integrations",
+      isPublic: true,
       value: { fcmEnabled: false, smsEnabled: false, emailEnabled: false },
     },
     {
       key: "integrations.email",
       group: "integrations",
+      isSensitive: true,
       value: { fromName: "NOVA Ride", fromEmail: "", apiUrl: "" },
     },
     {
       key: "integrations.sms",
       group: "integrations",
+      isSensitive: true,
       value: { sender: "NOVA", apiUrl: "" },
     },
   ];
   for (const s of settingDefs) {
     await prisma.setting.upsert({
       where: { key: s.key },
-      update: { group: s.group },
-      create: { key: s.key, group: s.group, value: s.value as object },
+      update: {
+        group: s.group,
+        isPublic: s.isPublic ?? false,
+        isSensitive: s.isSensitive ?? false,
+      },
+      create: {
+        key: s.key,
+        group: s.group,
+        value: s.value as object,
+        isPublic: s.isPublic ?? false,
+        isSensitive: s.isSensitive ?? false,
+      },
     });
   }
 

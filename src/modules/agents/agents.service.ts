@@ -11,6 +11,7 @@ import {
   AssignAgentRoleDto,
   CreateAgentDto,
   UpdateAgentDto,
+  UpdateAgentPasswordDto,
 } from "./dto/agents.dto";
 
 @Injectable()
@@ -34,11 +35,7 @@ export class AgentsService {
     return { roles, cities };
   }
 
-  async listAgents(
-    q: PaginationDto,
-    status?: AgentStatus,
-    cityId?: string,
-  ) {
+  async listAgents(q: PaginationDto, status?: AgentStatus, cityId?: string) {
     const where: Prisma.AgentProfileWhereInput = {
       ...(status ? { status } : {}),
       ...(cityId ? { cityId } : {}),
@@ -99,7 +96,7 @@ export class AgentsService {
           phone: dto.phone,
           passwordHash,
           type: "AGENT",
-          status: "ACTIVE",
+          status: "PENDING",
           staffRoleId: dto.roleId,
         },
       });
@@ -121,24 +118,53 @@ export class AgentsService {
   async updateAgent(id: string, dto: UpdateAgentDto) {
     const existing = await this.prisma.agentProfile.findUnique({
       where: { id },
-      select: { id: true, userId: true },
+      select: {
+        id: true,
+        userId: true,
+        agentCode: true,
+        user: { select: { phone: true } },
+      },
     });
     if (!existing) throw new NotFoundException("الوكيل غير موجود");
     if (dto.cityId) await this.ensureCityExists(dto.cityId);
+    if (dto.phone && dto.phone !== existing.user.phone) {
+      await this.ensurePhoneAvailable(dto.phone);
+    }
+    if (
+      dto.agentCode &&
+      dto.agentCode.trim().toUpperCase() !== existing.agentCode
+    ) {
+      await this.ensureAgentCodeAvailable(dto.agentCode);
+    }
 
     const userStatus = this.mapAgentStatusToUserStatus(dto.status);
 
     return this.prisma.$transaction(async (tx) => {
-      if (userStatus) {
+      if (userStatus || dto.name !== undefined || dto.phone !== undefined) {
         await tx.user.update({
           where: { id: existing.userId },
-          data: { status: userStatus },
+          data: {
+            ...(userStatus ? { status: userStatus } : {}),
+            ...(dto.name !== undefined ? { name: dto.name } : {}),
+            ...(dto.phone !== undefined ? { phone: dto.phone } : {}),
+          },
         });
+      }
+
+      if (dto.status && dto.status !== "ACTIVE") {
+        await tx.refreshToken.updateMany({
+          where: { userId: existing.userId, revoked: false },
+          data: { revoked: true },
+        });
+        await tx.session.deleteMany({ where: { userId: existing.userId } });
       }
 
       return tx.agentProfile.update({
         where: { id },
         data: {
+          ...(dto.agentCode !== undefined
+            ? { agentCode: dto.agentCode.trim().toUpperCase() }
+            : {}),
           ...(dto.status ? { status: dto.status } : {}),
           ...(dto.cityId !== undefined ? { cityId: dto.cityId || null } : {}),
           ...(dto.notes !== undefined ? { notes: dto.notes } : {}),
@@ -162,6 +188,29 @@ export class AgentsService {
     });
 
     return this.getAgent(id);
+  }
+
+  async updatePassword(id: string, dto: UpdateAgentPasswordDto) {
+    const agent = await this.prisma.agentProfile.findUnique({
+      where: { id },
+      select: { userId: true },
+    });
+    if (!agent) throw new NotFoundException("الوكيل غير موجود");
+
+    const passwordHash = await bcrypt.hash(dto.password, 10);
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: agent.userId },
+        data: { passwordHash },
+      }),
+      this.prisma.refreshToken.updateMany({
+        where: { userId: agent.userId, revoked: false },
+        data: { revoked: true },
+      }),
+      this.prisma.session.deleteMany({ where: { userId: agent.userId } }),
+    ]);
+
+    return { ok: true };
   }
 
   async auditTrail(id: string, q: PaginationDto) {
@@ -209,9 +258,12 @@ export class AgentsService {
     if (!city) throw new NotFoundException("المدينة غير موجودة");
   }
 
-  private mapAgentStatusToUserStatus(status?: AgentStatus): UserStatus | undefined {
+  private mapAgentStatusToUserStatus(
+    status?: AgentStatus,
+  ): UserStatus | undefined {
     if (!status) return undefined;
     if (status === "SUSPENDED") return "SUSPENDED";
+    if (status === "INVITED") return "PENDING";
     return "ACTIVE";
   }
 

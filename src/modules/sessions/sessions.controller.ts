@@ -15,32 +15,49 @@ import {
 export class SessionsController {
   constructor(private readonly sessions: SessionsService) {}
 
-  /** جلسات المستخدم الحالي */
   @Get("me")
   mine(@CurrentUser() user: AuthUser) {
     return this.sessions.list(user.userId);
   }
 
-  /** إنهاء جلسة واحدة */
   @Delete(":id")
   revoke(@CurrentUser() user: AuthUser, @Param("id") id: string) {
     return this.sessions.revoke(user.userId, id);
   }
 
-  /** إنهاء كل الجلسات */
   @Delete()
   revokeAll(@CurrentUser() user: AuthUser) {
     return this.sessions.revokeAll(user.userId);
   }
 
-  // ---------- إدارة (STAFF) ----------
-
-  /** جلسات مستخدم معيّن */
   @UseGuards(RolesGuard, PermissionsGuard)
   @Roles("STAFF")
   @RequirePermissions("audit.read", "staff.manage")
   @Get("user/:userId")
   forUser(@Param("userId") userId: string) {
     return this.sessions.listForUser(userId);
+  }
+
+  @UseGuards(RolesGuard, PermissionsGuard)
+  @Roles("STAFF")
+  @RequirePermissions("audit.read", "staff.manage")
+  @Delete("user/:userId/:id")
+  revokeForUser(
+    @Param("userId") userId: string,
+    @Param("id") id: string,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.sessions.revokeForUser(userId, id, actor.userId);
+  }
+
+  @UseGuards(RolesGuard, PermissionsGuard)
+  @Roles("STAFF")
+  @RequirePermissions("audit.read", "staff.manage")
+  @Delete("user/:userId")
+  revokeAllForUser(
+    @Param("userId") userId: string,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.sessions.revokeAllForUser(userId, actor.userId);
   }
 }

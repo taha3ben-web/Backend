@@ -3,6 +3,7 @@ import {
   Get,
   Header,
   Headers,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from "@nestjs/common";
 import { PrismaService } from "../../prisma/prisma.service";
@@ -110,9 +111,15 @@ export class MetricsController {
 
   private assertAuthorized(auth?: string): void {
     const token = process.env.METRICS_TOKEN;
-    if (!token) return; // غير مقيّد في التطوير
-    const provided =
-      auth && auth.startsWith("Bearer ") ? auth.slice(7) : auth;
+    if (!token) {
+      if (process.env.NODE_ENV === "production") {
+        throw new ServiceUnavailableException(
+          "metrics protection is not configured",
+        );
+      }
+      return; // غير مقيّد في التطوير فقط
+    }
+    const provided = auth && auth.startsWith("Bearer ") ? auth.slice(7) : auth;
     if (provided !== token) {
       throw new UnauthorizedException("metrics token غير صالح");
     }

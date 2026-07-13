@@ -4,6 +4,7 @@ import {
   Headers,
   Param,
   Post,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from "@nestjs/common";
 import { PaymentsService } from "./payments.service";
@@ -20,6 +21,11 @@ export class PaymentWebhooksController {
     @Headers("x-webhook-id") eventId?: string,
   ) {
     const expectedToken = process.env.PAYMENT_WEBHOOK_TOKEN?.trim();
+    if (!expectedToken && process.env.NODE_ENV === "production") {
+      throw new ServiceUnavailableException(
+        "Webhook protection is not configured",
+      );
+    }
     if (expectedToken && token?.trim() !== expectedToken) {
       throw new UnauthorizedException("Webhook token غير صالح");
     }

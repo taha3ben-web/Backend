@@ -357,6 +357,7 @@ model Trip {
   distanceKm    Float?
   durationSec   Int?
   fare          Decimal?      @db.Decimal(12, 2)
+  commissionPct Float         @default(15)
   currency      String        @default("DZD")
   paymentMethod PaymentMethod @default(CASH)
   cancelReason  String?
@@ -807,6 +808,7 @@ model City {
   centerLat Float?
   centerLng Float?
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   zones        Zone[]
   pricingRules PricingRule[]
@@ -822,6 +824,7 @@ model Zone {
   name      String
   polygon   Json?
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([cityId])
 }
@@ -874,11 +877,17 @@ model EmergencyContact {
 
 // ---------- Platform / system ----------
 model Setting {
-  id        String   @id @default(uuid())
-  key       String   @unique
-  value     Json
-  group     String?
-  updatedAt DateTime @updatedAt
+  id          String   @id @default(uuid())
+  key         String   @unique
+  value       Json
+  group       String?
+  isPublic    Boolean  @default(false)
+  isSensitive Boolean  @default(false)
+  version     Int      @default(1)
+  updatedAt   DateTime @updatedAt
+
+  @@index([group])
+  @@index([isPublic, isSensitive])
 }
 
 model AppVersion {
@@ -908,13 +917,16 @@ model RefreshToken {
   id        String   @id @default(uuid())
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessionId String?
   tokenHash String
   revoked   Boolean  @default(false)
   expiresAt DateTime?
   createdAt DateTime @default(now())
 
   @@index([userId])
+  @@index([sessionId])
   @@index([userId, revoked])
+  @@index([userId, sessionId, revoked])
   @@index([expiresAt])
 }
 
@@ -1155,7 +1167,7 @@ model VehiclePricingRule {
   maxFare        Decimal? @db.Decimal(12, 2)
   negotiationMin Decimal? @db.Decimal(12, 2)
   negotiationMax Decimal? @db.Decimal(12, 2)
-  commissionPct  Float    @default(0)
+  commissionPct  Float    @default(15)
   currency       String   @default("DZD")
 
   priority  Int      @default(0) // الأعلى يفوز عند تطابق أكثر من قاعدة
