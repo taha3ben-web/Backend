@@ -179,7 +179,7 @@ export class VehicleTypesService {
         maxAppVersion: dto.maxAppVersion,
         badgeText: dto.badgeText,
         etaMinutes: dto.etaMinutes,
-        iconType: dto.iconType ?? "EMOJI",
+        iconType: dto.iconType ?? "PNG",
         iconValue: dto.iconValue,
         iconUrl: dto.iconUrl,
         imageUrl: dto.imageUrl,
@@ -192,8 +192,8 @@ export class VehicleTypesService {
         requiredDocuments: dto.requiredDocuments ?? [],
         requiredPhotos: dto.requiredPhotos ?? [],
         requirements: this.json(dto.requirements),
-        // دورة النشر: الافتراضي DRAFT (لا يظهر للركاب قبل النشر)
-        status: (dto.status as WorkflowStatus) ?? "DRAFT",
+        // الإنشاء من لوحة الإدارة يُنشر مباشرة ليظهر في تطبيقي الراكب والسائق.
+        status: (dto.status as WorkflowStatus) ?? "PUBLISHED",
         isActive: dto.isActive ?? true,
         sortOrder: dto.sortOrder ?? 0,
       },

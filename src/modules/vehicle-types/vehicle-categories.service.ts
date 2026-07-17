@@ -118,7 +118,7 @@ export class VehicleCategoriesService {
         nameI18n: this.toI18n(dto.nameI18n),
         description: dto.description,
         descriptionI18n: this.toI18n(dto.descriptionI18n),
-        iconType: dto.iconType ?? "EMOJI",
+        iconType: dto.iconType ?? "PNG",
         iconValue: dto.iconValue,
         iconUrl: dto.iconUrl,
         imageUrl: dto.imageUrl,

@@ -193,12 +193,14 @@ async function main(): Promise<void> {
 
   // حساب مدير عام (STAFF) مربوط بدور SUPER_ADMIN
   const adminPhone = "0000000000";
-  const passwordHash = await bcrypt.hash("admin1234", 10);
+  const adminUsername = (process.env.ADMIN_USERNAME ?? "admin").toLowerCase();
+  const passwordHash = await bcrypt.hash(process.env.ADMIN_PASSWORD ?? "admin1234", 10);
   await prisma.user.upsert({
     where: { phone: adminPhone },
-    update: { staffRoleId: superAdminRole?.id },
+    update: { username: adminUsername, staffRoleId: superAdminRole?.id },
     create: {
       name: "Super Admin",
+      username: adminUsername,
       phone: adminPhone,
       email: "admin@novaride.app",
       passwordHash,

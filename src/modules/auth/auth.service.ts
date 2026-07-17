@@ -23,6 +23,7 @@ import { normalizePurpose } from "./otp.util";
 export interface AuthUserResponse {
   id: string;
   name: string;
+  username?: string | null;
   phone: string;
   email?: string;
   type: "PASSENGER" | "DRIVER" | "STAFF" | "AGENT";
@@ -150,22 +151,24 @@ export class AuthService {
   }
 
   async login(dto: LoginDto, session?: SessionContext): Promise<Tokens> {
-    const phone = await this.normalizedPhone(dto.phone, dto.countryCode);
+    const username = dto.username?.trim().toLowerCase();
+    const phone = username ? undefined : await this.normalizedPhone(dto.phone ?? "", dto.countryCode);
+    const loginKey = username ? `username:${username}` : (phone as string);
     // حماية من القوة الغاشمة: نرفض فورًا إن كان هذا الحساب مقفولًا مؤقتًا.
-    await this.loginThrottle.assertNotLocked(phone);
+    await this.loginThrottle.assertNotLocked(loginKey);
 
-    const user = await this.prisma.user.findUnique({
-      where: { phone },
-    });
+    const user = username
+      ? await this.prisma.user.findUnique({ where: { username } })
+      : await this.prisma.user.findUnique({ where: { phone: phone as string } });
     if (!user) {
       // نعدّ المحاولة حتى لرقم غير مسجّل لمنع التخمين المتسلسل.
-      await this.loginThrottle.recordFailure(phone);
+      await this.loginThrottle.recordFailure(loginKey);
       throw new AppException("INVALID_CREDENTIALS");
     }
 
     const ok = await bcrypt.compare(dto.password, user.passwordHash);
     if (!ok) {
-      await this.loginThrottle.recordFailure(phone);
+      await this.loginThrottle.recordFailure(loginKey);
       throw new AppException("INVALID_CREDENTIALS");
     }
     if (user.status !== "ACTIVE") {
@@ -173,7 +176,7 @@ export class AuthService {
     }
 
     // نجاح: نمسح عدّاد الفشل والقفل عن هذا الحساب.
-    await this.loginThrottle.recordSuccess(phone);
+    await this.loginThrottle.recordSuccess(loginKey);
 
     const sessionId = await this.createSession(user.id, session);
     await this.markAgentLogin(user.id, user.type);

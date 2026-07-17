@@ -19,6 +19,9 @@ export class StaffService {
 
   /** إنشاء موظف (STAFF) وتعيين دور له */
   async createStaff(dto: CreateStaffDto) {
+    const username = dto.username.trim().toLowerCase();
+    const usernameTaken = await this.prisma.user.findUnique({ where: { username }, select: { id: true } });
+    if (usernameTaken) throw new BadRequestException("اسم المستخدم مستخدم مسبقًا");
     const phoneTaken = await this.prisma.user.findUnique({
       where: { phone: dto.phone },
     });
@@ -33,6 +36,7 @@ export class StaffService {
     const user = await this.prisma.user.create({
       data: {
         name: dto.name,
+        username,
         phone: dto.phone,
         passwordHash,
         type: "STAFF",
@@ -51,6 +55,7 @@ export class StaffService {
         ? {
             OR: [
               { name: { contains: q.search, mode: "insensitive" as const } },
+              { username: { contains: q.search, mode: "insensitive" as const } },
               { phone: { contains: q.search } },
             ],
           }
@@ -148,6 +153,7 @@ export class StaffService {
     return {
       id: true,
       name: true,
+      username: true,
       phone: true,
       type: true,
       status: true,

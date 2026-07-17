@@ -3,6 +3,7 @@ import {
   IsIn,
   IsOptional,
   IsString,
+  Matches,
   MaxLength,
   MinLength,
 } from "class-validator";
@@ -56,6 +57,12 @@ export class CreateStaffDto {
   @IsString()
   @MinLength(2)
   declare name: string;
+
+  @IsString()
+  @MinLength(3)
+  @MaxLength(40)
+  @Matches(/^[A-Za-z0-9._-]+$/)
+  declare username: string;
 
   @IsString()
   @MinLength(6)
