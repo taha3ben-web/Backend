@@ -48,6 +48,17 @@ export class CreateVehicleTypeDto {
   @IsOptional() @IsBoolean() requiresApproval?: boolean;
   @IsOptional() @IsBoolean() visibleToPassengers?: boolean;
   @IsOptional() @IsBoolean() visibleToDrivers?: boolean;
+  @IsOptional() @IsArray() @IsString({ each: true }) appIds?: string[];
+  @IsOptional() @IsArray() @IsString({ each: true }) clientOs?: string[];
+  @IsOptional() @IsArray() @IsString({ each: true }) countryCodes?: string[];
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  audienceSegments?: string[];
+  @IsOptional() @IsString() minAppVersion?: string;
+  @IsOptional() @IsString() maxAppVersion?: string;
+  @IsOptional() @IsString() badgeText?: string;
+  @IsOptional() @IsInt() etaMinutes?: number;
 
   // الأيقونات المرنة
   @IsOptional() @IsIn(ICON_TYPES) iconType?: IconType;
@@ -61,7 +72,10 @@ export class CreateVehicleTypeDto {
   @IsOptional() @IsNumber() @Min(0) minDriverRating?: number;
   @IsOptional() @IsInt() @Min(0) minDriverTrips?: number;
   @IsOptional() @IsString() requiredLicenseType?: string;
-  @IsOptional() @IsArray() @IsString({ each: true }) requiredDocuments?: string[];
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  requiredDocuments?: string[];
   @IsOptional() @IsArray() @IsString({ each: true }) requiredPhotos?: string[];
   @IsOptional() @IsObject() requirements?: Record<string, unknown>;
 
@@ -95,6 +109,17 @@ export class UpdateVehicleTypeDto {
   @IsOptional() @IsBoolean() requiresApproval?: boolean;
   @IsOptional() @IsBoolean() visibleToPassengers?: boolean;
   @IsOptional() @IsBoolean() visibleToDrivers?: boolean;
+  @IsOptional() @IsArray() @IsString({ each: true }) appIds?: string[];
+  @IsOptional() @IsArray() @IsString({ each: true }) clientOs?: string[];
+  @IsOptional() @IsArray() @IsString({ each: true }) countryCodes?: string[];
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  audienceSegments?: string[];
+  @IsOptional() @IsString() minAppVersion?: string;
+  @IsOptional() @IsString() maxAppVersion?: string;
+  @IsOptional() @IsString() badgeText?: string;
+  @IsOptional() @IsInt() etaMinutes?: number;
 
   @IsOptional() @IsIn(ICON_TYPES) iconType?: IconType;
   @IsOptional() @IsString() iconValue?: string;
@@ -106,7 +131,10 @@ export class UpdateVehicleTypeDto {
   @IsOptional() @IsNumber() @Min(0) minDriverRating?: number;
   @IsOptional() @IsInt() @Min(0) minDriverTrips?: number;
   @IsOptional() @IsString() requiredLicenseType?: string;
-  @IsOptional() @IsArray() @IsString({ each: true }) requiredDocuments?: string[];
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  requiredDocuments?: string[];
   @IsOptional() @IsArray() @IsString({ each: true }) requiredPhotos?: string[];
   @IsOptional() @IsObject() requirements?: Record<string, unknown>;
 

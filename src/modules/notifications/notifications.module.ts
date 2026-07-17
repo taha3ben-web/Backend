@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 import { RealtimeModule } from "../realtime/realtime.module";
+import { AuthModule } from "../auth/auth.module";
 import { NotificationsService } from "./notifications.service";
 import { NotificationsController } from "./notifications.controller";
 import { NotificationsScheduler } from "./notifications.scheduler";
@@ -10,7 +11,8 @@ import { SmsProvider } from "./providers/sms.provider";
 import { EmailProvider } from "./providers/email.provider";
 
 @Module({
-  imports: [RealtimeModule],
+  // AuthModule يُصدّر FirebaseAdminService المستخدم لإرسال FCM (HTTP v1).
+  imports: [RealtimeModule, AuthModule],
   providers: [
     NotificationsService,
     NotificationDispatcher,

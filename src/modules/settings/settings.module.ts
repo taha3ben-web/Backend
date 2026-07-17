@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { AppVersionsModule } from "../app-versions/app-versions.module";
 import { SettingsService } from "./settings.service";
 import { CitiesService } from "./cities.service";
 import { ZonesService } from "./zones.service";
@@ -18,6 +19,7 @@ import { ZonesController } from "./zones.controller";
  * SettingsService مُصدّرة لاستخدامها من وحدات أخرى.
  */
 @Module({
+  imports: [AppVersionsModule],
   providers: [
     ConfigVersionService,
     SettingsService,

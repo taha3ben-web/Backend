@@ -7,6 +7,7 @@ import {
   MatchingStrategy,
 } from "./matching-strategy";
 import { NearestDriverStrategy } from "./nearest-driver.strategy";
+import { driverOfferKey, filterUnreserved } from "../matching-lock.util";
 
 /**
  * محرك المطابقة المستقل (Matching Engine).
@@ -48,7 +49,22 @@ export class MatchingEngineService {
       ctx.pickupLng,
       ctx.radiusKm,
     );
-    const userIds = nearby.filter((id) => !exclude.has(id));
+    const notExcluded = nearby.filter((id) => !exclude.has(id));
+    if (notExcluded.length === 0) return [];
+
+    // استبعاد السائقين المحجوزين حاليًا لعرض آخر (مطابقة موزّعة، fail-open).
+    let reserved = new Set<string>();
+    try {
+      const values = await this.redis.getKeys(
+        notExcluded.map((id) => driverOfferKey(id)),
+      );
+      notExcluded.forEach((id, i) => {
+        if (values[i] != null) reserved.add(id);
+      });
+    } catch {
+      reserved = new Set<string>();
+    }
+    const userIds = filterUnreserved(notExcluded, reserved);
     if (userIds.length === 0) return [];
 
     // 1) جلب دفعي لحالة "مشغول برحلة" (خط أنابيب واحد) تجنّبًا لـ N+1.

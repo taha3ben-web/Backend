@@ -1,6 +1,8 @@
+import { DEFAULT_CURRENCY } from "../../common/money.util";
 import { Injectable } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
+import { FinancialService } from "../financial/financial.service";
 
 export interface DateRange {
   from?: string;
@@ -9,7 +11,10 @@ export interface DateRange {
 
 @Injectable()
 export class StatisticsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly financial: FinancialService,
+  ) {}
 
   range(r: DateRange): { gte: Date; lte: Date } {
     const to = r.to ? new Date(r.to) : new Date();
@@ -49,30 +54,27 @@ export class StatisticsService {
 
   async revenue(r: DateRange) {
     const createdAt = this.range(r);
-    const [company, driver, payments, withdrawals] =
-      await this.prisma.$transaction([
-        this.prisma.companyEarning.aggregate({
-          where: { createdAt },
-          _sum: { amount: true },
-        }),
-        this.prisma.driverEarning.aggregate({
-          where: { createdAt },
-          _sum: { gross: true, commission: true, net: true },
-        }),
-        this.prisma.payment.aggregate({
-          where: { createdAt, status: { in: ["PAID", "CAPTURED"] } },
-          _sum: { amount: true },
-        }),
-        this.prisma.withdrawRequest.aggregate({
-          where: { createdAt, status: "PAID" },
-          _sum: { amount: true },
-        }),
-      ]);
+    // Company/driver revenue derived from the Ledger (single source of truth);
+    // payments collected and withdrawals paid stay as operational aggregates.
+    const ledger = await this.financial.getLedgerRevenue({
+      gte: createdAt.gte,
+      lte: createdAt.lte,
+    });
+    const [payments, withdrawals] = await this.prisma.$transaction([
+      this.prisma.payment.aggregate({
+        where: { createdAt, status: { in: ["PAID", "CAPTURED"] } },
+        _sum: { amount: true },
+      }),
+      this.prisma.withdrawRequest.aggregate({
+        where: { createdAt, status: "PAID" },
+        _sum: { amount: true },
+      }),
+    ]);
     return {
-      companyEarnings: this.num(company._sum.amount),
-      driverGross: this.num(driver._sum.gross),
-      commissions: this.num(driver._sum.commission),
-      driverNet: this.num(driver._sum.net),
+      companyEarnings: this.num(ledger.commission),
+      driverGross: this.num(ledger.gross),
+      commissions: this.num(ledger.commission),
+      driverNet: this.num(ledger.driverNet),
       paymentsCollected: this.num(payments._sum.amount),
       withdrawalsPaid: this.num(withdrawals._sum.amount),
     };
@@ -321,19 +323,19 @@ export class StatisticsService {
         where: { createdAt, referenceType: "DRIVER_TRANSFER", status: "POSTED" },
       }),
       this.prisma.financialAccount.aggregate({
-        where: { code: "PLATFORM:CASH:DZD" },
+        where: { code: `PLATFORM:CASH:${DEFAULT_CURRENCY}` },
         _sum: { balanceCache: true },
       }),
       this.prisma.financialAccount.aggregate({
-        where: { code: "PLATFORM:WITHDRAWAL_RESERVE:DZD" },
+        where: { code: `PLATFORM:WITHDRAWAL_RESERVE:${DEFAULT_CURRENCY}` },
         _sum: { balanceCache: true },
       }),
       this.prisma.financialAccount.aggregate({
-        where: { code: "PLATFORM:CARD_RECEIVABLE:DZD" },
+        where: { code: `PLATFORM:CARD_RECEIVABLE:${DEFAULT_CURRENCY}` },
         _sum: { balanceCache: true },
       }),
       this.prisma.financialAccount.aggregate({
-        where: { code: { startsWith: "USER:", endsWith: ":DZD:AVAILABLE" } },
+        where: { code: { startsWith: "USER:", endsWith: `:${DEFAULT_CURRENCY}:AVAILABLE` } },
         _sum: { balanceCache: true },
       }),
     ]);
@@ -359,6 +361,7 @@ export class StatisticsService {
 
   async topDrivers(r: DateRange, limit = 10) {
     const createdAt = this.range(r);
+    // Per-driver read model derived from the Ledger (rebuildable via FinancialService).
     const grouped = await this.prisma.driverEarning.groupBy({
       by: ["driverId"],
       where: { createdAt },
@@ -413,10 +416,12 @@ export class StatisticsService {
       Array<{ day: Date; trips: bigint; revenue: Prisma.Decimal | null }>
     >`
       SELECT date_trunc('day', t."createdAt") AS day,
-             COUNT(t.id) AS trips,
-             COALESCE(SUM(ce.amount), 0) AS revenue
+             COUNT(DISTINCT t.id) AS trips,
+             COALESCE(SUM(CASE WHEN le.direction = 'CREDIT' AND fa.code LIKE 'PLATFORM:COMMISSION:%' THEN le.amount ELSE 0 END), 0) AS revenue
       FROM "Trip" t
-      LEFT JOIN "CompanyEarning" ce ON ce."tripId" = t.id
+      LEFT JOIN "LedgerTransaction" lt ON lt."referenceId" = t.id AND lt."referenceType" = 'TRIP' AND lt.command = 'settleTrip' AND lt.status = 'POSTED'
+      LEFT JOIN "LedgerEntry" le ON le."transactionId" = lt.id
+      LEFT JOIN "FinancialAccount" fa ON fa.id = le."accountId"
       WHERE t."createdAt" >= ${gte} AND t."createdAt" <= ${lte}
       GROUP BY 1
       ORDER BY 1 ASC

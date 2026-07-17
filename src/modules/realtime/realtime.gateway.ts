@@ -16,18 +16,25 @@ import { RedisService } from "../redis/redis.service";
 import { MatchingService } from "../matching/matching.service";
 import { TripsService } from "../trips/trips.service";
 import { MetricsService, WsRole } from "../metrics/metrics.service";
+import {
+  WsRateLimiter,
+  WS_EVENT_LIMITS,
+  DEFAULT_WS_LIMIT,
+} from "./ws-rate-limiter";
+import { resolveCorsOptions } from "../../common/security/cors-origins";
 
 interface SocketUser {
   userId: string;
   role: string;
 }
 
-// قائمة سماح CORS للـ WebSocket — تطابق إعدادات HTTP (CORS_ORIGINS).
-// إن لم تُضبط يُسمح للجميع (مناسب للتطوير فقط).
-const WS_CORS_ORIGINS = (process.env.CORS_ORIGINS ?? "")
-  .split(",")
-  .map((o) => o.trim())
-  .filter(Boolean);
+// إعدادات CORS للـ WebSocket — مصدر موحّد مع HTTP (resolveCorsOptions).
+// في الإنتاج لا يُسمح بأصل مفتوح (*)؛ عند غياب القائمة يُرفض الاتصال العابر
+// للأصول. في التطوير فقط يُسمح للجميع دون اعتمادات.
+const WS_CORS = resolveCorsOptions(
+  process.env.CORS_ORIGINS,
+  process.env.NODE_ENV === "production",
+);
 
 // حدود إحداثيات صالحة (ترفض القيم المشوّهة/غير المنتهية).
 function isValidLatLng(lat: unknown, lng: unknown): boolean {
@@ -44,6 +51,13 @@ function isValidLatLng(lat: unknown, lng: unknown): boolean {
 }
 
 /**
+ * فاصل تقنين حفظ نقاط التتبّع في قاعدة البيانات (بالثواني) لكل رحلة.
+ * السائق يبثّ موقعه كل 1–2 ثانية للعرض الحي، لكن نحفظ نقطة واحدة
+ * كل TRACK_PERSIST_INTERVAL_SEC ثوانٍ فقط لبناء مسار الرحلة دون إغراق DB.
+ */
+const TRACK_PERSIST_INTERVAL_SEC = 4;
+
+/**
  * WebSocket gateway:
  * - السائق يرسل موقعه (driver:location) كل 1–2 ثانية
  * - الراكب يستقبل (driver:moved) في غرفة رحلته
@@ -51,7 +65,7 @@ function isValidLatLng(lat: unknown, lng: unknown): boolean {
  * - محرك المطابقة: عروض الرحلات (ride:offer) + رد السائق (ride:accept/decline)
  */
 @WebSocketGateway({
-  cors: { origin: WS_CORS_ORIGINS.length ? WS_CORS_ORIGINS : "*" },
+  cors: { origin: WS_CORS.origin, credentials: WS_CORS.credentials },
 })
 export class RealtimeGateway
   implements OnGatewayConnection, OnGatewayDisconnect
@@ -70,6 +84,8 @@ export class RealtimeGateway
   ) {}
 
   async handleConnection(socket: Socket): Promise<void> {
+    // مُقنّن معدّل الأحداث لكل اتصال (في الذاكرة — الاتصال ملتصق بنسخة واحدة).
+    socket.data.rateLimiter = new WsRateLimiter();
     try {
       const token = socket.handshake.auth?.token as string | undefined;
       if (!token) throw new Error("missing token");
@@ -112,6 +128,19 @@ export class RealtimeGateway
       : "UNKNOWN";
   }
 
+  /**
+   * تقنين معدّل الأحداث لكل (socket, event) عبر دلو رموز في الذاكرة.
+   * يمنع إغراق الخادم (DoS) بأحداث مثل driver:location أو ride:request.
+   * لا يستخدم Redis لأن اتصال Socket.IO ملتصق بنسخة واحدة، فالعدّاد المحلي
+   * كافٍ ويتجنّب جولة شبكة على المسار الساخن. يعيد true إذا سُمح بالحدث.
+   */
+  private allowEvent(socket: Socket, event: string): boolean {
+    const limiter = socket.data.rateLimiter as WsRateLimiter | undefined;
+    if (!limiter) return true; // fail-open إن غاب المُقنّن لأي سبب
+    const cfg = WS_EVENT_LIMITS[event] ?? DEFAULT_WS_LIMIT;
+    return limiter.tryConsume(event, cfg);
+  }
+
   @SubscribeMessage("trip:join")
   async onTripJoin(
     @ConnectedSocket() socket: Socket,
@@ -119,6 +148,10 @@ export class RealtimeGateway
   ): Promise<void> {
     const user: SocketUser | undefined = socket.data.user;
     if (!user || !body?.tripId) return;
+    if (!this.allowEvent(socket, "trip:join")) {
+      socket.emit("ride:error", { message: "rate_limited" });
+      return;
+    }
     // تصريح: لا ينضم إلى غرفة الرحلة إلا طرفاها (الراكب أو السائق المكلّف).
     // يمنع تسرّب الموقع الحي وتحديثات الحالة (IDOR).
     if (user.role !== "STAFF") {
@@ -134,10 +167,13 @@ export class RealtimeGateway
   @SubscribeMessage("driver:location")
   async onDriverLocation(
     @ConnectedSocket() socket: Socket,
-    @MessageBody() body: { lat: number; lng: number; heading?: number },
+    @MessageBody()
+    body: { lat: number; lng: number; heading?: number; speed?: number },
   ): Promise<void> {
     const user: SocketUser | undefined = socket.data.user;
     if (!user || user.role !== "DRIVER") return;
+    // تجاوز المعدّل → إسقاط صامت (لا نُرسل خطأ لتفادي حلقة تغذية راجعة).
+    if (!this.allowEvent(socket, "driver:location")) return;
     if (!isValidLatLng(body?.lat, body?.lng)) return;
 
     await this.redis.setDriverLocation(
@@ -152,6 +188,7 @@ export class RealtimeGateway
       lat: body.lat,
       lng: body.lng,
       heading: body.heading ?? 0,
+      speed: body.speed ?? 0,
     };
 
     // خريطة المدير الحية
@@ -163,6 +200,24 @@ export class RealtimeGateway
       this.server
         .to(`trip:${tripId}`)
         .emit("driver:moved", { tripId, ...payload });
+
+      // حفظ مسار الرحلة في TripTracking (مُقنّن لكل رحلة) لبناء سجلّ
+      // المسار دون إغراق قاعدة البيانات بنقاط كل 1–2 ثانية.
+      const gate = await this.redis.client.set(
+        `trip:${tripId}:track_gate`,
+        "1",
+        "EX",
+        TRACK_PERSIST_INTERVAL_SEC,
+        "NX",
+      );
+      if (gate === "OK") {
+        void this.trips.recordTracking(tripId, {
+          lat: body.lat,
+          lng: body.lng,
+          heading: body.heading,
+          speed: body.speed,
+        });
+      }
     }
   }
 
@@ -184,6 +239,10 @@ export class RealtimeGateway
   ): Promise<void> {
     const user: SocketUser | undefined = socket.data.user;
     if (!user || user.role !== "PASSENGER") return;
+    if (!this.allowEvent(socket, "ride:request")) {
+      socket.emit("ride:error", { message: "rate_limited" });
+      return;
+    }
     try {
       const trip = await this.matching.requestRide(user.userId, body as never);
       socket.join(`trip:${trip.id}`);
@@ -201,6 +260,10 @@ export class RealtimeGateway
   ): void {
     const user: SocketUser | undefined = socket.data.user;
     if (!user || user.role !== "DRIVER") return;
+    if (!this.allowEvent(socket, "ride:accept")) {
+      socket.emit("ride:error", { message: "rate_limited" });
+      return;
+    }
     this.matching.respondToOffer(body.tripId, user.userId, true);
   }
 
@@ -212,6 +275,10 @@ export class RealtimeGateway
   ): void {
     const user: SocketUser | undefined = socket.data.user;
     if (!user || user.role !== "DRIVER") return;
+    if (!this.allowEvent(socket, "ride:decline")) {
+      socket.emit("ride:error", { message: "rate_limited" });
+      return;
+    }
     this.matching.respondToOffer(body.tripId, user.userId, false);
   }
 
@@ -223,6 +290,10 @@ export class RealtimeGateway
   ): Promise<void> {
     const user: SocketUser | undefined = socket.data.user;
     if (!user || user.role !== "PASSENGER") return;
+    if (!this.allowEvent(socket, "ride:cancel")) {
+      socket.emit("ride:error", { message: "rate_limited" });
+      return;
+    }
     try {
       await this.matching.passengerCancel(
         user.userId,
@@ -242,6 +313,10 @@ export class RealtimeGateway
   ): Promise<void> {
     const user: SocketUser | undefined = socket.data.user;
     if (!user || user.role !== "DRIVER") return;
+    if (!this.allowEvent(socket, "trip:status")) {
+      socket.emit("ride:error", { message: "rate_limited" });
+      return;
+    }
     try {
       // التحقق من الملكية يتم داخل driverChangeStatus؛ لا ننضم
       // للغرفة إلا بعد نجاح العملية (منع انضمام غير مصرّح).

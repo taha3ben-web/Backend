@@ -9,6 +9,7 @@ import {
 } from "@nestjs/common";
 import { DriverStatus } from "@prisma/client";
 import { DriversService } from "./drivers.service";
+import { DriverSanctionsService } from "./driver-sanctions.service";
 import { PaginationDto } from "../../common/dto/pagination.dto";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
 import { RolesGuard } from "../../common/guards/roles.guard";
@@ -24,7 +25,36 @@ import {
 @Roles("STAFF")
 @Controller("drivers")
 export class DriversController {
-  constructor(private readonly drivers: DriversService) {}
+  constructor(
+    private readonly drivers: DriversService,
+    private readonly sanctions: DriverSanctionsService,
+  ) {}
+
+  // ===== نظام عقوبات الإلغاء (Stage 65) =====
+
+  @RequirePermissions("drivers.read", "drivers.manage")
+  @Get("sanctions/config")
+  sanctionsConfig() {
+    return this.sanctions.getConfig();
+  }
+
+  @RequirePermissions("drivers.read", "drivers.manage")
+  @Get("sanctions/suspended")
+  suspendedDrivers() {
+    return this.sanctions.listSuspended();
+  }
+
+  @RequirePermissions("drivers.read", "drivers.manage")
+  @Get("sanctions/log")
+  sanctionsLog(@Query() q: PaginationDto) {
+    return this.sanctions.listSanctions(q);
+  }
+
+  @RequirePermissions("drivers.manage")
+  @Patch("sanctions/:id/lift")
+  liftSuspension(@Param("id") id: string, @CurrentUser() user: AuthUser) {
+    return this.sanctions.liftSuspension(id, user.userId);
+  }
 
   @RequirePermissions("drivers.read", "drivers.manage")
   @Get()

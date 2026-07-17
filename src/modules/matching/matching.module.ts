@@ -6,6 +6,7 @@ import { RealtimeModule } from "../realtime/realtime.module";
 import { CouponsModule } from "../coupons/coupons.module";
 import { PricingEngineModule } from "../pricing-engine/pricing-engine.module";
 import { MatchingEngineModule } from "./engine/matching-engine.module";
+import { CityScalingModule } from "../city-scaling/city-scaling.module";
 
 @Module({
   imports: [
@@ -13,6 +14,7 @@ import { MatchingEngineModule } from "./engine/matching-engine.module";
     CouponsModule,
     PricingEngineModule,
     MatchingEngineModule,
+    CityScalingModule,
   ],
   providers: [MatchingService, PricingService],
   controllers: [MatchingController],

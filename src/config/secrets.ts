@@ -23,7 +23,6 @@ const SECRET_ENV_KEYS = [
   "FIREBASE_PROJECT_ID",
   "FIREBASE_CLIENT_EMAIL",
   "FIREBASE_PRIVATE_KEY",
-  "FCM_SERVER_KEY",
 ];
 
 /** يحوّل DATABASE_URL → database-url لاسم السر في Secret Manager. */

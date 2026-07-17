@@ -20,6 +20,15 @@ export class DeviceTokensService {
     return { ok: true };
   }
 
+  /** إزالة عدة توكنات (تنظيف التوكنات غير الصالحة التي رفضها FCM) */
+  async removeMany(tokens: string[]): Promise<number> {
+    if (tokens.length === 0) return 0;
+    const res = await this.prisma.deviceToken.deleteMany({
+      where: { token: { in: tokens } },
+    });
+    return res.count;
+  }
+
   /** توكنات مجموعة مستخدمين */
   async tokensForUsers(userIds: string[]): Promise<string[]> {
     if (userIds.length === 0) return [];

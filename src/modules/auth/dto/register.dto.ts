@@ -3,6 +3,7 @@ import {
   IsEnum,
   IsOptional,
   IsString,
+  Matches,
   MinLength,
 } from "class-validator";
 
@@ -17,6 +18,10 @@ export class RegisterDto {
 
   @IsString()
   declare phone: string;
+
+  @IsOptional()
+  @Matches(/^[A-Za-z]{2}$/)
+  countryCode?: string;
 
   @IsString()
   @MinLength(6)

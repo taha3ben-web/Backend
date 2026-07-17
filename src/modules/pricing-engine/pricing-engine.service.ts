@@ -1,9 +1,19 @@
-import { Injectable } from "@nestjs/common";
+import { DEFAULT_CURRENCY } from "../../common/money.util";
+import { Injectable, Optional } from "@nestjs/common";
 import { RideClass } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import { round2 } from "../../common/money.util";
 import { haversineKm, estimateDurationSec } from "../matching/geo.util";
 import { computeFare } from "../matching/pricing.util";
+import {
+  buildFareBreakdown,
+  type CouponPolicy,
+  type FareBreakdown,
+  type WaitingPolicy,
+} from "./fare-breakdown.util";
+import { CountryConfigService } from "../country-config/country-config.service";
+import { CityScalingService } from "../city-scaling/city-scaling.service";
+import { GrowthService } from "../growth/growth.service";
 
 /**
  * سياق طلب التسعير. كل الحقول اختيارية ليمكن استخدام المحرك
@@ -18,6 +28,7 @@ export interface PricingContext {
   country?: string;
   customerType?: string;
   couponCode?: string;
+  subjectId?: string;
   at?: Date;
   distanceKm?: number;
   durationSec?: number;
@@ -45,6 +56,7 @@ export interface PricingResult {
   distanceKm: number;
   durationSec: number;
   ruleUsed: PricingRuleUsed;
+  experimentVariant: string | null;
   breakdown: {
     baseFare: number;
     distanceCost: number;
@@ -54,6 +66,10 @@ export interface PricingResult {
     maxFare: number | null;
     negotiationMin: number | null;
     negotiationMax: number | null;
+    taxNet: number;
+    taxAmount: number;
+    taxGross: number;
+    countryCode: string | null;
   };
 }
 
@@ -78,7 +94,7 @@ const DEFAULT_RULE = {
   perMin: 3,
   minFare: 100,
   maxFare: null as number | null,
-  currency: "DZD",
+  currency: DEFAULT_CURRENCY,
 };
 
 const DEFAULT_COMMISSION_PCT = 15;
@@ -91,7 +107,38 @@ const DEFAULT_COMMISSION_PCT = 15;
  */
 @Injectable()
 export class PricingEngineService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly countryConfig?: CountryConfigService,
+    @Optional() private readonly cityScaling?: CityScalingService,
+    @Optional() private readonly growth?: GrowthService,
+  ) {}
+
+  /**
+   * يركّب الأجرة النهائية وخريطة التسوية (توزيع سائق/منصة) انطلاقًا من نتيجة quote
+   * مع إضافات الانتظار/الجسور/الرسوم ومصدر تمويل الكوبون — دون أي اعتماد على قاعدة البيانات.
+   * يُستخدم لربط التسعير بالتسوية المالية (settleTrip) بما يحفظ توازن المال.
+   */
+  composeFare(
+    result: Pick<PricingResult, "fare" | "commissionPct">,
+    extras: {
+      tolls?: number;
+      surcharges?: number;
+      waitingSeconds?: number;
+      waitingPolicy?: WaitingPolicy | null;
+      coupon?: CouponPolicy | null;
+    } = {},
+  ): FareBreakdown {
+    return buildFareBreakdown({
+      baseComputedFare: result.fare,
+      commissionPct: result.commissionPct,
+      tolls: extras.tolls,
+      surcharges: extras.surcharges,
+      waitingSeconds: extras.waitingSeconds,
+      waitingPolicy: extras.waitingPolicy,
+      coupon: extras.coupon,
+    });
+  }
 
   /** حساب أجرة كاملة (السعر + العمولة + القاعدة المستخدمة). */
   async quote(ctx: PricingContext): Promise<PricingResult> {
@@ -113,6 +160,11 @@ export class PricingEngineService {
     const durationSec = ctx.durationSec ?? estimateDurationSec(distanceKm);
 
     const rule = await this.resolve(ctx);
+    const countryCode = await this.resolveCountryCode(ctx);
+    const peakMultiplier =
+      ctx.cityId && this.cityScaling
+        ? await this.cityScaling.cappedSurge(ctx.cityId, rule.peakMultiplier)
+        : rule.peakMultiplier;
     const baseFare = Number(rule.baseFare);
     const minFare = Number(rule.minFare);
     const maxFare = rule.maxFare != null ? Number(rule.maxFare) : null;
@@ -127,30 +179,68 @@ export class PricingEngineService {
       },
       distanceKm,
       durationSec,
-      rule.peakMultiplier,
+      peakMultiplier,
     );
 
-    const commission = round2((fare * rule.commissionPct) / 100);
+    const tax =
+      countryCode && this.countryConfig
+        ? await this.countryConfig.taxFor(countryCode, fare)
+        : { net: fare, tax: 0, gross: fare };
+    const currency =
+      countryCode && this.countryConfig
+        ? await this.countryConfig.currencyFor(countryCode)
+        : rule.currency;
+    const experimentVariant = await this.assignPricingVariant(ctx.subjectId);
+    const finalFare = tax.gross;
+    const commission = round2((finalFare * rule.commissionPct) / 100);
 
     return {
-      currency: rule.currency,
-      fare,
+      currency,
+      fare: finalFare,
       commission,
       commissionPct: rule.commissionPct,
       distanceKm,
       durationSec,
       ruleUsed: rule.ruleUsed,
+      experimentVariant,
       breakdown: {
         baseFare,
         distanceCost,
         timeCost,
-        peakMultiplier: rule.peakMultiplier,
+        peakMultiplier,
         minFare,
         maxFare,
         negotiationMin: rule.negotiationMin,
         negotiationMax: rule.negotiationMax,
+        taxNet: tax.net,
+        taxAmount: tax.tax,
+        taxGross: tax.gross,
+        countryCode,
       },
     };
+  }
+
+  private async resolveCountryCode(ctx: PricingContext): Promise<string | null> {
+    if (ctx.country?.trim()) return ctx.country.trim().toUpperCase();
+    if (!ctx.cityId) return null;
+    const city = await this.prisma.city.findUnique({
+      where: { id: ctx.cityId },
+      select: { country: true },
+    });
+    return city?.country?.trim().toUpperCase() ?? null;
+  }
+
+  private async assignPricingVariant(
+    subjectId?: string,
+  ): Promise<string | null> {
+    if (!subjectId || !this.growth) return null;
+    const key = process.env.PRICING_EXPERIMENT_KEY?.trim() || "pricing-fare-v1";
+    try {
+      const assignment = await this.growth.assign(key, subjectId);
+      return assignment.variant;
+    } catch {
+      return null;
+    }
   }
 
   /**

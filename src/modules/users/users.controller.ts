@@ -34,6 +34,12 @@ export class UsersController {
   }
 
   @RequirePermissions("passengers.read", "passengers.manage")
+  @Get(":id/overview")
+  overview(@Param("id") id: string) {
+    return this.users.customer360(id);
+  }
+
+  @RequirePermissions("passengers.read", "passengers.manage")
   @Get(":id/trips")
   trips(@Param("id") id: string, @Query() q: PaginationDto) {
     return this.users.trips(id, q);

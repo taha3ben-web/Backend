@@ -10,6 +10,7 @@ import { PaginationDto } from "../../common/dto/pagination.dto";
 import { AuthUser } from "../../common/decorators/current-user.decorator";
 import { FinancialService } from "../financial/financial.service";
 import { CreateDriverFundingRequestDto } from "./dto/driver-funding.dto";
+import { toMinorUnits } from "../../common/money.util";
 
 @Injectable()
 export class DriverFundingService {
@@ -57,7 +58,7 @@ export class DriverFundingService {
 
     const resolvedIdempotencyKey =
       dto.idempotencyKey?.trim() ||
-      `driver-funding:${actor.userId}:${dto.driverId}:${Math.round(dto.amount * 100)}`;
+      `driver-funding:${actor.userId}:${dto.driverId}:${toMinorUnits(dto.amount)}`;
 
     const existing = await this.prisma.driverFundingRequest.findUnique({
       where: { idempotencyKey: resolvedIdempotencyKey },

@@ -7,10 +7,12 @@ import {
   NotFoundException,
   OnModuleDestroy,
   OnModuleInit,
+  Optional,
+  ServiceUnavailableException,
   forwardRef,
 } from "@nestjs/common";
 import { Cron, CronExpression } from "@nestjs/schedule";
-import { Prisma, RideClass, Trip } from "@prisma/client";
+import { CouponFundingSource, Prisma, RideClass, Trip } from "@prisma/client";
 import type Redis from "ioredis";
 import { PrismaService } from "../../prisma/prisma.service";
 import { PaginationDto } from "../../common/dto/pagination.dto";
@@ -20,6 +22,10 @@ import { PricingService } from "./pricing.service";
 import { CouponsService } from "../coupons/coupons.service";
 import { RequestRideDto } from "./dto/matching.dto";
 import { MatchingEngineService } from "./engine/matching-engine.service";
+import { driverOfferKey } from "./matching-lock.util";
+import { CityScalingService } from "../city-scaling/city-scaling.service";
+import { TracerService } from "../../common/observability/tracer.service";
+import { AppException } from "../../common/api/app.exception";
 
 interface PendingOffer {
   resolve: (accepted: boolean) => void;
@@ -68,9 +74,21 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
     private readonly pricing: PricingService,
     private readonly coupons: CouponsService,
     private readonly engine: MatchingEngineService,
+    private readonly cityScaling: CityScalingService,
     @Inject(forwardRef(() => RealtimeGateway))
     private readonly realtime: RealtimeGateway,
+    @Optional() private readonly tracer?: TracerService,
   ) {}
+
+  private withTrace<T>(
+    name: string,
+    attributes: Record<string, unknown>,
+    fn: () => Promise<T>,
+  ): Promise<T> {
+    return this.tracer
+      ? this.tracer.withSpan(name, async () => fn(), attributes)
+      : fn();
+  }
 
   async onModuleInit(): Promise<void> {
     try {
@@ -108,141 +126,215 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
 
   /** الراكب يطلب رحلة: ينشئ Trip ثم يبدأ البحث في الخلفية */
   async requestRide(passengerId: string, dto: RequestRideDto): Promise<Trip> {
-    // منع رحلتين نشطتين للراكب نفسه
-    const active = await this.prisma.trip.findFirst({
-      where: {
-        passengerId,
-        status: { in: ["SEARCHING", "ACCEPTED", "ARRIVING", "IN_PROGRESS"] },
-      },
-    });
-    if (active) {
-      throw new BadRequestException("لديك رحلة نشطة بالفعل");
-    }
-
-    const rideClass: RideClass = dto.rideClass ?? "ECONOMY";
-    const vehicleTypeId = dto.vehicleTypeId ?? null;
-    const quote = await this.pricing.quote(
-      dto.pickupLat,
-      dto.pickupLng,
-      dto.destLat,
-      dto.destLng,
+    return this.withTrace(
+      "matching.request_ride",
       {
-        rideClass,
-        cityId: dto.cityId,
-        vehicleTypeId: vehicleTypeId ?? undefined,
+        passengerId,
+        cityId: dto.cityId ?? null,
+        rideClass: dto.rideClass ?? "ECONOMY",
+      },
+      async () => {
+        // منع رحلتين نشطتين للراكب نفسه
+        const active = await this.prisma.trip.findFirst({
+          where: {
+            passengerId,
+            status: {
+              in: ["SEARCHING", "ACCEPTED", "ARRIVING", "IN_PROGRESS"],
+            },
+          },
+        });
+        if (active) {
+          throw new AppException("ACTIVE_TRIP_EXISTS", {
+            details: { tripId: active.id },
+          });
+        }
+
+        const rideClass: RideClass = dto.rideClass ?? "ECONOMY";
+        if (dto.cityId) {
+          const capacity = await this.cityScaling.evaluateAcceptance(
+            dto.cityId,
+            rideClass,
+          );
+          if (!capacity.accept) {
+            throw new AppException("CITY_CAPACITY_REJECTED", {
+              details: {
+                cityId: dto.cityId,
+                rideClass,
+                reason: capacity.reason,
+              },
+            });
+          }
+        }
+        const vehicleTypeId = dto.vehicleTypeId ?? null;
+        const quote = await this.pricing.quote(
+          dto.pickupLat,
+          dto.pickupLng,
+          dto.destLat,
+          dto.destLng,
+          {
+            rideClass,
+            cityId: dto.cityId,
+            vehicleTypeId: vehicleTypeId ?? undefined,
+            subjectId: passengerId,
+          },
+        );
+
+        // تطبيق الكوبون (اختياري) — يتحقق ويحسب الخصم ويحجز الاستخدام
+        let fare = quote.fare;
+        let couponId: string | null = null;
+        let discountAmount: number | null = null;
+        let couponFundingSource: CouponFundingSource | null = null;
+        let couponPlatformShare: number | null = null;
+        if (dto.couponCode) {
+          const applied = await this.coupons.validateAndCompute(
+            dto.couponCode,
+            passengerId,
+            quote.fare,
+          );
+          fare = applied.finalFare;
+          couponId = applied.coupon.id;
+          discountAmount = applied.discount;
+          couponFundingSource = applied.fundingSource;
+          couponPlatformShare = applied.platformShare;
+          await this.coupons.redeem(applied.coupon.id);
+        }
+
+        const trip = await this.prisma.trip.create({
+          data: {
+            passengerId,
+            status: "SEARCHING",
+            rideClass,
+            vehicleTypeId,
+            pickupLat: dto.pickupLat,
+            pickupLng: dto.pickupLng,
+            pickupAddress: dto.pickupAddress,
+            destLat: dto.destLat,
+            destLng: dto.destLng,
+            destAddress: dto.destAddress,
+            distanceKm: quote.distanceKm,
+            durationSec: quote.durationSec,
+            fare,
+            commissionPct: quote.commissionPct,
+            currency: quote.currency,
+            cityId: dto.cityId,
+            couponId,
+            discountAmount,
+            couponFundingSource,
+            couponPlatformShare,
+            events: {
+              create: {
+                type: "trip:requested",
+                actor: "PASSENGER",
+                meta: {
+                  pricingExperimentVariant: quote.experimentVariant,
+                  countryCode: quote.breakdown.countryCode,
+                  taxNet: quote.breakdown.taxNet,
+                  taxAmount: quote.breakdown.taxAmount,
+                  taxGross: quote.breakdown.taxGross,
+                },
+              },
+            },
+          },
+        });
+
+        // بدء البحث دون حجز الطلب (fire-and-forget)
+        void this.runMatching(trip.id).catch((err) =>
+          this.logger.error(`matching failed for ${trip.id}: ${err}`),
+        );
+
+        return trip;
       },
     );
-
-    // تطبيق الكوبون (اختياري) — يتحقق ويحسب الخصم ويحجز الاستخدام
-    let fare = quote.fare;
-    let couponId: string | null = null;
-    if (dto.couponCode) {
-      const applied = await this.coupons.validateAndCompute(
-        dto.couponCode,
-        passengerId,
-        quote.fare,
-      );
-      fare = applied.finalFare;
-      couponId = applied.coupon.id;
-      await this.coupons.redeem(applied.coupon.id);
-    }
-
-    const trip = await this.prisma.trip.create({
-      data: {
-        passengerId,
-        status: "SEARCHING",
-        rideClass,
-        vehicleTypeId,
-        pickupLat: dto.pickupLat,
-        pickupLng: dto.pickupLng,
-        pickupAddress: dto.pickupAddress,
-        destLat: dto.destLat,
-        destLng: dto.destLng,
-        destAddress: dto.destAddress,
-        distanceKm: quote.distanceKm,
-        durationSec: quote.durationSec,
-        fare,
-        commissionPct: quote.commissionPct,
-        currency: quote.currency,
-        cityId: dto.cityId,
-        couponId,
-        events: { create: { type: "trip:requested", actor: "PASSENGER" } },
-      },
-    });
-
-    // بدء البحث دون حجز الطلب (fire-and-forget)
-    void this.runMatching(trip.id).catch((err) =>
-      this.logger.error(`matching failed for ${trip.id}: ${err}`),
-    );
-
-    return trip;
   }
 
   /** حلقة البحث عن سائق وعرض الرحلة بالتتابع */
   private async runMatching(tripId: string): Promise<void> {
-    try {
-      const trip = await this.prisma.trip.findUnique({ where: { id: tripId } });
-      if (!trip || trip.status !== "SEARCHING") return;
+    return this.withTrace("matching.run", { tripId }, async () => {
+      try {
+        const trip = await this.prisma.trip.findUnique({
+          where: { id: tripId },
+        });
+        if (!trip || trip.status !== "SEARCHING") return;
 
-      const tried = new Set<string>();
+        const tried = new Set<string>();
 
-      // محاولتان لتوسيع نطاق البحث
-      for (const radius of [SEARCH_RADIUS_KM, SEARCH_RADIUS_KM * 2]) {
-        if (this.cancelled.has(tripId)) break;
-
-        const candidates = await this.findCandidates(
-          trip.pickupLat,
-          trip.pickupLng,
-          radius,
-          tried,
-          trip.rideClass,
-          trip.vehicleTypeId,
-        );
-
-        for (const driverUserId of candidates) {
+        // محاولتان لتوسيع نطاق البحث
+        for (const radius of [SEARCH_RADIUS_KM, SEARCH_RADIUS_KM * 2]) {
           if (this.cancelled.has(tripId)) break;
-          tried.add(driverUserId);
 
-          // تأكد أن الرحلة ما زالت قيد البحث (يلتقط الإلغاء عبر النسخ أيضًا)
-          const fresh = await this.prisma.trip.findUnique({
-            where: { id: tripId },
-            select: { status: true },
-          });
-          if (!fresh || fresh.status !== "SEARCHING") return;
+          const candidates = await this.findCandidates(
+            trip.pickupLat,
+            trip.pickupLng,
+            radius,
+            tried,
+            trip.rideClass,
+            trip.vehicleTypeId,
+          );
 
-          const accepted = await this.offerToDriver(trip, driverUserId);
-          if (accepted) {
-            const assigned = await this.assignDriver(tripId, driverUserId);
-            if (assigned) return; // نجحت المطابقة
+          for (const driverUserId of candidates) {
+            if (this.cancelled.has(tripId)) break;
+            tried.add(driverUserId);
+
+            // تأكد أن الرحلة ما زال�� قيد البحث (يلتقط الإلغاء عبر النسخ أيضًا)
+            const fresh = await this.prisma.trip.findUnique({
+              where: { id: tripId },
+              select: { status: true },
+            });
+            if (!fresh || fresh.status !== "SEARCHING") return;
+
+            // حجز عرض موزّع (fail-open): يمنع عرض السائق نفسه من رحلتين/
+            // نسختين متزامنتين. القفل تحسين وليس ضمان الصحة (المطالبة
+            // الذرّية في assignDriver تضمنها)، لذا نتابع عند فشل Redis.
+            const offerKey = driverOfferKey(driverUserId);
+            let reserved = true;
+            try {
+              reserved = await this.redis.acquireLock(
+                offerKey,
+                tripId,
+                OFFER_TIMEOUT_MS,
+              );
+            } catch {
+              reserved = true;
+            }
+            if (!reserved) continue; // محجوز لعرض آخر — جرّب التالي
+
+            const accepted = await this.offerToDriver(trip, driverUserId);
+            await this.redis
+              .releaseLock(offerKey, tripId)
+              .catch(() => undefined);
+            if (accepted) {
+              const assigned = await this.assignDriver(tripId, driverUserId);
+              if (assigned) return; // نجحت المطابقة
+            }
           }
         }
-      }
 
-      // لا يوجد سائق متاح
-      const current = await this.prisma.trip.findUnique({
-        where: { id: tripId },
-        select: { status: true, passengerId: true },
-      });
-      if (current && current.status === "SEARCHING") {
-        await this.releaseCoupon(tripId);
-        await this.prisma.trip.update({
+        // لا يوجد سائق متاح
+        const current = await this.prisma.trip.findUnique({
           where: { id: tripId },
-          data: {
-            status: "CANCELLED",
-            cancelReason: "لا يوجد سائق متاح",
-            cancelledBy: "SYSTEM",
-            events: { create: { type: "trip:no_drivers", actor: "SYSTEM" } },
-          },
+          select: { status: true, passengerId: true },
         });
-        this.realtime.emitToUser(current.passengerId, "ride:no_drivers", {
-          tripId,
-        });
-        this.realtime.emitTripStatus(tripId, "CANCELLED");
+        if (current && current.status === "SEARCHING") {
+          await this.releaseCoupon(tripId);
+          await this.prisma.trip.update({
+            where: { id: tripId },
+            data: {
+              status: "CANCELLED",
+              cancelReason: "لا يوجد سائق متاح",
+              cancelledBy: "SYSTEM",
+              events: { create: { type: "trip:no_drivers", actor: "SYSTEM" } },
+            },
+          });
+          this.realtime.emitToUser(current.passengerId, "ride:no_drivers", {
+            tripId,
+          });
+          this.realtime.emitTripStatus(tripId, "CANCELLED");
+        }
+      } finally {
+        // نظّف علامة الإلغاء المحلية دائمًا (منع تسرّب ذاكرة تدريجي).
+        this.cancelled.delete(tripId);
       }
-    } finally {
-      // نظّف علامة الإلغاء المحلية دائمًا (منع تسرّب ذاكرة تدريجي).
-      this.cancelled.delete(tripId);
-    }
+    });
   }
 
   /**
@@ -358,7 +450,7 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  /** تعيين السائق ذريًا (يفشل إن تغيرت حالة الرحلة) */
+  /** ت��يين السائق ذريًا (يفشل إن تغيرت حالة الرحلة) */
   private async assignDriver(
     tripId: string,
     driverUserId: string,
@@ -371,7 +463,7 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
     try {
       const updated = await this.prisma.$transaction(async (client) => {
         // 1) مطالبة ذرية بالسائق (قفل الصف): لا تنجح إلا إن كان ONLINE.
-        //    تمنع إسناد السائق نفسه لرحلتين متزامنتين (double assignment).
+        //    تمنع إسنا�� السائق نفسه لرحلتين متزامنتين (double assignment).
         const claimed = await client.driver.updateMany({
           where: { id: driver.id, availability: "ONLINE" },
           data: { availability: "ON_TRIP" },
@@ -394,6 +486,7 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
           data: {
             status: "ACCEPTED",
             driverId: driver.id,
+            acceptedAt: new Date(),
             events: {
               create: { type: "trip:accepted", actor: "DRIVER" },
             },
@@ -489,7 +582,9 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
           status: "CANCELLED",
           cancelReason: reason ?? "ألغاه الراكب",
           cancelledBy: "PASSENGER",
-          events: { create: { type: "trip:cancelled", actor: "PASSENGER" } },
+          events: {
+            create: { type: "trip:cancelled", actor: "PASSENGER" },
+          },
         },
       });
       // تحرير السائق: إتاحته من جديد ومسح ارتباطه بالرحلة في Redis
@@ -554,7 +649,7 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
     const isOwner =
       trip.passengerId === userId || trip.driver?.userId === userId;
     if (!isOwner) {
-      throw new ForbiddenException("ليست لديك صلاحية على هذه الرحلة");
+      throw new ForbiddenException("ل��ست لديك صلاحية على هذه الرحلة");
     }
     return trip;
   }

@@ -1,11 +1,18 @@
 import { NestFactory } from "@nestjs/core";
-import { ValidationPipe, Logger } from "@nestjs/common";
+import {
+  ValidationPipe,
+  Logger,
+  VersioningType,
+  VERSION_NEUTRAL,
+} from "@nestjs/common";
 import helmet from "helmet";
 import { json, urlencoded } from "express";
 import { AppModule } from "./app.module";
 import { loadSecretsIntoEnv } from "./config/secrets";
 import { RedisIoAdapter } from "./realtime-redis.adapter";
 import { AllExceptionsFilter } from "./common/filters/all-exceptions.filter";
+import { StructuredLogger } from "./common/observability/structured-logger.service";
+import { resolveCorsOptions } from "./common/security/cors-origins";
 
 async function bootstrap(): Promise<void> {
   // تحميل الأسرار من Google Secret Manager قبل إقلاع التطبيق (إن كان مُفعّلًا).
@@ -48,7 +55,13 @@ async function bootstrap(): Promise<void> {
   }
 
   // نعطّل محلّل الجسم الافتراضي لنضبط حدود الحجم بأنفسنا.
-  const app = await NestFactory.create(AppModule, { bodyParser: false });
+  const app = await NestFactory.create(AppModule, {
+    bodyParser: false,
+    bufferLogs: true,
+  });
+
+  // Logger مُهيكل (JSON) يضخّ حقول الربط requestId/traceId/actorId مع كل سطر.
+  app.useLogger(app.get(StructuredLogger));
 
   // خلف بروكسي/Load Balancer → يجعل req.ip يعكس IP العميل الحقيقي.
   const expressApp = app.getHttpAdapter().getInstance();
@@ -62,19 +75,21 @@ async function bootstrap(): Promise<void> {
   app.use(json({ limit: "1mb" }));
   app.use(urlencoded({ extended: true, limit: "1mb" }));
 
-  // CORS — قائمة سماح من البيئة (CORS_ORIGINS مفصولة بفواصل).
-  // إن لم تُضبط يُسمح للجميع دون اعتمادات (مناسب للتطوير).
-  const origins = (process.env.CORS_ORIGINS ?? "")
-    .split(",")
-    .map((o) => o.trim())
-    .filter(Boolean);
-  if (origins.length) {
-    app.enableCors({ origin: origins, credentials: true });
-  } else {
-    app.enableCors({ origin: "*" });
-  }
+  // CORS — مصدر موحّد مع WebSocket (resolveCorsOptions). قائمة سماح من
+  // البيئة (CORS_ORIGINS مفصولة بفواصل) مع اعتمادات؛ وإلا يُسمح للجميع بلا
+  // اعتمادات في التطوير فقط (الإنتاج يمنع غيابها أعلاه).
+  app.enableCors(resolveCorsOptions(process.env.CORS_ORIGINS, isProd));
 
   app.setGlobalPrefix("api");
+
+  // إصدار صارم لـ API عبر المسار (مثل /api/v1/...). نجعل الإصدار
+  // الافتراضي يشمل "1" والمحايد (VERSION_NEUTRAL) معًا فتبقى المسارات
+  // القديمة (بلا إصدار) تعمل دون كسر، وتتوفّر أيضًا تحت v1 للموبايل.
+  app.enableVersioning({
+    type: VersioningType.URI,
+    defaultVersion: ["1", VERSION_NEUTRAL],
+    prefix: "v",
+  });
 
   // تحقق مدخلات شامل (يرفض الحقول غير المعرّفة + يحوّل الأنواع)
   app.useGlobalPipes(

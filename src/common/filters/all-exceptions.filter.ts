@@ -7,11 +7,20 @@ import {
   Logger,
 } from "@nestjs/common";
 import type { Request, Response } from "express";
+import { getRequestContext } from "../observability/request-context";
+import { AppException } from "../api/app.exception";
+import {
+  ApiErrorCode,
+  buildErrorEnvelope,
+  codeForHttpStatus,
+  resolveLocale,
+} from "../api/api-error.util";
 
 /**
- * مُرشّح استثناءات موحّد لـ HTTP:
+ * مُرّشّح استثناءات موحّد لـ HTTP:
  *  - يُسجّل أخطاء الخادم (5xx) مع الـ stack داخليًا فقط.
- *  - يُرجع استجابة JSON متسقة دون تسريب التفاصيل في الإنتاج.
+ *  - يُرجع مغلّف JSON موحّد بـ (code ثابت + رسالة مترجمة حسب Accept-Language)
+ *    دون تسريب التفاصيل في الإنتاج.
  * لا يتدخل في سياق WebSocket (تتولّاه الـ Gateway).
  */
 @Catch()
@@ -30,13 +39,32 @@ export class AllExceptionsFilter implements ExceptionFilter {
         ? exception.getStatus()
         : HttpStatus.INTERNAL_SERVER_ERROR;
 
-    let message: unknown = "Internal server error";
-    if (exception instanceof HttpException) {
+    // الكود الموحّد: من AppException مباشرةً، وإلّا يُشتقّ من حالة HTTP.
+    let code: ApiErrorCode;
+    let details: unknown;
+    let messageOverride: string | undefined;
+    if (exception instanceof AppException) {
+      code = exception.code;
+      details = exception.details;
+      messageOverride = exception.messageOverride;
+    } else {
+      code = codeForHttpStatus(status);
+    }
+
+    // لاستثناءات Nest القديمة (BadRequest…): استخرج الرسالة/التفاصيل.
+    if (!messageOverride && exception instanceof HttpException) {
       const res = exception.getResponse();
-      message =
-        typeof res === "string"
-          ? res
-          : ((res as Record<string, unknown>)?.message ?? res);
+      if (typeof res === "string") {
+        messageOverride = res;
+      } else if (res && typeof res === "object") {
+        const msg = (res as Record<string, unknown>).message;
+        // رسائل التحقّق (ValidationPipe) تأتي كمصفوفة → details.
+        if (Array.isArray(msg)) {
+          details = msg;
+        } else if (typeof msg === "string") {
+          messageOverride = msg;
+        }
+      }
     }
 
     if (status >= 500) {
@@ -45,17 +73,31 @@ export class AllExceptionsFilter implements ExceptionFilter {
         exception instanceof Error ? exception.stack : String(exception),
       );
     } else {
-      this.logger.warn(
-        `${request.method} ${request.originalUrl} -> ${status}`,
-      );
+      this.logger.warn(`${request.method} ${request.originalUrl} -> ${status}`);
     }
 
     const isProd = process.env.NODE_ENV === "production";
-    response.status(status).json({
-      statusCode: status,
-      error: status >= 500 && isProd ? "Internal server error" : message,
+    // في الإنتاج لا نسرّب رسائل أخطاء الخادم الداخلية.
+    if (status >= 500 && isProd) {
+      messageOverride = undefined;
+      details = undefined;
+    }
+
+    const requestContext = getRequestContext();
+    const locale = resolveLocale(
+      (request.headers["accept-language"] as string | undefined) ?? undefined,
+    );
+
+    const envelope = buildErrorEnvelope({
+      code,
+      locale,
+      messageOverride,
+      details,
       path: request.originalUrl,
-      timestamp: new Date().toISOString(),
+      requestId: requestContext?.requestId,
+      traceId: requestContext?.traceId,
     });
+
+    response.status(status).json(envelope);
   }
 }

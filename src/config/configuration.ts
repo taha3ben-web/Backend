@@ -25,8 +25,8 @@ export default () => ({
     useSecretManager: process.env.USE_SECRET_MANAGER === "true",
   },
   notifications: {
-    // Push — Firebase Cloud Messaging (legacy HTTP API)
-    fcmServerKey: process.env.FCM_SERVER_KEY ?? "",
+    // Push — Firebase Cloud Messaging (HTTP v1) عبر Firebase Admin SDK.
+    // يستخدم بيانات اعتماد firebase.* (لا حاجة لـ FCM_SERVER_KEY القديم).
     // SMS — مزوّد HTTP عام (مثل Twilio أو بوابة محلية)
     sms: {
       apiUrl: process.env.SMS_API_URL ?? "",

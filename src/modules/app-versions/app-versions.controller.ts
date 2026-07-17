@@ -4,12 +4,17 @@ import {
   Delete,
   Get,
   Param,
+  Patch,
   Post,
   Query,
   UseGuards,
 } from "@nestjs/common";
 import { AppVersionsService } from "./app-versions.service";
-import { CreateAppVersionDto } from "./dto/app-versions.dto";
+import {
+  CheckAppVersionDto,
+  CreateAppVersionDto,
+  UpdateAppVersionDto,
+} from "./dto/app-versions.dto";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
 import { RolesGuard } from "../../common/guards/roles.guard";
 import { PermissionsGuard } from "../../common/guards/permissions.guard";
@@ -20,19 +25,10 @@ import { RequirePermissions } from "../../common/decorators/permissions.decorato
 export class AppVersionsController {
   constructor(private readonly appVersions: AppVersionsService) {}
 
-  /**
-   * فحص التحديث (عام — يُستدعى عند إقلاع التطبيق).
-   * مثال: GET /api/app-versions/check?platform=android&version=1.0.0
-   */
   @Get("check")
-  check(
-    @Query("platform") platform: string,
-    @Query("version") version: string,
-  ) {
-    return this.appVersions.check(platform, version ?? "0.0.0");
+  check(@Query() dto: CheckAppVersionDto) {
+    return this.appVersions.check(dto);
   }
-
-  // ---------- إدارة (STAFF) ----------
 
   @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
   @Roles("STAFF")
@@ -46,8 +42,20 @@ export class AppVersionsController {
   @Roles("STAFF")
   @RequirePermissions("settings.manage")
   @Get()
-  findAll(@Query("platform") platform?: string) {
-    return this.appVersions.findAll(platform);
+  findAll(
+    @Query("platform") platform?: string,
+    @Query("appId") appId?: string,
+    @Query("releaseChannel") releaseChannel?: string,
+  ) {
+    return this.appVersions.findAll({ platform, appId, releaseChannel });
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
+  @Roles("STAFF")
+  @RequirePermissions("settings.manage")
+  @Patch(":id")
+  update(@Param("id") id: string, @Body() dto: UpdateAppVersionDto) {
+    return this.appVersions.update(id, dto);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)

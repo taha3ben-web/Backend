@@ -1,3 +1,4 @@
+import { DEFAULT_CURRENCY, toMinorUnits } from "../../common/money.util";
 import {
   BadRequestException,
   ForbiddenException,
@@ -10,12 +11,17 @@ import { PaginationDto } from "../../common/dto/pagination.dto";
 import { AuthUser } from "../../common/decorators/current-user.decorator";
 import { FinancialService } from "../financial/financial.service";
 import { CreateDriverTransferDto } from "./dto/driver-transfer.dto";
+import { BlacklistKind, RiskService } from "../risk/risk.service";
+
+const TRANSFER_VELOCITY_WINDOW_MS = 24 * 60 * 60 * 1000;
+const TRANSFER_VELOCITY_MAX_COUNT = 5;
 
 @Injectable()
 export class DriverTransfersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly financial: FinancialService,
+    private readonly risk: RiskService,
   ) {}
 
   async list(
@@ -59,7 +65,7 @@ export class DriverTransfersService {
 
     const idempotencyKey =
       dto.idempotencyKey?.trim() ||
-      `driver-transfer:${actor.userId}:${dto.fromDriverId}:${dto.toDriverId}:${Math.round(dto.amount * 100)}`;
+      `driver-transfer:${actor.userId}:${dto.fromDriverId}:${dto.toDriverId}:${toMinorUnits(dto.amount)}`;
 
     const existing = await this.prisma.driverTransfer.findUnique({
       where: { idempotencyKey },
@@ -72,12 +78,22 @@ export class DriverTransfersService {
 
     await this.enforceDailyLimits(dto.fromDriverId, dto.amount);
 
-    const balance = await this.financial.getUserBalance(fromDriver.userId, "DZD");
+    const balance = await this.financial.getUserBalance(
+      fromDriver.userId,
+      DEFAULT_CURRENCY,
+    );
     if (balance.balance < dto.amount) {
       throw new BadRequestException("رصيد السائق المرسل غير كافٍ");
     }
 
-    const riskFlags = this.computeRiskFlags(fromDriver, toDriver, dto.amount, balance.balance);
+    await this.assessTransferRisk(fromDriver, dto.amount);
+
+    const riskFlags = this.computeRiskFlags(
+      fromDriver,
+      toDriver,
+      dto.amount,
+      balance.balance,
+    );
 
     return this.prisma.driverTransfer.create({
       data: {
@@ -88,7 +104,10 @@ export class DriverTransfersService {
         status: "PENDING",
         note: dto.note,
         idempotencyKey,
-        riskFlags: riskFlags.length > 0 ? (riskFlags as Prisma.InputJsonValue) : undefined,
+        riskFlags:
+          riskFlags.length > 0
+            ? (riskFlags as Prisma.InputJsonValue)
+            : undefined,
       },
       include: this.includeShape(),
     });
@@ -169,9 +188,17 @@ export class DriverTransfersService {
             OR: [
               { note: { contains: search, mode: "insensitive" } },
               { idempotencyKey: { contains: search, mode: "insensitive" } },
-              { fromDriver: { user: { name: { contains: search, mode: "insensitive" } } } },
+              {
+                fromDriver: {
+                  user: { name: { contains: search, mode: "insensitive" } },
+                },
+              },
               { fromDriver: { user: { phone: { contains: search } } } },
-              { toDriver: { user: { name: { contains: search, mode: "insensitive" } } } },
+              {
+                toDriver: {
+                  user: { name: { contains: search, mode: "insensitive" } },
+                },
+              },
               { toDriver: { user: { phone: { contains: search } } } },
             ],
           }
@@ -225,6 +252,67 @@ export class DriverTransfersService {
     }
   }
 
+  private async assessTransferRisk(
+    fromDriver: Awaited<ReturnType<DriverTransfersService["loadDriver"]>>,
+    amount: number,
+  ) {
+    const now = Date.now();
+    const windowStart = new Date(now - TRANSFER_VELOCITY_WINDOW_MS);
+    const [recent, aggregate] = await this.prisma.$transaction([
+      this.prisma.driverTransfer.findMany({
+        where: {
+          fromDriverId: fromDriver.id,
+          createdAt: { gte: windowStart },
+          status: { in: ["PENDING", "APPROVED", "COMPLETED"] },
+        },
+        select: { createdAt: true, amount: true },
+      }),
+      this.prisma.driverTransfer.aggregate({
+        where: {
+          fromDriverId: fromDriver.id,
+          status: { in: ["PENDING", "APPROVED", "COMPLETED"] },
+        },
+        _avg: { amount: true },
+      }),
+    ]);
+
+    const history = recent.map((r) => ({
+      at: r.createdAt.getTime(),
+      amount: Number(r.amount),
+    }));
+    const avgAmount = Number(aggregate._avg.amount ?? 0) || undefined;
+
+    const blacklistChecks: Array<{ kind: BlacklistKind; value: string }> = [
+      { kind: "USER", value: fromDriver.userId },
+    ];
+    if (fromDriver.user?.phone) {
+      blacklistChecks.push({ kind: "PHONE", value: fromDriver.user.phone });
+    }
+
+    const assessment = await this.risk.assess({
+      subjectKind: "USER",
+      subjectId: fromDriver.userId,
+      action: "driver-transfer.create",
+      amount,
+      avgAmount,
+      blacklistChecks,
+      velocity: {
+        history,
+        limit: {
+          windowMs: TRANSFER_VELOCITY_WINDOW_MS,
+          maxCount: TRANSFER_VELOCITY_MAX_COUNT,
+        },
+        now,
+      },
+    });
+
+    if (RiskService.shouldBlock(assessment.decision)) {
+      throw new ForbiddenException(
+        "تم رفض التحويل لأسباب أمنية. يُرجى التواصل مع الدعم.",
+      );
+    }
+  }
+
   private computeRiskFlags(
     fromDriver: Awaited<ReturnType<DriverTransfersService["loadDriver"]>>,
     toDriver: Awaited<ReturnType<DriverTransfersService["loadDriver"]>>,
@@ -233,7 +321,11 @@ export class DriverTransfersService {
   ) {
     const flags: string[] = [];
     if (amount >= 10000) flags.push("HIGH_AMOUNT");
-    if (fromDriver.cityId && toDriver.cityId && fromDriver.cityId !== toDriver.cityId) {
+    if (
+      fromDriver.cityId &&
+      toDriver.cityId &&
+      fromDriver.cityId !== toDriver.cityId
+    ) {
       flags.push("CROSS_CITY_TRANSFER");
     }
     if (currentBalance - amount < 500) flags.push("LOW_BALANCE_AFTER_TRANSFER");
@@ -241,7 +333,9 @@ export class DriverTransfersService {
   }
 
   private async getMutable(id: string) {
-    const transfer = await this.prisma.driverTransfer.findUnique({ where: { id } });
+    const transfer = await this.prisma.driverTransfer.findUnique({
+      where: { id },
+    });
     if (!transfer) throw new NotFoundException("طلب التحويل غير موجود");
     return transfer;
   }
@@ -273,7 +367,9 @@ export class DriverTransfersService {
           city: { select: { id: true, name: true } },
         },
       },
-      requestedBy: { select: { id: true, name: true, phone: true, type: true } },
+      requestedBy: {
+        select: { id: true, name: true, phone: true, type: true },
+      },
       reviewedBy: { select: { id: true, name: true, phone: true, type: true } },
     } satisfies Prisma.DriverTransferInclude;
   }

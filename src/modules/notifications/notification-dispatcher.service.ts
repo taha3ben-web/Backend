@@ -12,6 +12,8 @@ export interface DispatchInput {
   userIds: string[];
   title: string;
   body: string;
+  imageUrl?: string;
+  deepLink?: string;
   data?: Record<string, unknown>;
 }
 
@@ -41,6 +43,8 @@ export class NotificationDispatcher {
           this.realtime.emitToUser(userId, "notification", {
             title: input.title,
             body: input.body,
+            imageUrl: input.imageUrl,
+            deepLink: input.deepLink,
             data: input.data ?? {},
           });
         }
@@ -52,6 +56,8 @@ export class NotificationDispatcher {
           tokens,
           title: input.title,
           body: input.body,
+          imageUrl: input.imageUrl,
+          deepLink: input.deepLink,
           data: input.data,
         });
       }

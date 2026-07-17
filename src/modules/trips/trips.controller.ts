@@ -34,6 +34,12 @@ export class TripsController {
     return this.trips.findAll(q, status, unsettledOnly === "true", search);
   }
 
+  @RequirePermissions("trips.read", "reports.read")
+  @Get("dispatch-metrics")
+  dispatchMetrics(@Query("from") from?: string, @Query("to") to?: string) {
+    return this.trips.dispatchMetrics(from, to);
+  }
+
   @RequirePermissions("trips.read", "trips.manage")
   @Get(":id")
   findOne(@Param("id") id: string) {

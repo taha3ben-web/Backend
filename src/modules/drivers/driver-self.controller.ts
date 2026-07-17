@@ -57,6 +57,11 @@ export class DriverSelfController {
     return this.service.earnings(user.userId);
   }
 
+  @Get("me/sanctions")
+  sanctions(@CurrentUser() user: AuthUser) {
+    return this.service.sanctionStatus(user.userId);
+  }
+
   @Get("me/trips")
   trips(@CurrentUser() user: AuthUser, @Query() q: PaginationDto) {
     return this.service.trips(user.userId, q);

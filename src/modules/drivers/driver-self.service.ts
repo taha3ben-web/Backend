@@ -7,8 +7,10 @@ import {
 import { DriverAvailability, Prisma } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import { StorageService } from "../storage/storage.service";
+import { DriverSanctionsService } from "./driver-sanctions.service";
 import { PaginationDto } from "../../common/dto/pagination.dto";
 import { round2 } from "../../common/money.util";
+import { identityChanged } from "./vehicle-verification.util";
 import {
   AddDocumentDto,
   SetAvailabilityDto,
@@ -35,7 +37,14 @@ export class DriverSelfService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
+    private readonly sanctions: DriverSanctionsService,
   ) {}
+
+  /** حالة عقوبات الإلغاء للسائق الحالي (مشتقة من userId الجلسة). */
+  async sanctionStatus(userId: string) {
+    const driver = await this.requireDriver(userId);
+    return this.sanctions.getDriverSanctionStatus(driver.id);
+  }
 
   private async requireDriver(userId: string) {
     const driver = await this.prisma.driver.findUnique({ where: { userId } });
@@ -143,7 +152,19 @@ export class DriverSelfService {
         vehicleTypeId: dto.vehicleTypeId ?? active?.vehicleTypeId ?? null,
       };
       if (active) {
-        await this.prisma.vehicle.update({ where: { id: active.id }, data });
+        // عند تغيّر هوية المركبة (الصانع/الطراز/اللوحة/السنة) يُعاد ضبط التحقق للمراجعة.
+        const resetVerification = identityChanged(active, data)
+          ? {
+              verificationStatus: "PENDING" as const,
+              verificationNote: null,
+              verifiedById: null,
+              verifiedAt: null,
+            }
+          : {};
+        await this.prisma.vehicle.update({
+          where: { id: active.id },
+          data: { ...data, ...resetVerification },
+        });
       } else {
         await this.prisma.vehicle.create({
           data: { driverId: driver.id, isActive: true, ...data },

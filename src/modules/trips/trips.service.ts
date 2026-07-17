@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   BadRequestException,
   ForbiddenException,
@@ -14,9 +15,12 @@ import { RedisService } from "../redis/redis.service";
 import { PaginationDto } from "../../common/dto/pagination.dto";
 import { FinancialService } from "../financial/financial.service";
 import { canTransition } from "./trip-transitions";
+import { NotificationsService } from "../notifications/notifications.service";
 
 @Injectable()
 export class TripsService {
+  private readonly logger = new Logger(TripsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     @Inject(forwardRef(() => RealtimeGateway))
@@ -24,6 +28,7 @@ export class TripsService {
     private readonly financial: FinancialService,
     private readonly redis: RedisService,
     private readonly config: ConfigService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async findAll(
@@ -63,6 +68,79 @@ export class TripsService {
       this.prisma.trip.count({ where }),
     ]);
     return { items, total, page: q.page, limit: q.limit };
+  }
+
+  /**
+   * مؤشرات التوجيه والمطابقة (قراءة فقط) مشتقة من TripEvent وحالات الرحلات.
+   * لا تعدّل أي بيانات ولا تؤثر على محرك المطابقة.
+   */
+  async dispatchMetrics(fromISO?: string, toISO?: string) {
+    const to = toISO ? new Date(toISO) : new Date();
+    const from = fromISO
+      ? new Date(fromISO)
+      : new Date(to.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const createdAt = { gte: from, lte: to };
+
+    const [requested, noDrivers, searchTimeout, accepted, cancelledEvents] =
+      await this.prisma.$transaction([
+        this.prisma.tripEvent.count({
+          where: { type: "trip:requested", createdAt },
+        }),
+        this.prisma.tripEvent.count({
+          where: { type: "trip:no_drivers", createdAt },
+        }),
+        this.prisma.tripEvent.count({
+          where: { type: "trip:search_timeout", createdAt },
+        }),
+        this.prisma.tripEvent.count({
+          where: { type: "trip:accepted", createdAt },
+        }),
+        this.prisma.tripEvent.count({
+          where: { type: "trip:cancelled", createdAt },
+        }),
+      ]);
+
+    const [totalTrips, completed, cancelledTrips, activeSearching] =
+      await this.prisma.$transaction([
+        this.prisma.trip.count({ where: { createdAt } }),
+        this.prisma.trip.count({ where: { createdAt, status: "COMPLETED" } }),
+        this.prisma.trip.count({ where: { createdAt, status: "CANCELLED" } }),
+        this.prisma.trip.count({ where: { createdAt, status: "SEARCHING" } }),
+      ]);
+
+    const matchRate =
+      requested > 0 ? Math.round((accepted / requested) * 100) : 0;
+    const unservedRate =
+      requested > 0
+        ? Math.round(((noDrivers + searchTimeout) / requested) * 100)
+        : 0;
+
+    const recentFailures = await this.prisma.tripEvent.findMany({
+      where: {
+        type: { in: ["trip:no_drivers", "trip:search_timeout"] },
+        createdAt,
+      },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+      include: {
+        trip: {
+          select: {
+            id: true,
+            rideClass: true,
+            pickupAddress: true,
+            city: { select: { name: true } },
+          },
+        },
+      },
+    });
+
+    return {
+      range: { from, to },
+      events: { requested, noDrivers, searchTimeout, accepted, cancelledEvents },
+      rates: { matchRate, unservedRate },
+      funnel: { totalTrips, completed, cancelledTrips, activeSearching },
+      recentFailures,
+    };
   }
 
   async findOne(id: string) {
@@ -105,6 +183,7 @@ export class TripsService {
         cancelledBy: to === "CANCELLED" ? actor : undefined,
         startedAt: to === "IN_PROGRESS" ? new Date() : undefined,
         completedAt: to === "COMPLETED" ? new Date() : undefined,
+        settlementStatus: to === "COMPLETED" ? "PENDING" : undefined,
       },
     });
     if (guard.count === 0) {
@@ -159,13 +238,114 @@ export class TripsService {
   ) {
     const trip = await this.prisma.trip.findUnique({
       where: { id: tripId },
+      select: {
+        id: true,
+        passengerId: true,
+        driver: { select: { userId: true } },
+      },
+    });
+    if (!trip) throw new NotFoundException("Trip not found");
+    if (!trip.driver || trip.driver.userId !== driverUserId) {
+      throw new ForbiddenException("لست السائق المكلّف بهذه الرحلة");
+    }
+    const result = await this.changeStatus(tripId, to, reason, "DRIVER");
+    this.notifyTripPush(trip.passengerId, tripId, to);
+    return result;
+  }
+
+  /**
+   * إشعار Push للراكب عند تغيّر حالة الرحلة من طرف السائق (أفضل-جهد).
+   * الإرسال fire-and-forget؛ فشل الإشعار لا يكسر انتقال الحالة إطلاقًا.
+   */
+  private notifyTripPush(
+    passengerId: string,
+    tripId: string,
+    to: TripStatus,
+  ): void {
+    const messages: Partial<
+      Record<TripStatus, { title: string; body: string }>
+    > = {
+      ARRIVING: {
+        title: "سائقك في الطريق",
+        body: "السائق في طريقه إلى نقطة انطلاقك.",
+      },
+      IN_PROGRESS: {
+        title: "بدأت رحلتك",
+        body: "انطلقت رحلتك الآن، رحلة سعيدة.",
+      },
+      COMPLETED: {
+        title: "اكتملت رحلتك",
+        body: "وصلت إلى وجهتك. شكرًا لاستخدامك NOVA Ride.",
+      },
+      CANCELLED: {
+        title: "أُلغيت رحلتك",
+        body: "تم إلغاء الرحلة من طرف السائق.",
+      },
+    };
+    const msg = messages[to];
+    if (!msg) return;
+    void this.notifications
+      .notifyUser(passengerId, msg.title, msg.body, "PUSH", {
+        kind: "trip",
+        tripId,
+        status: to,
+      })
+      .catch((err: unknown) =>
+        this.logger.warn(
+          `فشل إرسال إشعار Push للرحلة ${tripId}: ${(err as Error).message}`,
+        ),
+      );
+  }
+
+  /**
+   * حفظ نقطة تتبّع GPS للرحلة (أفضل-جهد). يُستدعى من WebSocket gateway
+   * بشكل مُقنّن أثناء الرحلة النشطة؛ الفشل لا يؤثّر على البثّ الحي.
+   */
+  async recordTracking(
+    tripId: string,
+    point: { lat: number; lng: number; heading?: number; speed?: number },
+  ): Promise<void> {
+    await this.prisma.tripTracking
+      .create({
+        data: {
+          tripId,
+          lat: point.lat,
+          lng: point.lng,
+          heading: point.heading ?? null,
+          speed: point.speed ?? null,
+        },
+      })
+      .catch((err: unknown) =>
+        this.logger.warn(
+          `فشل حفظ نقطة تتبّع للرحلة ${tripId}: ${(err as Error).message}`,
+        ),
+      );
+  }
+
+  /**
+   * جلب مسار الرحلة المحفوظ (نقاط GPS) بعد التحقّق من ملكية السائق.
+   */
+  async getTripTrack(driverUserId: string, tripId: string, limit = 1000) {
+    const trip = await this.prisma.trip.findUnique({
+      where: { id: tripId },
       select: { id: true, driver: { select: { userId: true } } },
     });
     if (!trip) throw new NotFoundException("Trip not found");
     if (!trip.driver || trip.driver.userId !== driverUserId) {
       throw new ForbiddenException("لست السائق المكلّف بهذه الرحلة");
     }
-    return this.changeStatus(tripId, to, reason, "DRIVER");
+    return this.prisma.tripTracking.findMany({
+      where: { tripId },
+      orderBy: { recordedAt: "asc" },
+      take: limit,
+      select: {
+        lat: true,
+        lng: true,
+        heading: true,
+        speed: true,
+        recordedAt: true,
+      },
+    });
   }
 
   async isParticipant(tripId: string, userId: string): Promise<boolean> {

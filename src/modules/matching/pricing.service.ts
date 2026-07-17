@@ -12,6 +12,8 @@ export interface FareQuote {
   durationSec: number;
   fare: number;
   currency: string;
+  commissionPct: number;
+  experimentVariant: string | null;
   breakdown: {
     baseFare: number;
     distanceCost: number;
@@ -21,6 +23,10 @@ export interface FareQuote {
     maxFare: number | null;
     negotiationMin: number | null;
     negotiationMax: number | null;
+    taxNet: number;
+    taxAmount: number;
+    taxGross: number;
+    countryCode: string | null;
   };
 }
 
@@ -33,6 +39,7 @@ export interface QuoteOptions {
   country?: string;
   customerType?: string;
   couponCode?: string;
+  subjectId?: string;
 }
 
 /**
@@ -71,6 +78,8 @@ export class PricingService {
       durationSec: r.durationSec,
       fare: r.fare,
       currency: r.currency,
+      commissionPct: r.commissionPct,
+      experimentVariant: r.experimentVariant,
       breakdown: {
         baseFare: r.breakdown.baseFare,
         distanceCost: r.breakdown.distanceCost,
@@ -80,6 +89,10 @@ export class PricingService {
         maxFare: r.breakdown.maxFare,
         negotiationMin: r.breakdown.negotiationMin,
         negotiationMax: r.breakdown.negotiationMax,
+        taxNet: r.breakdown.taxNet,
+        taxAmount: r.breakdown.taxAmount,
+        taxGross: r.breakdown.taxGross,
+        countryCode: r.breakdown.countryCode,
       },
     };
   }

@@ -1,3 +1,4 @@
+import { DEFAULT_CURRENCY } from "../../common/money.util";
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
@@ -36,6 +37,28 @@ export class VehiclePricingService {
     if (!v) return undefined;
     const d = new Date(v);
     return isNaN(d.getTime()) ? undefined : d;
+  }
+
+  private json(v?: Record<string, unknown>): Prisma.InputJsonValue | undefined {
+    return v === undefined ? undefined : (v as Prisma.InputJsonValue);
+  }
+
+  private normalizeArray(
+    values: string[] | undefined,
+    casing: "upper" | "lower",
+  ) {
+    const seen = new Set<string>();
+    const result: string[] = [];
+    for (const value of values ?? []) {
+      const trimmed = value.trim();
+      if (!trimmed) continue;
+      const next =
+        casing === "upper" ? trimmed.toUpperCase() : trimmed.toLowerCase();
+      if (seen.has(next)) continue;
+      seen.add(next);
+      result.push(next);
+    }
+    return result;
   }
 
   async findAll(
@@ -92,6 +115,11 @@ export class VehiclePricingService {
         country: dto.country,
         customerType: dto.customerType,
         couponCode: dto.couponCode,
+        appIds: this.normalizeArray(dto.appIds, "lower"),
+        clientOs: this.normalizeArray(dto.clientOs, "lower"),
+        audienceSegments: this.normalizeArray(dto.audienceSegments, "lower"),
+        minAppVersion: dto.minAppVersion,
+        maxAppVersion: dto.maxAppVersion,
         validFrom: this.parseDate(dto.validFrom),
         validTo: this.parseDate(dto.validTo),
         daysOfWeek: dto.daysOfWeek ?? [],
@@ -106,7 +134,8 @@ export class VehiclePricingService {
         negotiationMin: dto.negotiationMin,
         negotiationMax: dto.negotiationMax,
         commissionPct: dto.commissionPct ?? 0,
-        currency: dto.currency ?? "DZD",
+        currency: dto.currency ?? DEFAULT_CURRENCY,
+        metadata: this.json(dto.metadata),
         priority: dto.priority ?? 0,
         isActive: dto.isActive ?? true,
       },
@@ -127,6 +156,20 @@ export class VehiclePricingService {
         country: dto.country,
         customerType: dto.customerType,
         couponCode: dto.couponCode,
+        appIds:
+          dto.appIds === undefined
+            ? undefined
+            : this.normalizeArray(dto.appIds, "lower"),
+        clientOs:
+          dto.clientOs === undefined
+            ? undefined
+            : this.normalizeArray(dto.clientOs, "lower"),
+        audienceSegments:
+          dto.audienceSegments === undefined
+            ? undefined
+            : this.normalizeArray(dto.audienceSegments, "lower"),
+        minAppVersion: dto.minAppVersion,
+        maxAppVersion: dto.maxAppVersion,
         validFrom: this.parseDate(dto.validFrom),
         validTo: this.parseDate(dto.validTo),
         daysOfWeek: dto.daysOfWeek,
@@ -142,6 +185,7 @@ export class VehiclePricingService {
         negotiationMax: dto.negotiationMax,
         commissionPct: dto.commissionPct,
         currency: dto.currency,
+        metadata: this.json(dto.metadata),
         priority: dto.priority,
         isActive: dto.isActive,
         version: { increment: 1 },

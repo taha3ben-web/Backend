@@ -67,6 +67,47 @@ export class RedisService implements OnModuleDestroy {
     return res;
   }
 
+  // سكربت Lua ذرّي: لا يحذف القفل إلا إن طابق الـ token (مالكه).
+  private static readonly RELEASE_LOCK_LUA =
+    'if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) else return 0 end';
+
+  /**
+   * قفل موزّع عام (SET key token PX ttl NX). يُرجع true عند النجاح فقط.
+   * أساس المطابقة الموزّعة: يمنع نسختين/رحلتين من احتكار المورد نفسه.
+   */
+  async acquireLock(
+    key: string,
+    token: string,
+    ttlMs: number,
+  ): Promise<boolean> {
+    const ttl = Number.isFinite(ttlMs) && ttlMs > 0 ? Math.floor(ttlMs) : 1;
+    const res = await this.client.set(key, token, "PX", ttl, "NX");
+    return res === "OK";
+  }
+
+  /**
+   * تحرير قفل بأمان (compare-and-delete عبر Lua ذرّي): لا يحذف إلا إن كان
+   * المالك هو نفس صاحب الـ token — يمنع تحرير قفل نسخة أخرى بعد انتهاء المهلة.
+   */
+  async releaseLock(key: string, token: string): Promise<boolean> {
+    const res = await this.client.eval(
+      RedisService.RELEASE_LOCK_LUA,
+      1,
+      key,
+      token,
+    );
+    return res === 1;
+  }
+
+  /** جلب دفعي لقيم مفاتيح (pipeline) بترتيب المدخلات؛ null لغير الموجود. */
+  async getKeys(keys: string[]): Promise<Array<string | null>> {
+    if (keys.length === 0) return [];
+    const pipeline = this.client.pipeline();
+    for (const k of keys) pipeline.get(k);
+    const res = await pipeline.exec();
+    return keys.map((_, i) => (res?.[i]?.[1] as string | null) ?? null);
+  }
+
   /**
    * ينشئ اتصال Redis جديدًا (مطلوب لـ Socket.IO Redis Adapter
    * الذي يحتاج زوج pub/sub منفصل عن عميل الأوامر).

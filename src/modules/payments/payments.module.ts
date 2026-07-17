@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 import { FinancialModule } from "../financial/financial.module";
+import { RiskModule } from "../risk/risk.module";
 import { WalletService } from "./wallet.service";
 import { PaymentsService } from "./payments.service";
 import { WithdrawalsService } from "./withdrawals.service";
@@ -14,7 +15,7 @@ import { DriverTransfersService } from "./driver-transfers.service";
 import { DriverTransfersController } from "./driver-transfers.controller";
 
 @Module({
-  imports: [FinancialModule],
+  imports: [FinancialModule, RiskModule],
   providers: [
     WalletService,
     PaymentsService,

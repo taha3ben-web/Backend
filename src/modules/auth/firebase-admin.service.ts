@@ -22,6 +22,15 @@ export class FirebaseAdminService {
     return this.app !== null;
   }
 
+  /**
+   * يُرجِع واجهة FCM (HTTP v1) من تطبيق Firebase Admin، أو null إن لم يُفعّل.
+   * تستخدمها طبقة الإشعارات لإرسال Push دون إعادة تهيئة الاعتمادات.
+   */
+  getMessaging(): admin.messaging.Messaging | null {
+    this.ensureInit();
+    return this.app ? this.app.messaging() : null;
+  }
+
   private ensureInit(): void {
     if (this.initialized) return;
     this.initialized = true;

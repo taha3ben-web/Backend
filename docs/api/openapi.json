@@ -1,0 +1,8525 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "NOVA Ride API",
+    "version": "1.0.0",
+    "description": "جرد مسارات مُولّد آليًا من المتحكّمات. البادئة /api؛ كل المسارات متاحة أيضًا تحت /api/v1. لا يتضمّن هذا الجرد مخطّطات الطلب/الاستجابة (تُثرى لاحقًا)."
+  },
+  "servers": [
+    {
+      "url": "{baseUrl}",
+      "variables": {
+        "baseUrl": {
+          "default": "http://localhost:4000"
+        }
+      }
+    }
+  ],
+  "tags": [
+    {
+      "name": "ads"
+    },
+    {
+      "name": "agents"
+    },
+    {
+      "name": "app-versions"
+    },
+    {
+      "name": "assets"
+    },
+    {
+      "name": "auth"
+    },
+    {
+      "name": "backups"
+    },
+    {
+      "name": "bootstrap"
+    },
+    {
+      "name": "city-scaling"
+    },
+    {
+      "name": "content-blocks"
+    },
+    {
+      "name": "country-config"
+    },
+    {
+      "name": "coupons"
+    },
+    {
+      "name": "dashboard"
+    },
+    {
+      "name": "drivers"
+    },
+    {
+      "name": "emergency"
+    },
+    {
+      "name": "fare-quotes"
+    },
+    {
+      "name": "financial"
+    },
+    {
+      "name": "geo"
+    },
+    {
+      "name": "growth"
+    },
+    {
+      "name": "health"
+    },
+    {
+      "name": "kyc"
+    },
+    {
+      "name": "legal"
+    },
+    {
+      "name": "loyalty"
+    },
+    {
+      "name": "matching"
+    },
+    {
+      "name": "message-templates"
+    },
+    {
+      "name": "metrics"
+    },
+    {
+      "name": "notifications"
+    },
+    {
+      "name": "payment-gateways"
+    },
+    {
+      "name": "payments"
+    },
+    {
+      "name": "payouts"
+    },
+    {
+      "name": "pooling"
+    },
+    {
+      "name": "pricing"
+    },
+    {
+      "name": "pricing-engine"
+    },
+    {
+      "name": "promo-codes"
+    },
+    {
+      "name": "queue-insight"
+    },
+    {
+      "name": "rbac"
+    },
+    {
+      "name": "referral"
+    },
+    {
+      "name": "reports"
+    },
+    {
+      "name": "risk"
+    },
+    {
+      "name": "scheduled-trips"
+    },
+    {
+      "name": "sessions"
+    },
+    {
+      "name": "settings"
+    },
+    {
+      "name": "subscriptions"
+    },
+    {
+      "name": "support"
+    },
+    {
+      "name": "trips"
+    },
+    {
+      "name": "users"
+    },
+    {
+      "name": "vehicle-types"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    }
+  },
+  "paths": {
+    "/api/admin/bootstrap/preview": {
+      "get": {
+        "tags": [
+          "bootstrap"
+        ],
+        "operationId": "bootstrap_preview",
+        "summary": "GET /api/admin/bootstrap/preview",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      }
+    },
+    "/api/admin/fare-offers": {
+      "get": {
+        "tags": [
+          "fare-quotes"
+        ],
+        "operationId": "fare-quotes_list",
+        "summary": "GET /api/admin/fare-offers",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage"
+      }
+    },
+    "/api/admin/fare-offers/:id": {
+      "get": {
+        "tags": [
+          "fare-quotes"
+        ],
+        "operationId": "fare-quotes_getOne",
+        "summary": "GET /api/admin/fare-offers/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage"
+      }
+    },
+    "/api/admin/fare-quotes": {
+      "get": {
+        "tags": [
+          "fare-quotes"
+        ],
+        "operationId": "fare-quotes_list",
+        "summary": "GET /api/admin/fare-quotes",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage"
+      }
+    },
+    "/api/admin/fare-quotes/:id": {
+      "get": {
+        "tags": [
+          "fare-quotes"
+        ],
+        "operationId": "fare-quotes_getOne",
+        "summary": "GET /api/admin/fare-quotes/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage"
+      }
+    },
+    "/api/admin/fare-quotes/simulate": {
+      "post": {
+        "tags": [
+          "fare-quotes"
+        ],
+        "operationId": "fare-quotes_simulate",
+        "summary": "POST /api/admin/fare-quotes/simulate",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage"
+      }
+    },
+    "/api/admin/geo/provider": {
+      "get": {
+        "tags": [
+          "geo"
+        ],
+        "operationId": "geo_getConfig",
+        "summary": "GET /api/admin/geo/provider",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      },
+      "put": {
+        "tags": [
+          "geo"
+        ],
+        "operationId": "geo_updateConfig",
+        "summary": "PUT /api/admin/geo/provider",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      }
+    },
+    "/api/ads": {
+      "get": {
+        "tags": [
+          "ads"
+        ],
+        "operationId": "ads_findAll",
+        "summary": "GET /api/ads",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      },
+      "post": {
+        "tags": [
+          "ads"
+        ],
+        "operationId": "ads_create",
+        "summary": "POST /api/ads",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      }
+    },
+    "/api/ads/:id": {
+      "delete": {
+        "tags": [
+          "ads"
+        ],
+        "operationId": "ads_remove",
+        "summary": "DELETE /api/ads/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      },
+      "patch": {
+        "tags": [
+          "ads"
+        ],
+        "operationId": "ads_update",
+        "summary": "PATCH /api/ads/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      }
+    },
+    "/api/ads/active": {
+      "get": {
+        "tags": [
+          "ads"
+        ],
+        "operationId": "ads_active",
+        "summary": "GET /api/ads/active",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/agents": {
+      "get": {
+        "tags": [
+          "agents"
+        ],
+        "operationId": "agents_list",
+        "summary": "GET /api/agents",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: agents.manage, staff.manage"
+      },
+      "post": {
+        "tags": [
+          "agents"
+        ],
+        "operationId": "agents_create",
+        "summary": "POST /api/agents",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: agents.manage, staff.manage"
+      }
+    },
+    "/api/agents/:id": {
+      "get": {
+        "tags": [
+          "agents"
+        ],
+        "operationId": "agents_getOne",
+        "summary": "GET /api/agents/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: agents.manage, staff.manage"
+      },
+      "patch": {
+        "tags": [
+          "agents"
+        ],
+        "operationId": "agents_update",
+        "summary": "PATCH /api/agents/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: agents.manage, staff.manage"
+      }
+    },
+    "/api/agents/:id/audit": {
+      "get": {
+        "tags": [
+          "agents"
+        ],
+        "operationId": "agents_auditTrail",
+        "summary": "GET /api/agents/:id/audit",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: agents.manage, staff.manage"
+      }
+    },
+    "/api/agents/:id/password": {
+      "patch": {
+        "tags": [
+          "agents"
+        ],
+        "operationId": "agents_updatePassword",
+        "summary": "PATCH /api/agents/:id/password",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: agents.manage, staff.manage"
+      }
+    },
+    "/api/agents/:id/role": {
+      "patch": {
+        "tags": [
+          "agents"
+        ],
+        "operationId": "agents_assignRole",
+        "summary": "PATCH /api/agents/:id/role",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: agents.manage, staff.manage"
+      }
+    },
+    "/api/agents/me/profile": {
+      "get": {
+        "tags": [
+          "agents"
+        ],
+        "operationId": "agents_profile",
+        "summary": "GET /api/agents/me/profile",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/agents/options": {
+      "get": {
+        "tags": [
+          "agents"
+        ],
+        "operationId": "agents_managementOptions",
+        "summary": "GET /api/agents/options",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: agents.manage, staff.manage"
+      }
+    },
+    "/api/app-versions": {
+      "get": {
+        "tags": [
+          "app-versions"
+        ],
+        "operationId": "app-versions_findAll",
+        "summary": "GET /api/app-versions",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      },
+      "post": {
+        "tags": [
+          "app-versions"
+        ],
+        "operationId": "app-versions_create",
+        "summary": "POST /api/app-versions",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      }
+    },
+    "/api/app-versions/:id": {
+      "delete": {
+        "tags": [
+          "app-versions"
+        ],
+        "operationId": "app-versions_remove",
+        "summary": "DELETE /api/app-versions/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      },
+      "patch": {
+        "tags": [
+          "app-versions"
+        ],
+        "operationId": "app-versions_update",
+        "summary": "PATCH /api/app-versions/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      }
+    },
+    "/api/app-versions/check": {
+      "get": {
+        "tags": [
+          "app-versions"
+        ],
+        "operationId": "app-versions_check",
+        "summary": "GET /api/app-versions/check",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/assets/file/:key": {
+      "get": {
+        "tags": [
+          "assets"
+        ],
+        "operationId": "assets_file",
+        "summary": "GET /api/assets/file/:key",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/assets/manifest": {
+      "get": {
+        "tags": [
+          "assets"
+        ],
+        "operationId": "assets_manifest",
+        "summary": "GET /api/assets/manifest",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/auth/firebase": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "auth_firebase",
+        "summary": "POST /api/auth/firebase",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "auth_login",
+        "summary": "POST /api/auth/login",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "auth_logout",
+        "summary": "POST /api/auth/logout",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/auth/me": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "auth_me",
+        "summary": "POST /api/auth/me",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/auth/otp/request": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "auth_requestOtp",
+        "summary": "POST /api/auth/otp/request",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/auth/otp/verify": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "auth_verifyOtp",
+        "summary": "POST /api/auth/otp/verify",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/auth/refresh": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "auth_refresh",
+        "summary": "POST /api/auth/refresh",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/auth/register": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "auth_register",
+        "summary": "POST /api/auth/register",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/backups": {
+      "get": {
+        "tags": [
+          "backups"
+        ],
+        "operationId": "backups_list",
+        "summary": "GET /api/backups",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      },
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "operationId": "backups_create",
+        "summary": "POST /api/backups",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      }
+    },
+    "/api/backups/:id": {
+      "delete": {
+        "tags": [
+          "backups"
+        ],
+        "operationId": "backups_remove",
+        "summary": "DELETE /api/backups/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      },
+      "get": {
+        "tags": [
+          "backups"
+        ],
+        "operationId": "backups_findOne",
+        "summary": "GET /api/backups/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      },
+      "patch": {
+        "tags": [
+          "backups"
+        ],
+        "operationId": "backups_update",
+        "summary": "PATCH /api/backups/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      }
+    },
+    "/api/backups/dr-status": {
+      "get": {
+        "tags": [
+          "backups"
+        ],
+        "operationId": "backups_drStatus",
+        "summary": "GET /api/backups/dr-status",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      }
+    },
+    "/api/backups/retention/apply": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "operationId": "backups_applyRetention",
+        "summary": "POST /api/backups/retention/apply",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      }
+    },
+    "/api/bootstrap": {
+      "get": {
+        "tags": [
+          "bootstrap"
+        ],
+        "operationId": "bootstrap_build",
+        "summary": "GET /api/bootstrap",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/catalog/analytics": {
+      "get": {
+        "tags": [
+          "vehicle-types"
+        ],
+        "operationId": "vehicle-types_analyticsOverview",
+        "summary": "GET /api/catalog/analytics",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage, reports.read"
+      }
+    },
+    "/api/catalog/audit": {
+      "get": {
+        "tags": [
+          "vehicle-types"
+        ],
+        "operationId": "vehicle-types_auditLog",
+        "summary": "GET /api/catalog/audit",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage, audit.read"
+      }
+    },
+    "/api/catalog/vehicles": {
+      "get": {
+        "tags": [
+          "vehicle-types"
+        ],
+        "operationId": "vehicle-types_vehicles",
+        "summary": "GET /api/catalog/vehicles",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/catalog/version": {
+      "get": {
+        "tags": [
+          "vehicle-types"
+        ],
+        "operationId": "vehicle-types_version",
+        "summary": "GET /api/catalog/version",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/cities": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "operationId": "settings_findAll",
+        "summary": "GET /api/cities",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      },
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "operationId": "settings_create",
+        "summary": "POST /api/cities",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      }
+    },
+    "/api/cities/:id": {
+      "delete": {
+        "tags": [
+          "settings"
+        ],
+        "operationId": "settings_remove",
+        "summary": "DELETE /api/cities/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      },
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "operationId": "settings_findOne",
+        "summary": "GET /api/cities/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      },
+      "patch": {
+        "tags": [
+          "settings"
+        ],
+        "operationId": "settings_update",
+        "summary": "PATCH /api/cities/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      }
+    },
+    "/api/cities/scaling": {
+      "get": {
+        "tags": [
+          "city-scaling"
+        ],
+        "operationId": "city-scaling_list",
+        "summary": "GET /api/cities/scaling",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      },
+      "post": {
+        "tags": [
+          "city-scaling"
+        ],
+        "operationId": "city-scaling_upsert",
+        "summary": "POST /api/cities/scaling",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      }
+    },
+    "/api/cities/scaling/:cityId": {
+      "get": {
+        "tags": [
+          "city-scaling"
+        ],
+        "operationId": "city-scaling_get",
+        "summary": "GET /api/cities/scaling/:cityId",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      }
+    },
+    "/api/cities/scaling/:cityId/acceptance": {
+      "get": {
+        "tags": [
+          "city-scaling"
+        ],
+        "operationId": "city-scaling_acceptance",
+        "summary": "GET /api/cities/scaling/:cityId/acceptance",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      }
+    },
+    "/api/cities/scaling/:cityId/launch-status": {
+      "patch": {
+        "tags": [
+          "city-scaling"
+        ],
+        "operationId": "city-scaling_changeStatus",
+        "summary": "PATCH /api/cities/scaling/:cityId/launch-status",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      }
+    },
+    "/api/content-blocks": {
+      "get": {
+        "tags": [
+          "content-blocks"
+        ],
+        "operationId": "content-blocks_list",
+        "summary": "GET /api/content-blocks",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      },
+      "post": {
+        "tags": [
+          "content-blocks"
+        ],
+        "operationId": "content-blocks_create",
+        "summary": "POST /api/content-blocks",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      }
+    },
+    "/api/content-blocks/:id": {
+      "delete": {
+        "tags": [
+          "content-blocks"
+        ],
+        "operationId": "content-blocks_remove",
+        "summary": "DELETE /api/content-blocks/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      },
+      "get": {
+        "tags": [
+          "content-blocks"
+        ],
+        "operationId": "content-blocks_findOne",
+        "summary": "GET /api/content-blocks/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      },
+      "patch": {
+        "tags": [
+          "content-blocks"
+        ],
+        "operationId": "content-blocks_update",
+        "summary": "PATCH /api/content-blocks/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      }
+    },
+    "/api/content-blocks/live": {
+      "get": {
+        "tags": [
+          "content-blocks"
+        ],
+        "operationId": "content-blocks_live",
+        "summary": "GET /api/content-blocks/live",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/country-config": {
+      "get": {
+        "tags": [
+          "country-config"
+        ],
+        "operationId": "country-config_list",
+        "summary": "GET /api/country-config",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      }
+    },
+    "/api/country-config/:code": {
+      "get": {
+        "tags": [
+          "country-config"
+        ],
+        "operationId": "country-config_get",
+        "summary": "GET /api/country-config/:code",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      },
+      "put": {
+        "tags": [
+          "country-config"
+        ],
+        "operationId": "country-config_upsert",
+        "summary": "PUT /api/country-config/:code",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      }
+    },
+    "/api/country-config/:code/phone": {
+      "get": {
+        "tags": [
+          "country-config"
+        ],
+        "operationId": "country-config_phone",
+        "summary": "GET /api/country-config/:code/phone",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      }
+    },
+    "/api/country-config/:code/tax": {
+      "get": {
+        "tags": [
+          "country-config"
+        ],
+        "operationId": "country-config_tax",
+        "summary": "GET /api/country-config/:code/tax",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      }
+    },
+    "/api/coupons": {
+      "get": {
+        "tags": [
+          "coupons"
+        ],
+        "operationId": "coupons_findAll",
+        "summary": "GET /api/coupons",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: coupons.manage"
+      },
+      "post": {
+        "tags": [
+          "coupons"
+        ],
+        "operationId": "coupons_create",
+        "summary": "POST /api/coupons",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: coupons.manage"
+      }
+    },
+    "/api/coupons/:id": {
+      "delete": {
+        "tags": [
+          "coupons"
+        ],
+        "operationId": "coupons_deactivate",
+        "summary": "DELETE /api/coupons/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: coupons.manage"
+      },
+      "get": {
+        "tags": [
+          "coupons"
+        ],
+        "operationId": "coupons_findOne",
+        "summary": "GET /api/coupons/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: coupons.manage"
+      },
+      "patch": {
+        "tags": [
+          "coupons"
+        ],
+        "operationId": "coupons_update",
+        "summary": "PATCH /api/coupons/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: coupons.manage"
+      }
+    },
+    "/api/coupons/validate": {
+      "post": {
+        "tags": [
+          "coupons"
+        ],
+        "operationId": "coupons_validate",
+        "summary": "POST /api/coupons/validate",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/dashboard/earnings": {
+      "get": {
+        "tags": [
+          "dashboard"
+        ],
+        "operationId": "dashboard_earnings",
+        "summary": "GET /api/dashboard/earnings",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: reports.read, payments.read"
+      }
+    },
+    "/api/dashboard/latest": {
+      "get": {
+        "tags": [
+          "dashboard"
+        ],
+        "operationId": "dashboard_latest",
+        "summary": "GET /api/dashboard/latest",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: reports.read, trips.read, support.manage"
+      }
+    },
+    "/api/dashboard/live-map": {
+      "get": {
+        "tags": [
+          "dashboard"
+        ],
+        "operationId": "dashboard_liveMap",
+        "summary": "GET /api/dashboard/live-map",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: reports.read, drivers.read"
+      }
+    },
+    "/api/dashboard/operations": {
+      "get": {
+        "tags": [
+          "dashboard"
+        ],
+        "operationId": "dashboard_operations",
+        "summary": "GET /api/dashboard/operations",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: reports.read, support.manage, safety.manage"
+      }
+    },
+    "/api/dashboard/ops/dead-letters": {
+      "get": {
+        "tags": [
+          "dashboard"
+        ],
+        "operationId": "dashboard_deadLetters",
+        "summary": "GET /api/dashboard/ops/dead-letters",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: reports.read"
+      }
+    },
+    "/api/dashboard/ops/dead-letters/:id/retry": {
+      "post": {
+        "tags": [
+          "dashboard"
+        ],
+        "operationId": "dashboard_retryDeadLetter",
+        "summary": "POST /api/dashboard/ops/dead-letters/:id/retry",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: payments.manage"
+      }
+    },
+    "/api/dashboard/ops/incidents": {
+      "get": {
+        "tags": [
+          "dashboard"
+        ],
+        "operationId": "dashboard_incidents",
+        "summary": "GET /api/dashboard/ops/incidents",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: reports.read"
+      }
+    },
+    "/api/dashboard/ops/incidents/:id/resolve": {
+      "post": {
+        "tags": [
+          "dashboard"
+        ],
+        "operationId": "dashboard_resolveIncident",
+        "summary": "POST /api/dashboard/ops/incidents/:id/resolve",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: payments.manage"
+      }
+    },
+    "/api/dashboard/ops/overview": {
+      "get": {
+        "tags": [
+          "dashboard"
+        ],
+        "operationId": "dashboard_overview",
+        "summary": "GET /api/dashboard/ops/overview",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: reports.read"
+      }
+    },
+    "/api/dashboard/ops/reconciliation/run": {
+      "post": {
+        "tags": [
+          "dashboard"
+        ],
+        "operationId": "dashboard_runReconciliation",
+        "summary": "POST /api/dashboard/ops/reconciliation/run",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: payments.manage"
+      }
+    },
+    "/api/dashboard/ops/risk-reviews": {
+      "get": {
+        "tags": [
+          "dashboard"
+        ],
+        "operationId": "dashboard_riskReviews",
+        "summary": "GET /api/dashboard/ops/risk-reviews",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: reports.read"
+      }
+    },
+    "/api/dashboard/ops/settlements": {
+      "get": {
+        "tags": [
+          "dashboard"
+        ],
+        "operationId": "dashboard_settlementQueue",
+        "summary": "GET /api/dashboard/ops/settlements",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: payments.read"
+      }
+    },
+    "/api/dashboard/ops/settlements/retry": {
+      "post": {
+        "tags": [
+          "dashboard"
+        ],
+        "operationId": "dashboard_retrySettlements",
+        "summary": "POST /api/dashboard/ops/settlements/retry",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: payments.manage"
+      }
+    },
+    "/api/dashboard/payments/gateways/providers": {
+      "get": {
+        "tags": [
+          "payment-gateways"
+        ],
+        "operationId": "payment-gateways_providers",
+        "summary": "GET /api/dashboard/payments/gateways/providers",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: payments.read, payments.manage"
+      }
+    },
+    "/api/dashboard/payments/gateways/recent-events": {
+      "get": {
+        "tags": [
+          "payment-gateways"
+        ],
+        "operationId": "payment-gateways_recentEvents",
+        "summary": "GET /api/dashboard/payments/gateways/recent-events",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: payments.read, payments.manage"
+      }
+    },
+    "/api/dashboard/payments/gateways/webhook-health": {
+      "get": {
+        "tags": [
+          "payment-gateways"
+        ],
+        "operationId": "payment-gateways_webhookHealth",
+        "summary": "GET /api/dashboard/payments/gateways/webhook-health",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: payments.read, payments.manage"
+      }
+    },
+    "/api/dashboard/queue/backlog-by-name": {
+      "get": {
+        "tags": [
+          "queue-insight"
+        ],
+        "operationId": "queue-insight_backlogByName",
+        "summary": "GET /api/dashboard/queue/backlog-by-name",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: reports.read"
+      }
+    },
+    "/api/dashboard/queue/dead-letters": {
+      "get": {
+        "tags": [
+          "queue-insight"
+        ],
+        "operationId": "queue-insight_deadLetters",
+        "summary": "GET /api/dashboard/queue/dead-letters",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: reports.read"
+      }
+    },
+    "/api/dashboard/queue/dead-letters/retry-all": {
+      "post": {
+        "tags": [
+          "queue-insight"
+        ],
+        "operationId": "queue-insight_retryAllDeadLetters",
+        "summary": "POST /api/dashboard/queue/dead-letters/retry-all",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: payments.manage"
+      }
+    },
+    "/api/dashboard/queue/insight": {
+      "get": {
+        "tags": [
+          "queue-insight"
+        ],
+        "operationId": "queue-insight_insight",
+        "summary": "GET /api/dashboard/queue/insight",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: reports.read"
+      }
+    },
+    "/api/dashboard/queue/purge-delivered": {
+      "post": {
+        "tags": [
+          "queue-insight"
+        ],
+        "operationId": "queue-insight_purgeDelivered",
+        "summary": "POST /api/dashboard/queue/purge-delivered",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      }
+    },
+    "/api/dashboard/readiness": {
+      "get": {
+        "tags": [
+          "dashboard"
+        ],
+        "operationId": "dashboard_readiness",
+        "summary": "GET /api/dashboard/readiness",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: audit.read, reports.read, staff.manage"
+      }
+    },
+    "/api/dashboard/summary": {
+      "get": {
+        "tags": [
+          "dashboard"
+        ],
+        "operationId": "dashboard_summary",
+        "summary": "GET /api/dashboard/summary",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: reports.read, drivers.read, trips.read"
+      }
+    },
+    "/api/documents": {
+      "get": {
+        "tags": [
+          "drivers"
+        ],
+        "operationId": "drivers_findAll",
+        "summary": "GET /api/documents",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: drivers.documents, drivers.manage"
+      }
+    },
+    "/api/documents/:id/review": {
+      "patch": {
+        "tags": [
+          "drivers"
+        ],
+        "operationId": "drivers_review",
+        "summary": "PATCH /api/documents/:id/review",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: drivers.documents, drivers.manage"
+      }
+    },
+    "/api/driver-funding/requests": {
+      "get": {
+        "tags": [
+          "payments"
+        ],
+        "operationId": "payments_list",
+        "summary": "GET /api/driver-funding/requests",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: funding.read, funding.manage"
+      },
+      "post": {
+        "tags": [
+          "payments"
+        ],
+        "operationId": "payments_create",
+        "summary": "POST /api/driver-funding/requests",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: funding.manage"
+      }
+    },
+    "/api/driver-funding/requests/:id": {
+      "get": {
+        "tags": [
+          "payments"
+        ],
+        "operationId": "payments_getOne",
+        "summary": "GET /api/driver-funding/requests/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: funding.read, funding.manage"
+      }
+    },
+    "/api/driver-funding/requests/:id/approve": {
+      "patch": {
+        "tags": [
+          "payments"
+        ],
+        "operationId": "payments_approve",
+        "summary": "PATCH /api/driver-funding/requests/:id/approve",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: funding.manage"
+      }
+    },
+    "/api/driver-funding/requests/:id/fund": {
+      "post": {
+        "tags": [
+          "payments"
+        ],
+        "operationId": "payments_fund",
+        "summary": "POST /api/driver-funding/requests/:id/fund",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: funding.manage"
+      }
+    },
+    "/api/driver-funding/requests/:id/reject": {
+      "patch": {
+        "tags": [
+          "payments"
+        ],
+        "operationId": "payments_reject",
+        "summary": "PATCH /api/driver-funding/requests/:id/reject",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: funding.manage"
+      }
+    },
+    "/api/driver-qr/resolve/:publicIdentifier": {
+      "get": {
+        "tags": [
+          "drivers"
+        ],
+        "operationId": "drivers_resolve",
+        "summary": "GET /api/driver-qr/resolve/:publicIdentifier",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/driver-transfers": {
+      "get": {
+        "tags": [
+          "payments"
+        ],
+        "operationId": "payments_list",
+        "summary": "GET /api/driver-transfers",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: transfer.read, transfer.manage"
+      },
+      "post": {
+        "tags": [
+          "payments"
+        ],
+        "operationId": "payments_create",
+        "summary": "POST /api/driver-transfers",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: transfer.manage"
+      }
+    },
+    "/api/driver-transfers/:id": {
+      "get": {
+        "tags": [
+          "payments"
+        ],
+        "operationId": "payments_getOne",
+        "summary": "GET /api/driver-transfers/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: transfer.read, transfer.manage"
+      }
+    },
+    "/api/driver-transfers/:id/approve": {
+      "patch": {
+        "tags": [
+          "payments"
+        ],
+        "operationId": "payments_approve",
+        "summary": "PATCH /api/driver-transfers/:id/approve",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: transfer.manage"
+      }
+    },
+    "/api/driver-transfers/:id/complete": {
+      "post": {
+        "tags": [
+          "payments"
+        ],
+        "operationId": "payments_complete",
+        "summary": "POST /api/driver-transfers/:id/complete",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: transfer.manage"
+      }
+    },
+    "/api/driver-transfers/:id/reject": {
+      "patch": {
+        "tags": [
+          "payments"
+        ],
+        "operationId": "payments_reject",
+        "summary": "PATCH /api/driver-transfers/:id/reject",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: transfer.manage"
+      }
+    },
+    "/api/driver/fare-offers": {
+      "get": {
+        "tags": [
+          "fare-quotes"
+        ],
+        "operationId": "fare-quotes_listMine",
+        "summary": "GET /api/driver/fare-offers",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "fare-quotes"
+        ],
+        "operationId": "fare-quotes_create",
+        "summary": "POST /api/driver/fare-offers",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/driver/fare-offers/:id/withdraw": {
+      "post": {
+        "tags": [
+          "fare-quotes"
+        ],
+        "operationId": "fare-quotes_withdraw",
+        "summary": "POST /api/driver/fare-offers/:id/withdraw",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/driver/me": {
+      "get": {
+        "tags": [
+          "drivers"
+        ],
+        "operationId": "drivers_me",
+        "summary": "GET /api/driver/me",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "drivers"
+        ],
+        "operationId": "drivers_updateMe",
+        "summary": "PATCH /api/driver/me",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/driver/me/availability": {
+      "post": {
+        "tags": [
+          "drivers"
+        ],
+        "operationId": "drivers_availability",
+        "summary": "POST /api/driver/me/availability",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/driver/me/documents": {
+      "post": {
+        "tags": [
+          "drivers"
+        ],
+        "operationId": "drivers_addDocument",
+        "summary": "POST /api/driver/me/documents",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/driver/me/earnings": {
+      "get": {
+        "tags": [
+          "drivers"
+        ],
+        "operationId": "drivers_earnings",
+        "summary": "GET /api/driver/me/earnings",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/driver/me/sanctions": {
+      "get": {
+        "tags": [
+          "drivers"
+        ],
+        "operationId": "drivers_sanctions",
+        "summary": "GET /api/driver/me/sanctions",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/driver/me/trips": {
+      "get": {
+        "tags": [
+          "drivers"
+        ],
+        "operationId": "drivers_trips",
+        "summary": "GET /api/driver/me/trips",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/driver/me/trips/:id": {
+      "get": {
+        "tags": [
+          "drivers"
+        ],
+        "operationId": "drivers_trip",
+        "summary": "GET /api/driver/me/trips/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/driver/me/trips/:id/status": {
+      "patch": {
+        "tags": [
+          "drivers"
+        ],
+        "operationId": "drivers_updateTrip",
+        "summary": "PATCH /api/driver/me/trips/:id/status",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/driver/me/upload-url": {
+      "post": {
+        "tags": [
+          "drivers"
+        ],
+        "operationId": "drivers_uploadUrl",
+        "summary": "POST /api/driver/me/upload-url",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/driver/trips/:id/arriving": {
+      "post": {
+        "tags": [
+          "trips"
+        ],
+        "operationId": "trips_arriving",
+        "summary": "POST /api/driver/trips/:id/arriving",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/driver/trips/:id/cancel": {
+      "post": {
+        "tags": [
+          "trips"
+        ],
+        "operationId": "trips_cancel",
+        "summary": "POST /api/driver/trips/:id/cancel",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/driver/trips/:id/complete": {
+      "post": {
+        "tags": [
+          "trips"
+        ],
+        "operationId": "trips_complete",
+        "summary": "POST /api/driver/trips/:id/complete",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/driver/trips/:id/start": {
+      "post": {
+        "tags": [
+          "trips"
+        ],
+        "operationId": "trips_start",
+        "summary": "POST /api/driver/trips/:id/start",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/driver/trips/:id/track": {
+      "get": {
+        "tags": [
+          "trips"
+        ],
+        "operationId": "trips_track",
+        "summary": "GET /api/driver/trips/:id/track",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/drivers": {
+      "get": {
+        "tags": [
+          "drivers"
+        ],
+        "operationId": "drivers_findAll",
+        "summary": "GET /api/drivers",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: drivers.read, drivers.manage"
+      }
+    },
+    "/api/drivers/:driverId/qr": {
+      "get": {
+        "tags": [
+          "drivers"
+        ],
+        "operationId": "drivers_getCurrent",
+        "summary": "GET /api/drivers/:driverId/qr",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: qr.read, qr.manage"
+      }
+    },
+    "/api/drivers/:driverId/qr/issue": {
+      "post": {
+        "tags": [
+          "drivers"
+        ],
+        "operationId": "drivers_issue",
+        "summary": "POST /api/drivers/:driverId/qr/issue",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: qr.read, qr.manage"
+      }
+    },
+    "/api/drivers/:driverId/qr/revoke": {
+      "post": {
+        "tags": [
+          "drivers"
+        ],
+        "operationId": "drivers_revoke",
+        "summary": "POST /api/drivers/:driverId/qr/revoke",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: qr.read, qr.manage"
+      }
+    },
+    "/api/drivers/:driverId/qr/rotate": {
+      "post": {
+        "tags": [
+          "drivers"
+        ],
+        "operationId": "drivers_rotate",
+        "summary": "POST /api/drivers/:driverId/qr/rotate",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: qr.read, qr.manage"
+      }
+    },
+    "/api/drivers/:id": {
+      "get": {
+        "tags": [
+          "drivers"
+        ],
+        "operationId": "drivers_findOne",
+        "summary": "GET /api/drivers/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: drivers.read, drivers.manage"
+      }
+    },
+    "/api/drivers/:id/approve": {
+      "patch": {
+        "tags": [
+          "drivers"
+        ],
+        "operationId": "drivers_approve",
+        "summary": "PATCH /api/drivers/:id/approve",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: drivers.manage"
+      }
+    },
+    "/api/drivers/:id/ban": {
+      "patch": {
+        "tags": [
+          "drivers"
+        ],
+        "operationId": "drivers_ban",
+        "summary": "PATCH /api/drivers/:id/ban",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: drivers.manage"
+      }
+    },
+    "/api/drivers/:id/reject": {
+      "patch": {
+        "tags": [
+          "drivers"
+        ],
+        "operationId": "drivers_reject",
+        "summary": "PATCH /api/drivers/:id/reject",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: drivers.manage"
+      }
+    },
+    "/api/drivers/:id/suspend": {
+      "patch": {
+        "tags": [
+          "drivers"
+        ],
+        "operationId": "drivers_suspend",
+        "summary": "PATCH /api/drivers/:id/suspend",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: drivers.manage"
+      }
+    },
+    "/api/drivers/documents/:docId/review": {
+      "patch": {
+        "tags": [
+          "drivers"
+        ],
+        "operationId": "drivers_reviewDocument",
+        "summary": "PATCH /api/drivers/documents/:docId/review",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: drivers.documents, drivers.manage"
+      }
+    },
+    "/api/drivers/sanctions/:id/lift": {
+      "patch": {
+        "tags": [
+          "drivers"
+        ],
+        "operationId": "drivers_liftSuspension",
+        "summary": "PATCH /api/drivers/sanctions/:id/lift",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: drivers.manage"
+      }
+    },
+    "/api/drivers/sanctions/config": {
+      "get": {
+        "tags": [
+          "drivers"
+        ],
+        "operationId": "drivers_sanctionsConfig",
+        "summary": "GET /api/drivers/sanctions/config",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: drivers.read, drivers.manage"
+      }
+    },
+    "/api/drivers/sanctions/log": {
+      "get": {
+        "tags": [
+          "drivers"
+        ],
+        "operationId": "drivers_sanctionsLog",
+        "summary": "GET /api/drivers/sanctions/log",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: drivers.read, drivers.manage"
+      }
+    },
+    "/api/drivers/sanctions/suspended": {
+      "get": {
+        "tags": [
+          "drivers"
+        ],
+        "operationId": "drivers_suspendedDrivers",
+        "summary": "GET /api/drivers/sanctions/suspended",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: drivers.read, drivers.manage"
+      }
+    },
+    "/api/emergency-contacts": {
+      "post": {
+        "tags": [
+          "emergency"
+        ],
+        "operationId": "emergency_create",
+        "summary": "POST /api/emergency-contacts",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/emergency-contacts/:id": {
+      "delete": {
+        "tags": [
+          "emergency"
+        ],
+        "operationId": "emergency_remove",
+        "summary": "DELETE /api/emergency-contacts/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "emergency"
+        ],
+        "operationId": "emergency_update",
+        "summary": "PATCH /api/emergency-contacts/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/emergency-contacts/me": {
+      "get": {
+        "tags": [
+          "emergency"
+        ],
+        "operationId": "emergency_mine",
+        "summary": "GET /api/emergency-contacts/me",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/emergency-contacts/user/:userId": {
+      "get": {
+        "tags": [
+          "emergency"
+        ],
+        "operationId": "emergency_forUser",
+        "summary": "GET /api/emergency-contacts/user/:userId",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: safety.manage, support.manage"
+      }
+    },
+    "/api/fare-quotes": {
+      "get": {
+        "tags": [
+          "fare-quotes"
+        ],
+        "operationId": "fare-quotes_listMine",
+        "summary": "GET /api/fare-quotes",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "fare-quotes"
+        ],
+        "operationId": "fare-quotes_create",
+        "summary": "POST /api/fare-quotes",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/fare-quotes/:id": {
+      "get": {
+        "tags": [
+          "fare-quotes"
+        ],
+        "operationId": "fare-quotes_getOne",
+        "summary": "GET /api/fare-quotes/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/fare-quotes/:id/cancel": {
+      "post": {
+        "tags": [
+          "fare-quotes"
+        ],
+        "operationId": "fare-quotes_cancel",
+        "summary": "POST /api/fare-quotes/:id/cancel",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/fare-quotes/:id/offers": {
+      "get": {
+        "tags": [
+          "fare-quotes"
+        ],
+        "operationId": "fare-quotes_listOffers",
+        "summary": "GET /api/fare-quotes/:id/offers",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/fare-quotes/:id/offers/:offerId/accept": {
+      "post": {
+        "tags": [
+          "fare-quotes"
+        ],
+        "operationId": "fare-quotes_acceptOffer",
+        "summary": "POST /api/fare-quotes/:id/offers/:offerId/accept",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/fare-quotes/:id/offers/:offerId/reject": {
+      "post": {
+        "tags": [
+          "fare-quotes"
+        ],
+        "operationId": "fare-quotes_rejectOffer",
+        "summary": "POST /api/fare-quotes/:id/offers/:offerId/reject",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/fare-quotes/:id/propose": {
+      "post": {
+        "tags": [
+          "fare-quotes"
+        ],
+        "operationId": "fare-quotes_propose",
+        "summary": "POST /api/fare-quotes/:id/propose",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/feature-flags": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "operationId": "settings_findAll",
+        "summary": "GET /api/feature-flags",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      },
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "operationId": "settings_create",
+        "summary": "POST /api/feature-flags",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      }
+    },
+    "/api/feature-flags/:id": {
+      "delete": {
+        "tags": [
+          "settings"
+        ],
+        "operationId": "settings_remove",
+        "summary": "DELETE /api/feature-flags/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      },
+      "patch": {
+        "tags": [
+          "settings"
+        ],
+        "operationId": "settings_update",
+        "summary": "PATCH /api/feature-flags/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      }
+    },
+    "/api/feature-flags/control": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "operationId": "settings_getControl",
+        "summary": "GET /api/feature-flags/control",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      },
+      "patch": {
+        "tags": [
+          "settings"
+        ],
+        "operationId": "settings_updateControl",
+        "summary": "PATCH /api/feature-flags/control",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      }
+    },
+    "/api/feature-flags/health": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "operationId": "settings_health",
+        "summary": "GET /api/feature-flags/health",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      }
+    },
+    "/api/feature-flags/preview": {
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "operationId": "settings_preview",
+        "summary": "POST /api/feature-flags/preview",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      }
+    },
+    "/api/features": {
+      "get": {
+        "tags": [
+          "vehicle-types"
+        ],
+        "operationId": "vehicle-types_findAll",
+        "summary": "GET /api/features",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage, settings.manage"
+      },
+      "post": {
+        "tags": [
+          "vehicle-types"
+        ],
+        "operationId": "vehicle-types_create",
+        "summary": "POST /api/features",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage, settings.manage"
+      }
+    },
+    "/api/features/:id": {
+      "delete": {
+        "tags": [
+          "vehicle-types"
+        ],
+        "operationId": "vehicle-types_remove",
+        "summary": "DELETE /api/features/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage, settings.manage"
+      },
+      "get": {
+        "tags": [
+          "vehicle-types"
+        ],
+        "operationId": "vehicle-types_findOne",
+        "summary": "GET /api/features/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage, settings.manage"
+      },
+      "patch": {
+        "tags": [
+          "vehicle-types"
+        ],
+        "operationId": "vehicle-types_update",
+        "summary": "PATCH /api/features/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage, settings.manage"
+      }
+    },
+    "/api/features/:id/active": {
+      "patch": {
+        "tags": [
+          "vehicle-types"
+        ],
+        "operationId": "vehicle-types_setActive",
+        "summary": "PATCH /api/features/:id/active",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage, settings.manage"
+      }
+    },
+    "/api/features/:id/restore": {
+      "post": {
+        "tags": [
+          "vehicle-types"
+        ],
+        "operationId": "vehicle-types_restore",
+        "summary": "POST /api/features/:id/restore",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage, settings.manage"
+      }
+    },
+    "/api/financial/accounts": {
+      "get": {
+        "tags": [
+          "financial"
+        ],
+        "operationId": "financial_accounts",
+        "summary": "GET /api/financial/accounts",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: payments.read, reports.read"
+      }
+    },
+    "/api/financial/reconciliation/incidents": {
+      "get": {
+        "tags": [
+          "financial"
+        ],
+        "operationId": "financial_reconciliationIncidents",
+        "summary": "GET /api/financial/reconciliation/incidents",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: payments.read, reports.read"
+      }
+    },
+    "/api/financial/reconciliation/incidents/resolve": {
+      "post": {
+        "tags": [
+          "financial"
+        ],
+        "operationId": "financial_resolveReconciliationIncident",
+        "summary": "POST /api/financial/reconciliation/incidents/resolve",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: payments.manage"
+      }
+    },
+    "/api/financial/reconciliation/items": {
+      "get": {
+        "tags": [
+          "financial"
+        ],
+        "operationId": "financial_reconciliationItems",
+        "summary": "GET /api/financial/reconciliation/items",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: payments.read, reports.read"
+      }
+    },
+    "/api/financial/reconciliation/run": {
+      "post": {
+        "tags": [
+          "financial"
+        ],
+        "operationId": "financial_runReconciliation",
+        "summary": "POST /api/financial/reconciliation/run",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: payments.manage"
+      }
+    },
+    "/api/financial/reconciliation/summary": {
+      "get": {
+        "tags": [
+          "financial"
+        ],
+        "operationId": "financial_reconciliationSummary",
+        "summary": "GET /api/financial/reconciliation/summary",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: payments.read, reports.read"
+      }
+    },
+    "/api/financial/settlement/queue": {
+      "get": {
+        "tags": [
+          "financial"
+        ],
+        "operationId": "financial_settlementQueue",
+        "summary": "GET /api/financial/settlement/queue",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: payments.read, payments.manage"
+      }
+    },
+    "/api/financial/settlement/run": {
+      "post": {
+        "tags": [
+          "financial"
+        ],
+        "operationId": "financial_runSettlement",
+        "summary": "POST /api/financial/settlement/run",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: payments.manage"
+      }
+    },
+    "/api/financial/transactions": {
+      "get": {
+        "tags": [
+          "financial"
+        ],
+        "operationId": "financial_transactions",
+        "summary": "GET /api/financial/transactions",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: payments.read, reports.read"
+      }
+    },
+    "/api/geo/autocomplete": {
+      "get": {
+        "tags": [
+          "geo"
+        ],
+        "operationId": "geo_autocomplete",
+        "summary": "GET /api/geo/autocomplete",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/geo/directions": {
+      "post": {
+        "tags": [
+          "geo"
+        ],
+        "operationId": "geo_directions",
+        "summary": "POST /api/geo/directions",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/geo/geocode": {
+      "get": {
+        "tags": [
+          "geo"
+        ],
+        "operationId": "geo_geocode",
+        "summary": "GET /api/geo/geocode",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/geo/places": {
+      "get": {
+        "tags": [
+          "geo"
+        ],
+        "operationId": "geo_list",
+        "summary": "GET /api/geo/places",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "geo"
+        ],
+        "operationId": "geo_create",
+        "summary": "POST /api/geo/places",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/geo/places/:id": {
+      "delete": {
+        "tags": [
+          "geo"
+        ],
+        "operationId": "geo_remove",
+        "summary": "DELETE /api/geo/places/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "geo"
+        ],
+        "operationId": "geo_update",
+        "summary": "PATCH /api/geo/places/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/geo/places/recent": {
+      "post": {
+        "tags": [
+          "geo"
+        ],
+        "operationId": "geo_recordRecent",
+        "summary": "POST /api/geo/places/recent",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/geo/reverse": {
+      "get": {
+        "tags": [
+          "geo"
+        ],
+        "operationId": "geo_reverse",
+        "summary": "GET /api/geo/reverse",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/geofence/resolve": {
+      "get": {
+        "tags": [
+          "geo"
+        ],
+        "operationId": "geo_resolve",
+        "summary": "GET /api/geofence/resolve",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage, pricing.manage"
+      }
+    },
+    "/api/geofence/serviceable": {
+      "get": {
+        "tags": [
+          "geo"
+        ],
+        "operationId": "geo_serviceable",
+        "summary": "GET /api/geofence/serviceable",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/growth/experiments": {
+      "get": {
+        "tags": [
+          "growth"
+        ],
+        "operationId": "growth_listExperiments",
+        "summary": "GET /api/growth/experiments",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "growth"
+        ],
+        "operationId": "growth_createExperiment",
+        "summary": "POST /api/growth/experiments",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/growth/experiments/:key/assignment": {
+      "get": {
+        "tags": [
+          "growth"
+        ],
+        "operationId": "growth_assign",
+        "summary": "GET /api/growth/experiments/:key/assignment",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/growth/incentives": {
+      "get": {
+        "tags": [
+          "growth"
+        ],
+        "operationId": "growth_listIncentives",
+        "summary": "GET /api/growth/incentives",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "growth"
+        ],
+        "operationId": "growth_createIncentive",
+        "summary": "POST /api/growth/incentives",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/growth/incentives/:id/progress": {
+      "post": {
+        "tags": [
+          "growth"
+        ],
+        "operationId": "growth_recordProgress",
+        "summary": "POST /api/growth/incentives/:id/progress",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/health": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "operationId": "health_live",
+        "summary": "GET /api/health",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/health/live": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "operationId": "health_liveness",
+        "summary": "GET /api/health/live",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/health/ready": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "operationId": "health_ready",
+        "summary": "GET /api/health/ready",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/kyc": {
+      "get": {
+        "tags": [
+          "kyc"
+        ],
+        "operationId": "kyc_findAll",
+        "summary": "GET /api/kyc",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: kyc.manage"
+      }
+    },
+    "/api/kyc/:id": {
+      "get": {
+        "tags": [
+          "kyc"
+        ],
+        "operationId": "kyc_findOne",
+        "summary": "GET /api/kyc/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: kyc.manage"
+      }
+    },
+    "/api/kyc/:id/approve": {
+      "post": {
+        "tags": [
+          "kyc"
+        ],
+        "operationId": "kyc_approve",
+        "summary": "POST /api/kyc/:id/approve",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: kyc.manage"
+      }
+    },
+    "/api/kyc/:id/reject": {
+      "post": {
+        "tags": [
+          "kyc"
+        ],
+        "operationId": "kyc_reject",
+        "summary": "POST /api/kyc/:id/reject",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: kyc.manage"
+      }
+    },
+    "/api/kyc/me": {
+      "get": {
+        "tags": [
+          "kyc"
+        ],
+        "operationId": "kyc_me",
+        "summary": "GET /api/kyc/me",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/kyc/submit": {
+      "post": {
+        "tags": [
+          "kyc"
+        ],
+        "operationId": "kyc_submit",
+        "summary": "POST /api/kyc/submit",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/legal-documents": {
+      "get": {
+        "tags": [
+          "legal"
+        ],
+        "operationId": "legal_findAll",
+        "summary": "GET /api/legal-documents",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      },
+      "post": {
+        "tags": [
+          "legal"
+        ],
+        "operationId": "legal_create",
+        "summary": "POST /api/legal-documents",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      }
+    },
+    "/api/legal-documents/:id": {
+      "get": {
+        "tags": [
+          "legal"
+        ],
+        "operationId": "legal_findOne",
+        "summary": "GET /api/legal-documents/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      },
+      "patch": {
+        "tags": [
+          "legal"
+        ],
+        "operationId": "legal_update",
+        "summary": "PATCH /api/legal-documents/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      }
+    },
+    "/api/legal-documents/:id/accept": {
+      "post": {
+        "tags": [
+          "legal"
+        ],
+        "operationId": "legal_accept",
+        "summary": "POST /api/legal-documents/:id/accept",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/legal-documents/:id/publish": {
+      "post": {
+        "tags": [
+          "legal"
+        ],
+        "operationId": "legal_publish",
+        "summary": "POST /api/legal-documents/:id/publish",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      }
+    },
+    "/api/legal-documents/:id/versions": {
+      "get": {
+        "tags": [
+          "legal"
+        ],
+        "operationId": "legal_versions",
+        "summary": "GET /api/legal-documents/:id/versions",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      }
+    },
+    "/api/legal-documents/pending": {
+      "get": {
+        "tags": [
+          "legal"
+        ],
+        "operationId": "legal_pending",
+        "summary": "GET /api/legal-documents/pending",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/logs/activity": {
+      "get": {
+        "tags": [
+          "rbac"
+        ],
+        "operationId": "rbac_activity",
+        "summary": "GET /api/logs/activity",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: audit.read, staff.manage"
+      }
+    },
+    "/api/logs/audit": {
+      "get": {
+        "tags": [
+          "rbac"
+        ],
+        "operationId": "rbac_audits",
+        "summary": "GET /api/logs/audit",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: audit.read, staff.manage"
+      }
+    },
+    "/api/loyalty": {
+      "get": {
+        "tags": [
+          "loyalty"
+        ],
+        "operationId": "loyalty_findAll",
+        "summary": "GET /api/loyalty",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: loyalty.manage"
+      }
+    },
+    "/api/loyalty/:userId/adjust": {
+      "post": {
+        "tags": [
+          "loyalty"
+        ],
+        "operationId": "loyalty_adjust",
+        "summary": "POST /api/loyalty/:userId/adjust",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: loyalty.manage"
+      }
+    },
+    "/api/loyalty/me": {
+      "get": {
+        "tags": [
+          "loyalty"
+        ],
+        "operationId": "loyalty_me",
+        "summary": "GET /api/loyalty/me",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/loyalty/me/history": {
+      "get": {
+        "tags": [
+          "loyalty"
+        ],
+        "operationId": "loyalty_history",
+        "summary": "GET /api/loyalty/me/history",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/loyalty/redeem": {
+      "post": {
+        "tags": [
+          "loyalty"
+        ],
+        "operationId": "loyalty_redeem",
+        "summary": "POST /api/loyalty/redeem",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/message-templates": {
+      "get": {
+        "tags": [
+          "message-templates"
+        ],
+        "operationId": "message-templates_list",
+        "summary": "GET /api/message-templates",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: notifications.send"
+      },
+      "post": {
+        "tags": [
+          "message-templates"
+        ],
+        "operationId": "message-templates_create",
+        "summary": "POST /api/message-templates",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: notifications.send"
+      }
+    },
+    "/api/message-templates/:id": {
+      "delete": {
+        "tags": [
+          "message-templates"
+        ],
+        "operationId": "message-templates_remove",
+        "summary": "DELETE /api/message-templates/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: notifications.send"
+      },
+      "get": {
+        "tags": [
+          "message-templates"
+        ],
+        "operationId": "message-templates_findOne",
+        "summary": "GET /api/message-templates/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: notifications.send"
+      },
+      "patch": {
+        "tags": [
+          "message-templates"
+        ],
+        "operationId": "message-templates_update",
+        "summary": "PATCH /api/message-templates/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: notifications.send"
+      }
+    },
+    "/api/message-templates/preview": {
+      "post": {
+        "tags": [
+          "message-templates"
+        ],
+        "operationId": "message-templates_preview",
+        "summary": "POST /api/message-templates/preview",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: notifications.send"
+      }
+    },
+    "/api/message-templates/render/:key": {
+      "post": {
+        "tags": [
+          "message-templates"
+        ],
+        "operationId": "message-templates_render",
+        "summary": "POST /api/message-templates/render/:key",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: notifications.send"
+      }
+    },
+    "/api/metrics": {
+      "get": {
+        "tags": [
+          "metrics"
+        ],
+        "operationId": "metrics_json",
+        "summary": "GET /api/metrics",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/metrics/prometheus": {
+      "get": {
+        "tags": [
+          "metrics"
+        ],
+        "operationId": "metrics_prometheus",
+        "summary": "GET /api/metrics/prometheus",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/notifications": {
+      "get": {
+        "tags": [
+          "notifications"
+        ],
+        "operationId": "notifications_findAll",
+        "summary": "GET /api/notifications",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: notifications.send"
+      },
+      "post": {
+        "tags": [
+          "notifications"
+        ],
+        "operationId": "notifications_send",
+        "summary": "POST /api/notifications",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: notifications.send"
+      }
+    },
+    "/api/notifications/:id": {
+      "delete": {
+        "tags": [
+          "notifications"
+        ],
+        "operationId": "notifications_cancel",
+        "summary": "DELETE /api/notifications/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: notifications.send"
+      }
+    },
+    "/api/notifications/devices": {
+      "post": {
+        "tags": [
+          "notifications"
+        ],
+        "operationId": "notifications_registerDevice",
+        "summary": "POST /api/notifications/devices",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/notifications/devices/:token": {
+      "delete": {
+        "tags": [
+          "notifications"
+        ],
+        "operationId": "notifications_removeDevice",
+        "summary": "DELETE /api/notifications/devices/:token",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/notifications/me": {
+      "get": {
+        "tags": [
+          "notifications"
+        ],
+        "operationId": "notifications_myNotifications",
+        "summary": "GET /api/notifications/me",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/passenger/me": {
+      "get": {
+        "tags": [
+          "users"
+        ],
+        "operationId": "users_me",
+        "summary": "GET /api/passenger/me",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "users"
+        ],
+        "operationId": "users_update",
+        "summary": "PATCH /api/passenger/me",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/passenger/me/upload-url": {
+      "post": {
+        "tags": [
+          "users"
+        ],
+        "operationId": "users_uploadUrl",
+        "summary": "POST /api/passenger/me/upload-url",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/passengers": {
+      "get": {
+        "tags": [
+          "users"
+        ],
+        "operationId": "users_findAll",
+        "summary": "GET /api/passengers",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: passengers.read, passengers.manage"
+      }
+    },
+    "/api/passengers/:id": {
+      "get": {
+        "tags": [
+          "users"
+        ],
+        "operationId": "users_findOne",
+        "summary": "GET /api/passengers/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: passengers.read, passengers.manage"
+      }
+    },
+    "/api/passengers/:id/activate": {
+      "patch": {
+        "tags": [
+          "users"
+        ],
+        "operationId": "users_activate",
+        "summary": "PATCH /api/passengers/:id/activate",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: passengers.manage"
+      }
+    },
+    "/api/passengers/:id/ban": {
+      "patch": {
+        "tags": [
+          "users"
+        ],
+        "operationId": "users_ban",
+        "summary": "PATCH /api/passengers/:id/ban",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: passengers.manage"
+      }
+    },
+    "/api/passengers/:id/overview": {
+      "get": {
+        "tags": [
+          "users"
+        ],
+        "operationId": "users_overview",
+        "summary": "GET /api/passengers/:id/overview",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: passengers.read, passengers.manage"
+      }
+    },
+    "/api/passengers/:id/suspend": {
+      "patch": {
+        "tags": [
+          "users"
+        ],
+        "operationId": "users_suspend",
+        "summary": "PATCH /api/passengers/:id/suspend",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: passengers.manage"
+      }
+    },
+    "/api/passengers/:id/trips": {
+      "get": {
+        "tags": [
+          "users"
+        ],
+        "operationId": "users_trips",
+        "summary": "GET /api/passengers/:id/trips",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: passengers.read, passengers.manage"
+      }
+    },
+    "/api/payments": {
+      "get": {
+        "tags": [
+          "payments"
+        ],
+        "operationId": "payments_findAll",
+        "summary": "GET /api/payments",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: payments.read, payments.manage"
+      }
+    },
+    "/api/payments/:id": {
+      "get": {
+        "tags": [
+          "payments"
+        ],
+        "operationId": "payments_findOne",
+        "summary": "GET /api/payments/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: payments.read, payments.manage"
+      }
+    },
+    "/api/payments/:id/cancel": {
+      "post": {
+        "tags": [
+          "payments"
+        ],
+        "operationId": "payments_cancel",
+        "summary": "POST /api/payments/:id/cancel",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: payments.manage"
+      }
+    },
+    "/api/payments/:id/capture": {
+      "post": {
+        "tags": [
+          "payments"
+        ],
+        "operationId": "payments_capture",
+        "summary": "POST /api/payments/:id/capture",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: payments.manage"
+      }
+    },
+    "/api/payments/:id/refund": {
+      "post": {
+        "tags": [
+          "payments"
+        ],
+        "operationId": "payments_refund",
+        "summary": "POST /api/payments/:id/refund",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: payments.manage"
+      }
+    },
+    "/api/payments/:id/status": {
+      "patch": {
+        "tags": [
+          "payments"
+        ],
+        "operationId": "payments_updateStatus",
+        "summary": "PATCH /api/payments/:id/status",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: payments.manage"
+      }
+    },
+    "/api/payments/payouts": {
+      "get": {
+        "tags": [
+          "payouts"
+        ],
+        "operationId": "payouts_list",
+        "summary": "GET /api/payments/payouts",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "payouts"
+        ],
+        "operationId": "payouts_create",
+        "summary": "POST /api/payments/payouts",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/payments/payouts/:id": {
+      "get": {
+        "tags": [
+          "payouts"
+        ],
+        "operationId": "payouts_get",
+        "summary": "GET /api/payments/payouts/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/payments/payouts/:id/status": {
+      "patch": {
+        "tags": [
+          "payouts"
+        ],
+        "operationId": "payouts_transition",
+        "summary": "PATCH /api/payments/payouts/:id/status",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/payments/refunds": {
+      "get": {
+        "tags": [
+          "payments"
+        ],
+        "operationId": "payments_refunds",
+        "summary": "GET /api/payments/refunds",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: payments.read, payments.manage"
+      }
+    },
+    "/api/payments/summary": {
+      "get": {
+        "tags": [
+          "payments"
+        ],
+        "operationId": "payments_summary",
+        "summary": "GET /api/payments/summary",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: payments.read, payments.manage"
+      }
+    },
+    "/api/payments/trip/:tripId/checkout": {
+      "post": {
+        "tags": [
+          "payments"
+        ],
+        "operationId": "payments_createCheckout",
+        "summary": "POST /api/payments/trip/:tripId/checkout",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: payments.manage"
+      }
+    },
+    "/api/payments/webhooks/:provider": {
+      "post": {
+        "tags": [
+          "payments"
+        ],
+        "operationId": "payments_receive",
+        "summary": "POST /api/payments/webhooks/:provider",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/pooling/candidates/:tripId": {
+      "get": {
+        "tags": [
+          "pooling"
+        ],
+        "operationId": "pooling_candidates",
+        "summary": "GET /api/pooling/candidates/:tripId",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: trips.read, trips.manage"
+      }
+    },
+    "/api/pricing-engine/quote": {
+      "post": {
+        "tags": [
+          "pricing-engine"
+        ],
+        "operationId": "pricing-engine_quote",
+        "summary": "POST /api/pricing-engine/quote",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage"
+      }
+    },
+    "/api/pricing/peak": {
+      "post": {
+        "tags": [
+          "pricing"
+        ],
+        "operationId": "pricing_createPeak",
+        "summary": "POST /api/pricing/peak",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage"
+      }
+    },
+    "/api/pricing/peak/:id": {
+      "delete": {
+        "tags": [
+          "pricing"
+        ],
+        "operationId": "pricing_deletePeak",
+        "summary": "DELETE /api/pricing/peak/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage"
+      }
+    },
+    "/api/pricing/rules": {
+      "get": {
+        "tags": [
+          "pricing"
+        ],
+        "operationId": "pricing_listRules",
+        "summary": "GET /api/pricing/rules",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage"
+      },
+      "post": {
+        "tags": [
+          "pricing"
+        ],
+        "operationId": "pricing_createRule",
+        "summary": "POST /api/pricing/rules",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage"
+      }
+    },
+    "/api/pricing/rules/:id": {
+      "delete": {
+        "tags": [
+          "pricing"
+        ],
+        "operationId": "pricing_deleteRule",
+        "summary": "DELETE /api/pricing/rules/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage"
+      },
+      "patch": {
+        "tags": [
+          "pricing"
+        ],
+        "operationId": "pricing_updateRule",
+        "summary": "PATCH /api/pricing/rules/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage"
+      }
+    },
+    "/api/promo-codes": {
+      "get": {
+        "tags": [
+          "promo-codes"
+        ],
+        "operationId": "promo-codes_findAll",
+        "summary": "GET /api/promo-codes",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: promoCodes.manage"
+      },
+      "post": {
+        "tags": [
+          "promo-codes"
+        ],
+        "operationId": "promo-codes_create",
+        "summary": "POST /api/promo-codes",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: promoCodes.manage"
+      }
+    },
+    "/api/promo-codes/:id": {
+      "delete": {
+        "tags": [
+          "promo-codes"
+        ],
+        "operationId": "promo-codes_deactivate",
+        "summary": "DELETE /api/promo-codes/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: promoCodes.manage"
+      },
+      "get": {
+        "tags": [
+          "promo-codes"
+        ],
+        "operationId": "promo-codes_findOne",
+        "summary": "GET /api/promo-codes/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: promoCodes.manage"
+      },
+      "patch": {
+        "tags": [
+          "promo-codes"
+        ],
+        "operationId": "promo-codes_update",
+        "summary": "PATCH /api/promo-codes/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: promoCodes.manage"
+      }
+    },
+    "/api/promo-codes/redeem": {
+      "post": {
+        "tags": [
+          "promo-codes"
+        ],
+        "operationId": "promo-codes_redeem",
+        "summary": "POST /api/promo-codes/redeem",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/public/legal": {
+      "get": {
+        "tags": [
+          "legal"
+        ],
+        "operationId": "legal_list",
+        "summary": "GET /api/public/legal",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/ratings": {
+      "get": {
+        "tags": [
+          "support"
+        ],
+        "operationId": "support_adminList",
+        "summary": "GET /api/ratings",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: support.manage"
+      },
+      "post": {
+        "tags": [
+          "support"
+        ],
+        "operationId": "support_rate",
+        "summary": "POST /api/ratings",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/ratings/user/:userId": {
+      "get": {
+        "tags": [
+          "support"
+        ],
+        "operationId": "support_forUser",
+        "summary": "GET /api/ratings/user/:userId",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/rbac/permissions": {
+      "get": {
+        "tags": [
+          "rbac"
+        ],
+        "operationId": "rbac_listPermissions",
+        "summary": "GET /api/rbac/permissions",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: staff.manage"
+      },
+      "post": {
+        "tags": [
+          "rbac"
+        ],
+        "operationId": "rbac_createPermission",
+        "summary": "POST /api/rbac/permissions",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: staff.manage"
+      }
+    },
+    "/api/rbac/roles": {
+      "get": {
+        "tags": [
+          "rbac"
+        ],
+        "operationId": "rbac_listRoles",
+        "summary": "GET /api/rbac/roles",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: staff.manage"
+      },
+      "post": {
+        "tags": [
+          "rbac"
+        ],
+        "operationId": "rbac_createRole",
+        "summary": "POST /api/rbac/roles",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: staff.manage"
+      }
+    },
+    "/api/rbac/roles/:id": {
+      "delete": {
+        "tags": [
+          "rbac"
+        ],
+        "operationId": "rbac_deleteRole",
+        "summary": "DELETE /api/rbac/roles/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: staff.manage"
+      },
+      "get": {
+        "tags": [
+          "rbac"
+        ],
+        "operationId": "rbac_getRole",
+        "summary": "GET /api/rbac/roles/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: staff.manage"
+      },
+      "patch": {
+        "tags": [
+          "rbac"
+        ],
+        "operationId": "rbac_updateRole",
+        "summary": "PATCH /api/rbac/roles/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: staff.manage"
+      }
+    },
+    "/api/rbac/roles/:id/permissions": {
+      "put": {
+        "tags": [
+          "rbac"
+        ],
+        "operationId": "rbac_setPermissions",
+        "summary": "PUT /api/rbac/roles/:id/permissions",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: staff.manage"
+      }
+    },
+    "/api/referrals": {
+      "get": {
+        "tags": [
+          "referral"
+        ],
+        "operationId": "referral_findAll",
+        "summary": "GET /api/referrals",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: referrals.manage"
+      }
+    },
+    "/api/referrals/:refereeId/qualify": {
+      "post": {
+        "tags": [
+          "referral"
+        ],
+        "operationId": "referral_qualify",
+        "summary": "POST /api/referrals/:refereeId/qualify",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: referrals.manage"
+      }
+    },
+    "/api/referrals/apply": {
+      "post": {
+        "tags": [
+          "referral"
+        ],
+        "operationId": "referral_apply",
+        "summary": "POST /api/referrals/apply",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/referrals/mine": {
+      "get": {
+        "tags": [
+          "referral"
+        ],
+        "operationId": "referral_mine",
+        "summary": "GET /api/referrals/mine",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/referrals/my-code": {
+      "get": {
+        "tags": [
+          "referral"
+        ],
+        "operationId": "referral_myCode",
+        "summary": "GET /api/referrals/my-code",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/reports/:type": {
+      "get": {
+        "tags": [
+          "reports"
+        ],
+        "operationId": "reports_download",
+        "summary": "GET /api/reports/:type",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: reports.read"
+      }
+    },
+    "/api/rides/:id": {
+      "get": {
+        "tags": [
+          "matching"
+        ],
+        "operationId": "matching_getOne",
+        "summary": "GET /api/rides/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/rides/:id/cancel": {
+      "patch": {
+        "tags": [
+          "matching"
+        ],
+        "operationId": "matching_cancel",
+        "summary": "PATCH /api/rides/:id/cancel",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/rides/mine": {
+      "get": {
+        "tags": [
+          "matching"
+        ],
+        "operationId": "matching_myTrips",
+        "summary": "GET /api/rides/mine",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/rides/quote": {
+      "post": {
+        "tags": [
+          "matching"
+        ],
+        "operationId": "matching_quote",
+        "summary": "POST /api/rides/quote",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/rides/request": {
+      "post": {
+        "tags": [
+          "matching"
+        ],
+        "operationId": "matching_request",
+        "summary": "POST /api/rides/request",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/risk/blacklist": {
+      "delete": {
+        "tags": [
+          "risk"
+        ],
+        "operationId": "risk_removeBlacklist",
+        "summary": "DELETE /api/risk/blacklist",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: risk.manage"
+      },
+      "get": {
+        "tags": [
+          "risk"
+        ],
+        "operationId": "risk_listBlacklist",
+        "summary": "GET /api/risk/blacklist",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: risk.manage"
+      },
+      "post": {
+        "tags": [
+          "risk"
+        ],
+        "operationId": "risk_addBlacklist",
+        "summary": "POST /api/risk/blacklist",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: risk.manage"
+      }
+    },
+    "/api/risk/events": {
+      "get": {
+        "tags": [
+          "risk"
+        ],
+        "operationId": "risk_listEvents",
+        "summary": "GET /api/risk/events",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: risk.review"
+      }
+    },
+    "/api/risk/fraud-signals": {
+      "get": {
+        "tags": [
+          "risk"
+        ],
+        "operationId": "risk_fraudSignals",
+        "summary": "GET /api/risk/fraud-signals",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: risk.review"
+      }
+    },
+    "/api/risk/holds": {
+      "get": {
+        "tags": [
+          "risk"
+        ],
+        "operationId": "risk_listHolds",
+        "summary": "GET /api/risk/holds",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: risk.manage"
+      },
+      "post": {
+        "tags": [
+          "risk"
+        ],
+        "operationId": "risk_placeHold",
+        "summary": "POST /api/risk/holds",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: risk.manage"
+      }
+    },
+    "/api/risk/holds/:id/release": {
+      "post": {
+        "tags": [
+          "risk"
+        ],
+        "operationId": "risk_releaseHold",
+        "summary": "POST /api/risk/holds/:id/release",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: risk.manage"
+      }
+    },
+    "/api/risk/reviews": {
+      "get": {
+        "tags": [
+          "risk"
+        ],
+        "operationId": "risk_listReviews",
+        "summary": "GET /api/risk/reviews",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: risk.review"
+      }
+    },
+    "/api/risk/reviews/:id/resolve": {
+      "post": {
+        "tags": [
+          "risk"
+        ],
+        "operationId": "risk_resolveReview",
+        "summary": "POST /api/risk/reviews/:id/resolve",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: risk.review"
+      }
+    },
+    "/api/safety/incidents": {
+      "get": {
+        "tags": [
+          "emergency"
+        ],
+        "operationId": "emergency_list",
+        "summary": "GET /api/safety/incidents",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: safety.manage"
+      },
+      "post": {
+        "tags": [
+          "emergency"
+        ],
+        "operationId": "emergency_create",
+        "summary": "POST /api/safety/incidents",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/safety/incidents/:id/status": {
+      "patch": {
+        "tags": [
+          "emergency"
+        ],
+        "operationId": "emergency_updateStatus",
+        "summary": "PATCH /api/safety/incidents/:id/status",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: safety.manage"
+      }
+    },
+    "/api/safety/incidents/me": {
+      "get": {
+        "tags": [
+          "emergency"
+        ],
+        "operationId": "emergency_mine",
+        "summary": "GET /api/safety/incidents/me",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/service-areas": {
+      "get": {
+        "tags": [
+          "vehicle-types"
+        ],
+        "operationId": "vehicle-types_findAll",
+        "summary": "GET /api/service-areas",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage, settings.manage"
+      },
+      "post": {
+        "tags": [
+          "vehicle-types"
+        ],
+        "operationId": "vehicle-types_create",
+        "summary": "POST /api/service-areas",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage, settings.manage"
+      }
+    },
+    "/api/service-areas/:id": {
+      "delete": {
+        "tags": [
+          "vehicle-types"
+        ],
+        "operationId": "vehicle-types_remove",
+        "summary": "DELETE /api/service-areas/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage, settings.manage"
+      },
+      "get": {
+        "tags": [
+          "vehicle-types"
+        ],
+        "operationId": "vehicle-types_findOne",
+        "summary": "GET /api/service-areas/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage, settings.manage"
+      },
+      "patch": {
+        "tags": [
+          "vehicle-types"
+        ],
+        "operationId": "vehicle-types_update",
+        "summary": "PATCH /api/service-areas/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage, settings.manage"
+      }
+    },
+    "/api/service-areas/:id/active": {
+      "patch": {
+        "tags": [
+          "vehicle-types"
+        ],
+        "operationId": "vehicle-types_setActive",
+        "summary": "PATCH /api/service-areas/:id/active",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage, settings.manage"
+      }
+    },
+    "/api/service-areas/:id/restore": {
+      "post": {
+        "tags": [
+          "vehicle-types"
+        ],
+        "operationId": "vehicle-types_restore",
+        "summary": "POST /api/service-areas/:id/restore",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage, settings.manage"
+      }
+    },
+    "/api/sessions": {
+      "delete": {
+        "tags": [
+          "sessions"
+        ],
+        "operationId": "sessions_revokeAll",
+        "summary": "DELETE /api/sessions",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/sessions/:id": {
+      "delete": {
+        "tags": [
+          "sessions"
+        ],
+        "operationId": "sessions_revoke",
+        "summary": "DELETE /api/sessions/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/sessions/me": {
+      "get": {
+        "tags": [
+          "sessions"
+        ],
+        "operationId": "sessions_mine",
+        "summary": "GET /api/sessions/me",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/sessions/user/:userId": {
+      "delete": {
+        "tags": [
+          "sessions"
+        ],
+        "operationId": "sessions_revokeAllForUser",
+        "summary": "DELETE /api/sessions/user/:userId",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: audit.read, staff.manage"
+      },
+      "get": {
+        "tags": [
+          "sessions"
+        ],
+        "operationId": "sessions_forUser",
+        "summary": "GET /api/sessions/user/:userId",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: audit.read, staff.manage"
+      }
+    },
+    "/api/sessions/user/:userId/:id": {
+      "delete": {
+        "tags": [
+          "sessions"
+        ],
+        "operationId": "sessions_revokeForUser",
+        "summary": "DELETE /api/sessions/user/:userId/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: audit.read, staff.manage"
+      }
+    },
+    "/api/setting-change-requests": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "operationId": "settings_findAll",
+        "summary": "GET /api/setting-change-requests",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      }
+    },
+    "/api/setting-change-requests/:id/approve": {
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "operationId": "settings_approve",
+        "summary": "POST /api/setting-change-requests/:id/approve",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      }
+    },
+    "/api/setting-change-requests/:id/reject": {
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "operationId": "settings_reject",
+        "summary": "POST /api/setting-change-requests/:id/reject",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      }
+    },
+    "/api/settings": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "operationId": "settings_findAll",
+        "summary": "GET /api/settings",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      },
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "operationId": "settings_upsert",
+        "summary": "POST /api/settings",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      }
+    },
+    "/api/settings/:key": {
+      "delete": {
+        "tags": [
+          "settings"
+        ],
+        "operationId": "settings_remove",
+        "summary": "DELETE /api/settings/:key",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      },
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "operationId": "settings_findOne",
+        "summary": "GET /api/settings/:key",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      },
+      "put": {
+        "tags": [
+          "settings"
+        ],
+        "operationId": "settings_updateValue",
+        "summary": "PUT /api/settings/:key",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      }
+    },
+    "/api/settings/:key/discard-draft": {
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "operationId": "settings_discardDraft",
+        "summary": "POST /api/settings/:key/discard-draft",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      }
+    },
+    "/api/settings/:key/publish": {
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "operationId": "settings_publish",
+        "summary": "POST /api/settings/:key/publish",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      }
+    },
+    "/api/settings/:key/revisions": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "operationId": "settings_revisions",
+        "summary": "GET /api/settings/:key/revisions",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      }
+    },
+    "/api/settings/:key/rollback/:publishedVersion": {
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "operationId": "settings_rollback",
+        "summary": "POST /api/settings/:key/rollback/:publishedVersion",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      }
+    },
+    "/api/settings/bulk": {
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "operationId": "settings_bulkUpsert",
+        "summary": "POST /api/settings/bulk",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      }
+    },
+    "/api/settings/governance/overview": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "operationId": "settings_governanceOverview",
+        "summary": "GET /api/settings/governance/overview",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      }
+    },
+    "/api/staff": {
+      "get": {
+        "tags": [
+          "rbac"
+        ],
+        "operationId": "rbac_list",
+        "summary": "GET /api/staff",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: staff.manage"
+      },
+      "post": {
+        "tags": [
+          "rbac"
+        ],
+        "operationId": "rbac_create",
+        "summary": "POST /api/staff",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: staff.manage"
+      }
+    },
+    "/api/staff/:id/password": {
+      "patch": {
+        "tags": [
+          "rbac"
+        ],
+        "operationId": "rbac_updatePassword",
+        "summary": "PATCH /api/staff/:id/password",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: staff.manage"
+      }
+    },
+    "/api/staff/:id/role": {
+      "patch": {
+        "tags": [
+          "rbac"
+        ],
+        "operationId": "rbac_assignRole",
+        "summary": "PATCH /api/staff/:id/role",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: staff.manage"
+      }
+    },
+    "/api/staff/:id/status": {
+      "patch": {
+        "tags": [
+          "rbac"
+        ],
+        "operationId": "rbac_updateStatus",
+        "summary": "PATCH /api/staff/:id/status",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: staff.manage"
+      }
+    },
+    "/api/statistics/financial-health": {
+      "get": {
+        "tags": [
+          "reports"
+        ],
+        "operationId": "reports_financialHealth",
+        "summary": "GET /api/statistics/financial-health",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: reports.read, payments.read"
+      }
+    },
+    "/api/statistics/funding-ops": {
+      "get": {
+        "tags": [
+          "reports"
+        ],
+        "operationId": "reports_fundingOps",
+        "summary": "GET /api/statistics/funding-ops",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: reports.read, funding.read"
+      }
+    },
+    "/api/statistics/overview": {
+      "get": {
+        "tags": [
+          "reports"
+        ],
+        "operationId": "reports_overview",
+        "summary": "GET /api/statistics/overview",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: reports.read"
+      }
+    },
+    "/api/statistics/payment-ops": {
+      "get": {
+        "tags": [
+          "reports"
+        ],
+        "operationId": "reports_paymentOps",
+        "summary": "GET /api/statistics/payment-ops",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: reports.read, payments.read"
+      }
+    },
+    "/api/statistics/revenue": {
+      "get": {
+        "tags": [
+          "reports"
+        ],
+        "operationId": "reports_revenue",
+        "summary": "GET /api/statistics/revenue",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: reports.read"
+      }
+    },
+    "/api/statistics/settlement-ops": {
+      "get": {
+        "tags": [
+          "reports"
+        ],
+        "operationId": "reports_settlementOps",
+        "summary": "GET /api/statistics/settlement-ops",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: reports.read, payments.read"
+      }
+    },
+    "/api/statistics/timeseries": {
+      "get": {
+        "tags": [
+          "reports"
+        ],
+        "operationId": "reports_timeseries",
+        "summary": "GET /api/statistics/timeseries",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: reports.read"
+      }
+    },
+    "/api/statistics/top-cities": {
+      "get": {
+        "tags": [
+          "reports"
+        ],
+        "operationId": "reports_topCities",
+        "summary": "GET /api/statistics/top-cities",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: reports.read"
+      }
+    },
+    "/api/statistics/top-drivers": {
+      "get": {
+        "tags": [
+          "reports"
+        ],
+        "operationId": "reports_topDrivers",
+        "summary": "GET /api/statistics/top-drivers",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: reports.read"
+      }
+    },
+    "/api/statistics/transfer-ops": {
+      "get": {
+        "tags": [
+          "reports"
+        ],
+        "operationId": "reports_transferOps",
+        "summary": "GET /api/statistics/transfer-ops",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: reports.read, transfer.read"
+      }
+    },
+    "/api/statistics/withdrawal-ops": {
+      "get": {
+        "tags": [
+          "reports"
+        ],
+        "operationId": "reports_withdrawalOps",
+        "summary": "GET /api/statistics/withdrawal-ops",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: reports.read, payments.read"
+      }
+    },
+    "/api/subscriptions": {
+      "get": {
+        "tags": [
+          "subscriptions"
+        ],
+        "operationId": "subscriptions_findAll",
+        "summary": "GET /api/subscriptions",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: subscriptions.manage"
+      }
+    },
+    "/api/subscriptions/cancel": {
+      "post": {
+        "tags": [
+          "subscriptions"
+        ],
+        "operationId": "subscriptions_cancel",
+        "summary": "POST /api/subscriptions/cancel",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/subscriptions/me": {
+      "get": {
+        "tags": [
+          "subscriptions"
+        ],
+        "operationId": "subscriptions_me",
+        "summary": "GET /api/subscriptions/me",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/subscriptions/plans": {
+      "get": {
+        "tags": [
+          "subscriptions"
+        ],
+        "operationId": "subscriptions_plans",
+        "summary": "GET /api/subscriptions/plans",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "subscriptions"
+        ],
+        "operationId": "subscriptions_createPlan",
+        "summary": "POST /api/subscriptions/plans",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: subscriptions.manage"
+      }
+    },
+    "/api/subscriptions/plans/:id": {
+      "delete": {
+        "tags": [
+          "subscriptions"
+        ],
+        "operationId": "subscriptions_deactivatePlan",
+        "summary": "DELETE /api/subscriptions/plans/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: subscriptions.manage"
+      },
+      "patch": {
+        "tags": [
+          "subscriptions"
+        ],
+        "operationId": "subscriptions_updatePlan",
+        "summary": "PATCH /api/subscriptions/plans/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: subscriptions.manage"
+      }
+    },
+    "/api/subscriptions/plans/all": {
+      "get": {
+        "tags": [
+          "subscriptions"
+        ],
+        "operationId": "subscriptions_allPlans",
+        "summary": "GET /api/subscriptions/plans/all",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: subscriptions.manage"
+      }
+    },
+    "/api/subscriptions/subscribe": {
+      "post": {
+        "tags": [
+          "subscriptions"
+        ],
+        "operationId": "subscriptions_subscribe",
+        "summary": "POST /api/subscriptions/subscribe",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/support/complaints": {
+      "get": {
+        "tags": [
+          "support"
+        ],
+        "operationId": "support_findAll",
+        "summary": "GET /api/support/complaints",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: support.manage, safety.manage"
+      },
+      "post": {
+        "tags": [
+          "support"
+        ],
+        "operationId": "support_create",
+        "summary": "POST /api/support/complaints",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/support/complaints/:id": {
+      "get": {
+        "tags": [
+          "support"
+        ],
+        "operationId": "support_findOne",
+        "summary": "GET /api/support/complaints/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: support.manage, safety.manage"
+      }
+    },
+    "/api/support/complaints/:id/status": {
+      "patch": {
+        "tags": [
+          "support"
+        ],
+        "operationId": "support_updateStatus",
+        "summary": "PATCH /api/support/complaints/:id/status",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: support.manage, safety.manage"
+      }
+    },
+    "/api/support/tickets": {
+      "get": {
+        "tags": [
+          "support"
+        ],
+        "operationId": "support_all",
+        "summary": "GET /api/support/tickets",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: support.manage"
+      },
+      "post": {
+        "tags": [
+          "support"
+        ],
+        "operationId": "support_create",
+        "summary": "POST /api/support/tickets",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/support/tickets/:id": {
+      "get": {
+        "tags": [
+          "support"
+        ],
+        "operationId": "support_getOne",
+        "summary": "GET /api/support/tickets/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/support/tickets/:id/assign": {
+      "patch": {
+        "tags": [
+          "support"
+        ],
+        "operationId": "support_assign",
+        "summary": "PATCH /api/support/tickets/:id/assign",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/support/tickets/:id/first-response": {
+      "post": {
+        "tags": [
+          "support"
+        ],
+        "operationId": "support_firstResponse",
+        "summary": "POST /api/support/tickets/:id/first-response",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/support/tickets/:id/messages": {
+      "post": {
+        "tags": [
+          "support"
+        ],
+        "operationId": "support_reply",
+        "summary": "POST /api/support/tickets/:id/messages",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/support/tickets/:id/priority": {
+      "patch": {
+        "tags": [
+          "support"
+        ],
+        "operationId": "support_setPriority",
+        "summary": "PATCH /api/support/tickets/:id/priority",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/support/tickets/:id/resolve": {
+      "patch": {
+        "tags": [
+          "support"
+        ],
+        "operationId": "support_resolve",
+        "summary": "PATCH /api/support/tickets/:id/resolve",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/support/tickets/:id/status": {
+      "patch": {
+        "tags": [
+          "support"
+        ],
+        "operationId": "support_updateStatus",
+        "summary": "PATCH /api/support/tickets/:id/status",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: support.manage"
+      }
+    },
+    "/api/support/tickets/breaching": {
+      "get": {
+        "tags": [
+          "support"
+        ],
+        "operationId": "support_breaching",
+        "summary": "GET /api/support/tickets/breaching",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/support/tickets/me": {
+      "get": {
+        "tags": [
+          "support"
+        ],
+        "operationId": "support_mine",
+        "summary": "GET /api/support/tickets/me",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/trips": {
+      "get": {
+        "tags": [
+          "trips"
+        ],
+        "operationId": "trips_findAll",
+        "summary": "GET /api/trips",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: trips.read, trips.manage"
+      }
+    },
+    "/api/trips/:id": {
+      "get": {
+        "tags": [
+          "trips"
+        ],
+        "operationId": "trips_findOne",
+        "summary": "GET /api/trips/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: trips.read, trips.manage"
+      }
+    },
+    "/api/trips/:id/retry-settlement": {
+      "post": {
+        "tags": [
+          "trips"
+        ],
+        "operationId": "trips_retrySettlement",
+        "summary": "POST /api/trips/:id/retry-settlement",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: trips.manage, payments.manage"
+      }
+    },
+    "/api/trips/:id/status": {
+      "patch": {
+        "tags": [
+          "trips"
+        ],
+        "operationId": "trips_changeStatus",
+        "summary": "PATCH /api/trips/:id/status",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: trips.manage"
+      }
+    },
+    "/api/trips/dispatch-metrics": {
+      "get": {
+        "tags": [
+          "trips"
+        ],
+        "operationId": "trips_dispatchMetrics",
+        "summary": "GET /api/trips/dispatch-metrics",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: trips.read, reports.read"
+      }
+    },
+    "/api/trips/scheduled": {
+      "get": {
+        "tags": [
+          "scheduled-trips"
+        ],
+        "operationId": "scheduled-trips_listAll",
+        "summary": "GET /api/trips/scheduled",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "scheduled-trips"
+        ],
+        "operationId": "scheduled-trips_create",
+        "summary": "POST /api/trips/scheduled",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/trips/scheduled/:id": {
+      "delete": {
+        "tags": [
+          "scheduled-trips"
+        ],
+        "operationId": "scheduled-trips_cancel",
+        "summary": "DELETE /api/trips/scheduled/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/trips/scheduled/mine": {
+      "get": {
+        "tags": [
+          "scheduled-trips"
+        ],
+        "operationId": "scheduled-trips_listMine",
+        "summary": "GET /api/trips/scheduled/mine",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/vehicle-categories": {
+      "get": {
+        "tags": [
+          "vehicle-types"
+        ],
+        "operationId": "vehicle-types_findAll",
+        "summary": "GET /api/vehicle-categories",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage, settings.manage"
+      },
+      "post": {
+        "tags": [
+          "vehicle-types"
+        ],
+        "operationId": "vehicle-types_create",
+        "summary": "POST /api/vehicle-categories",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage, settings.manage"
+      }
+    },
+    "/api/vehicle-categories/:id": {
+      "delete": {
+        "tags": [
+          "vehicle-types"
+        ],
+        "operationId": "vehicle-types_remove",
+        "summary": "DELETE /api/vehicle-categories/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage, settings.manage"
+      },
+      "get": {
+        "tags": [
+          "vehicle-types"
+        ],
+        "operationId": "vehicle-types_findOne",
+        "summary": "GET /api/vehicle-categories/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage, settings.manage"
+      },
+      "patch": {
+        "tags": [
+          "vehicle-types"
+        ],
+        "operationId": "vehicle-types_update",
+        "summary": "PATCH /api/vehicle-categories/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage, settings.manage"
+      }
+    },
+    "/api/vehicle-categories/:id/active": {
+      "patch": {
+        "tags": [
+          "vehicle-types"
+        ],
+        "operationId": "vehicle-types_setActive",
+        "summary": "PATCH /api/vehicle-categories/:id/active",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage, settings.manage"
+      }
+    },
+    "/api/vehicle-categories/:id/restore": {
+      "post": {
+        "tags": [
+          "vehicle-types"
+        ],
+        "operationId": "vehicle-types_restore",
+        "summary": "POST /api/vehicle-categories/:id/restore",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage, settings.manage"
+      }
+    },
+    "/api/vehicle-categories/:id/status": {
+      "patch": {
+        "tags": [
+          "vehicle-types"
+        ],
+        "operationId": "vehicle-types_setStatus",
+        "summary": "PATCH /api/vehicle-categories/:id/status",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage, settings.manage"
+      }
+    },
+    "/api/vehicle-categories/reorder": {
+      "patch": {
+        "tags": [
+          "vehicle-types"
+        ],
+        "operationId": "vehicle-types_reorder",
+        "summary": "PATCH /api/vehicle-categories/reorder",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage, settings.manage"
+      }
+    },
+    "/api/vehicle-pricing": {
+      "get": {
+        "tags": [
+          "vehicle-types"
+        ],
+        "operationId": "vehicle-types_findAll",
+        "summary": "GET /api/vehicle-pricing",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage"
+      },
+      "post": {
+        "tags": [
+          "vehicle-types"
+        ],
+        "operationId": "vehicle-types_create",
+        "summary": "POST /api/vehicle-pricing",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage"
+      }
+    },
+    "/api/vehicle-pricing/:id": {
+      "delete": {
+        "tags": [
+          "vehicle-types"
+        ],
+        "operationId": "vehicle-types_remove",
+        "summary": "DELETE /api/vehicle-pricing/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage"
+      },
+      "get": {
+        "tags": [
+          "vehicle-types"
+        ],
+        "operationId": "vehicle-types_findOne",
+        "summary": "GET /api/vehicle-pricing/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage"
+      },
+      "patch": {
+        "tags": [
+          "vehicle-types"
+        ],
+        "operationId": "vehicle-types_update",
+        "summary": "PATCH /api/vehicle-pricing/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage"
+      }
+    },
+    "/api/vehicle-pricing/:id/restore": {
+      "post": {
+        "tags": [
+          "vehicle-types"
+        ],
+        "operationId": "vehicle-types_restore",
+        "summary": "POST /api/vehicle-pricing/:id/restore",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage"
+      }
+    },
+    "/api/vehicle-types": {
+      "get": {
+        "tags": [
+          "vehicle-types"
+        ],
+        "operationId": "vehicle-types_findAll",
+        "summary": "GET /api/vehicle-types",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage, settings.manage"
+      },
+      "post": {
+        "tags": [
+          "vehicle-types"
+        ],
+        "operationId": "vehicle-types_create",
+        "summary": "POST /api/vehicle-types",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage, settings.manage"
+      }
+    },
+    "/api/vehicle-types/:id": {
+      "delete": {
+        "tags": [
+          "vehicle-types"
+        ],
+        "operationId": "vehicle-types_remove",
+        "summary": "DELETE /api/vehicle-types/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage, settings.manage"
+      },
+      "get": {
+        "tags": [
+          "vehicle-types"
+        ],
+        "operationId": "vehicle-types_findOne",
+        "summary": "GET /api/vehicle-types/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage, settings.manage"
+      },
+      "patch": {
+        "tags": [
+          "vehicle-types"
+        ],
+        "operationId": "vehicle-types_update",
+        "summary": "PATCH /api/vehicle-types/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage, settings.manage"
+      }
+    },
+    "/api/vehicle-types/:id/active": {
+      "patch": {
+        "tags": [
+          "vehicle-types"
+        ],
+        "operationId": "vehicle-types_setActive",
+        "summary": "PATCH /api/vehicle-types/:id/active",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage, settings.manage"
+      }
+    },
+    "/api/vehicle-types/:id/fields": {
+      "get": {
+        "tags": [
+          "vehicle-types"
+        ],
+        "operationId": "vehicle-types_listFields",
+        "summary": "GET /api/vehicle-types/:id/fields",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage, settings.manage"
+      },
+      "post": {
+        "tags": [
+          "vehicle-types"
+        ],
+        "operationId": "vehicle-types_createField",
+        "summary": "POST /api/vehicle-types/:id/fields",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage, settings.manage"
+      }
+    },
+    "/api/vehicle-types/:id/restore": {
+      "post": {
+        "tags": [
+          "vehicle-types"
+        ],
+        "operationId": "vehicle-types_restore",
+        "summary": "POST /api/vehicle-types/:id/restore",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage, settings.manage"
+      }
+    },
+    "/api/vehicle-types/:id/status": {
+      "patch": {
+        "tags": [
+          "vehicle-types"
+        ],
+        "operationId": "vehicle-types_setStatus",
+        "summary": "PATCH /api/vehicle-types/:id/status",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage, settings.manage"
+      }
+    },
+    "/api/vehicle-types/:id/verify/:driverId": {
+      "get": {
+        "tags": [
+          "vehicle-types"
+        ],
+        "operationId": "vehicle-types_verify",
+        "summary": "GET /api/vehicle-types/:id/verify/:driverId",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage, settings.manage"
+      }
+    },
+    "/api/vehicle-types/fields/:fieldId": {
+      "delete": {
+        "tags": [
+          "vehicle-types"
+        ],
+        "operationId": "vehicle-types_removeField",
+        "summary": "DELETE /api/vehicle-types/fields/:fieldId",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage, settings.manage"
+      },
+      "patch": {
+        "tags": [
+          "vehicle-types"
+        ],
+        "operationId": "vehicle-types_updateField",
+        "summary": "PATCH /api/vehicle-types/fields/:fieldId",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage, settings.manage"
+      }
+    },
+    "/api/vehicle-types/reorder": {
+      "patch": {
+        "tags": [
+          "vehicle-types"
+        ],
+        "operationId": "vehicle-types_reorder",
+        "summary": "PATCH /api/vehicle-types/reorder",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: pricing.manage, settings.manage"
+      }
+    },
+    "/api/vehicles": {
+      "get": {
+        "tags": [
+          "drivers"
+        ],
+        "operationId": "drivers_findAll",
+        "summary": "GET /api/vehicles",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: drivers.read, drivers.manage"
+      }
+    },
+    "/api/vehicles/:id/toggle": {
+      "patch": {
+        "tags": [
+          "drivers"
+        ],
+        "operationId": "drivers_toggle",
+        "summary": "PATCH /api/vehicles/:id/toggle",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: drivers.manage"
+      }
+    },
+    "/api/vehicles/:id/verify": {
+      "patch": {
+        "tags": [
+          "drivers"
+        ],
+        "operationId": "drivers_verify",
+        "summary": "PATCH /api/vehicles/:id/verify",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: drivers.manage"
+      }
+    },
+    "/api/wallet/me": {
+      "get": {
+        "tags": [
+          "payments"
+        ],
+        "operationId": "payments_myWallet",
+        "summary": "GET /api/wallet/me",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/withdrawals": {
+      "get": {
+        "tags": [
+          "payments"
+        ],
+        "operationId": "payments_findAll",
+        "summary": "GET /api/withdrawals",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: payments.read, payments.manage"
+      },
+      "post": {
+        "tags": [
+          "payments"
+        ],
+        "operationId": "payments_create",
+        "summary": "POST /api/withdrawals",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/withdrawals/:id/approve": {
+      "patch": {
+        "tags": [
+          "payments"
+        ],
+        "operationId": "payments_approve",
+        "summary": "PATCH /api/withdrawals/:id/approve",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: payments.manage"
+      }
+    },
+    "/api/withdrawals/:id/paid": {
+      "patch": {
+        "tags": [
+          "payments"
+        ],
+        "operationId": "payments_markPaid",
+        "summary": "PATCH /api/withdrawals/:id/paid",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: payments.manage"
+      }
+    },
+    "/api/withdrawals/:id/reject": {
+      "patch": {
+        "tags": [
+          "payments"
+        ],
+        "operationId": "payments_reject",
+        "summary": "PATCH /api/withdrawals/:id/reject",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: payments.manage"
+      }
+    },
+    "/api/withdrawals/payout-integrity": {
+      "get": {
+        "tags": [
+          "payments"
+        ],
+        "operationId": "payments_payoutIntegrity",
+        "summary": "GET /api/withdrawals/payout-integrity",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: payments.read, payments.manage"
+      }
+    },
+    "/api/withdrawals/settlement-proposal": {
+      "get": {
+        "tags": [
+          "payments"
+        ],
+        "operationId": "payments_settlementProposal",
+        "summary": "GET /api/withdrawals/settlement-proposal",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: payments.read, payments.manage"
+      }
+    },
+    "/api/withdrawals/summary": {
+      "get": {
+        "tags": [
+          "payments"
+        ],
+        "operationId": "payments_summary",
+        "summary": "GET /api/withdrawals/summary",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: payments.read, payments.manage"
+      }
+    },
+    "/api/zones": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "operationId": "settings_findByCity",
+        "summary": "GET /api/zones",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      },
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "operationId": "settings_create",
+        "summary": "POST /api/zones",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      }
+    },
+    "/api/zones/:id": {
+      "delete": {
+        "tags": [
+          "settings"
+        ],
+        "operationId": "settings_remove",
+        "summary": "DELETE /api/zones/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      },
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "operationId": "settings_findOne",
+        "summary": "GET /api/zones/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      },
+      "patch": {
+        "tags": [
+          "settings"
+        ],
+        "operationId": "settings_update",
+        "summary": "PATCH /api/zones/:id",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "الصلاحيات المطلوبة: settings.manage"
+      }
+    }
+  }
+}

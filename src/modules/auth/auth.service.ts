@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ForbiddenException,
   Injectable,
   UnauthorizedException,
@@ -12,6 +13,12 @@ import { RegisterDto } from "./dto/register.dto";
 import { LoginDto } from "./dto/login.dto";
 import { FirebaseLoginDto } from "./dto/firebase-login.dto";
 import { FirebaseAdminService } from "./firebase-admin.service";
+import { CountryConfigService } from "../country-config/country-config.service";
+import { AppException } from "../../common/api/app.exception";
+import { LoginThrottleService } from "./login-throttle.service";
+import { OtpService } from "./otp.service";
+import { RequestOtpDto, VerifyOtpDto } from "./dto/otp.dto";
+import { normalizePurpose } from "./otp.util";
 
 export interface AuthUserResponse {
   id: string;
@@ -69,23 +76,61 @@ export class AuthService {
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
     private readonly firebase: FirebaseAdminService,
+    private readonly countryConfig: CountryConfigService,
+    private readonly loginThrottle: LoginThrottleService,
+    private readonly otp: OtpService,
   ) {}
 
+  /**
+   * يطلب رمز OTP لرقم هاتف (يُطبّق أولًا). إضافي ومستقل — لا يغيّر
+   * سلوك register/login القائم.
+   */
+  async requestPhoneOtp(
+    dto: RequestOtpDto,
+  ): Promise<{ sent: boolean; expiresInSeconds: number }> {
+    const phone = await this.normalizedPhone(dto.phone, dto.countryCode);
+    return this.otp.requestOtp(phone, normalizePurpose(dto.purpose));
+  }
+
+  /** يتحقق من رمز OTP لرقم هاتف (يُطبّق أولًا). */
+  async verifyPhoneOtp(dto: VerifyOtpDto): Promise<{ verified: true }> {
+    const phone = await this.normalizedPhone(dto.phone, dto.countryCode);
+    return this.otp.verifyOtp(phone, normalizePurpose(dto.purpose), dto.code);
+  }
+
+  private async normalizedPhone(
+    phone: string,
+    countryCode?: string,
+  ): Promise<string> {
+    const code = (
+      countryCode ??
+      this.config.get<string>("DEFAULT_COUNTRY_CODE") ??
+      "DZ"
+    ).toUpperCase();
+    const normalized = await this.countryConfig.normalizePhone(code, phone);
+    if (!normalized) {
+      throw new AppException("INVALID_PHONE_NUMBER", {
+        details: { countryCode: code },
+      });
+    }
+    return normalized;
+  }
+
   async register(dto: RegisterDto, session?: SessionContext): Promise<Tokens> {
+    const phone = await this.normalizedPhone(dto.phone, dto.countryCode);
     const existing = await this.prisma.user.findUnique({
-      where: { phone: dto.phone },
+      where: { phone },
     });
-    if (existing) throw new ForbiddenException("Phone already registered");
+    if (existing) throw new AppException("PHONE_ALREADY_REGISTERED");
 
     const passwordHash = await bcrypt.hash(dto.password, 10);
     const user = await this.prisma.user.create({
       data: {
         name: dto.name,
-        phone: dto.phone,
+        phone,
         email: dto.email,
         passwordHash,
         type: dto.role,
-        wallet: { create: {} },
         driver: dto.role === "DRIVER" ? { create: {} } : undefined,
       },
     });
@@ -105,16 +150,30 @@ export class AuthService {
   }
 
   async login(dto: LoginDto, session?: SessionContext): Promise<Tokens> {
+    const phone = await this.normalizedPhone(dto.phone, dto.countryCode);
+    // حماية من القوة الغاشمة: نرفض فورًا إن كان هذا الحساب مقفولًا مؤقتًا.
+    await this.loginThrottle.assertNotLocked(phone);
+
     const user = await this.prisma.user.findUnique({
-      where: { phone: dto.phone },
+      where: { phone },
     });
-    if (!user) throw new UnauthorizedException("Invalid credentials");
+    if (!user) {
+      // نعدّ المحاولة حتى لرقم غير مسجّل لمنع التخمين المتسلسل.
+      await this.loginThrottle.recordFailure(phone);
+      throw new AppException("INVALID_CREDENTIALS");
+    }
 
     const ok = await bcrypt.compare(dto.password, user.passwordHash);
-    if (!ok) throw new UnauthorizedException("Invalid credentials");
-    if (user.status !== "ACTIVE") {
-      throw new ForbiddenException("Account is not active");
+    if (!ok) {
+      await this.loginThrottle.recordFailure(phone);
+      throw new AppException("INVALID_CREDENTIALS");
     }
+    if (user.status !== "ACTIVE") {
+      throw new AppException("ACCOUNT_INACTIVE");
+    }
+
+    // نجاح: نمسح عدّاد الفشل والقفل عن هذا الحساب.
+    await this.loginThrottle.recordSuccess(phone);
 
     const sessionId = await this.createSession(user.id, session);
     await this.markAgentLogin(user.id, user.type);
@@ -174,7 +233,6 @@ export class AuthService {
           firebaseUid,
           passwordHash: placeholderHash,
           type: role,
-          wallet: { create: {} },
           driver: role === "DRIVER" ? { create: {} } : undefined,
         },
       });

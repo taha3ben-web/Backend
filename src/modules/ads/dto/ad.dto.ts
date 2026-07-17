@@ -1,4 +1,6 @@
 import {
+  ArrayUnique,
+  IsArray,
   IsBoolean,
   IsEnum,
   IsInt,
@@ -9,7 +11,6 @@ import {
 } from "class-validator";
 import { AdPlacement } from "@prisma/client";
 
-/** إنشاء إعلان جديد. */
 export class CreateAdDto {
   @IsString()
   @IsNotEmpty()
@@ -24,8 +25,32 @@ export class CreateAdDto {
   targetUrl?: string;
 
   @IsOptional()
+  @IsString()
+  campaignKey?: string;
+
+  @IsOptional()
   @IsEnum(AdPlacement)
   placement?: AdPlacement;
+
+  @IsOptional()
+  @IsString()
+  appId?: string;
+
+  @IsOptional()
+  @IsString()
+  clientOs?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsString({ each: true })
+  countryCodes?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsString({ each: true })
+  audienceSegments?: string[];
 
   @IsOptional()
   @IsBoolean()
@@ -41,10 +66,13 @@ export class CreateAdDto {
 
   @IsOptional()
   @IsInt()
+  priority?: number;
+
+  @IsOptional()
+  @IsInt()
   sortOrder?: number;
 }
 
-/** تحديث إعلان (كل الحقول اختيارية). */
 export class UpdateAdDto {
   @IsOptional()
   @IsString()
@@ -61,8 +89,32 @@ export class UpdateAdDto {
   targetUrl?: string;
 
   @IsOptional()
+  @IsString()
+  campaignKey?: string;
+
+  @IsOptional()
   @IsEnum(AdPlacement)
   placement?: AdPlacement;
+
+  @IsOptional()
+  @IsString()
+  appId?: string;
+
+  @IsOptional()
+  @IsString()
+  clientOs?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsString({ each: true })
+  countryCodes?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsString({ each: true })
+  audienceSegments?: string[];
 
   @IsOptional()
   @IsBoolean()
@@ -75,6 +127,10 @@ export class UpdateAdDto {
   @IsOptional()
   @IsString()
   endsAt?: string;
+
+  @IsOptional()
+  @IsInt()
+  priority?: number;
 
   @IsOptional()
   @IsInt()

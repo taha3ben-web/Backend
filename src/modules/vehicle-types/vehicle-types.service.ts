@@ -62,12 +62,32 @@ export class VehicleTypesService {
     private readonly cache: CatalogCacheService,
   ) {}
 
-  private toI18n(v?: Record<string, string>): Prisma.InputJsonValue | undefined {
+  private toI18n(
+    v?: Record<string, string>,
+  ): Prisma.InputJsonValue | undefined {
     return v === undefined ? undefined : (v as Prisma.InputJsonValue);
   }
 
   private json(v?: Record<string, unknown>): Prisma.InputJsonValue | undefined {
     return v === undefined ? undefined : (v as Prisma.InputJsonValue);
+  }
+
+  private normalizeArray(
+    values: string[] | undefined,
+    casing: "upper" | "lower",
+  ) {
+    const seen = new Set<string>();
+    const result: string[] = [];
+    for (const value of values ?? []) {
+      const trimmed = value.trim();
+      if (!trimmed) continue;
+      const next =
+        casing === "upper" ? trimmed.toUpperCase() : trimmed.toLowerCase();
+      if (seen.has(next)) continue;
+      seen.add(next);
+      result.push(next);
+    }
+    return result;
   }
 
   async findAll(
@@ -120,7 +140,10 @@ export class VehicleTypesService {
       ...(featureIds.length
         ? [
             this.prisma.vehicleTypeFeature.createMany({
-              data: featureIds.map((featureId) => ({ vehicleTypeId, featureId })),
+              data: featureIds.map((featureId) => ({
+                vehicleTypeId,
+                featureId,
+              })),
               skipDuplicates: true,
             }),
           ]
@@ -148,6 +171,14 @@ export class VehicleTypesService {
         requiresApproval: dto.requiresApproval ?? false,
         visibleToPassengers: dto.visibleToPassengers ?? true,
         visibleToDrivers: dto.visibleToDrivers ?? true,
+        appIds: this.normalizeArray(dto.appIds, "lower"),
+        clientOs: this.normalizeArray(dto.clientOs, "lower"),
+        countryCodes: this.normalizeArray(dto.countryCodes, "upper"),
+        audienceSegments: this.normalizeArray(dto.audienceSegments, "lower"),
+        minAppVersion: dto.minAppVersion,
+        maxAppVersion: dto.maxAppVersion,
+        badgeText: dto.badgeText,
+        etaMinutes: dto.etaMinutes,
         iconType: dto.iconType ?? "EMOJI",
         iconValue: dto.iconValue,
         iconUrl: dto.iconUrl,
@@ -194,6 +225,26 @@ export class VehicleTypesService {
         requiresApproval: dto.requiresApproval,
         visibleToPassengers: dto.visibleToPassengers,
         visibleToDrivers: dto.visibleToDrivers,
+        appIds:
+          dto.appIds === undefined
+            ? undefined
+            : this.normalizeArray(dto.appIds, "lower"),
+        clientOs:
+          dto.clientOs === undefined
+            ? undefined
+            : this.normalizeArray(dto.clientOs, "lower"),
+        countryCodes:
+          dto.countryCodes === undefined
+            ? undefined
+            : this.normalizeArray(dto.countryCodes, "upper"),
+        audienceSegments:
+          dto.audienceSegments === undefined
+            ? undefined
+            : this.normalizeArray(dto.audienceSegments, "lower"),
+        minAppVersion: dto.minAppVersion,
+        maxAppVersion: dto.maxAppVersion,
+        badgeText: dto.badgeText,
+        etaMinutes: dto.etaMinutes,
         iconType: dto.iconType,
         iconValue: dto.iconValue,
         iconUrl: dto.iconUrl,
@@ -266,13 +317,7 @@ export class VehicleTypesService {
       where: { id },
       data: { status, version: { increment: 1 } },
     });
-    await this.afterWrite(
-      "UPDATE",
-      id,
-      { status },
-      actorId,
-      "status_changed",
-    );
+    await this.afterWrite("UPDATE", id, { status }, actorId, "status_changed");
     return updated;
   }
 

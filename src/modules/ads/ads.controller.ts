@@ -22,19 +22,37 @@ import { CreateAdDto, UpdateAdDto } from "./dto/ad.dto";
 export class AdsController {
   constructor(private readonly ads: AdsService) {}
 
-  /** الإعلانات النشطة لموضع معيّن (متاح لأي مستخدم مُصادَق — للتطبيقات). */
   @Get("active")
   @UseGuards(JwtAuthGuard)
-  active(@Query("placement") placement: AdPlacement) {
-    return this.ads.findActive(placement ?? "PASSENGER_HOME");
+  active(
+    @Query("placement") placement: AdPlacement,
+    @Query("appId") appId?: string,
+    @Query("clientOs") clientOs?: string,
+    @Query("countryCode") countryCode?: string,
+    @Query("segments") segments?: string,
+  ) {
+    return this.ads.findActive(placement ?? "PASSENGER_HOME", {
+      appId,
+      clientOs,
+      countryCode,
+      segments: segments
+        ? segments
+            .split(",")
+            .map((item) => item.trim())
+            .filter(Boolean)
+        : undefined,
+    });
   }
 
   @Get()
   @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
   @Roles("STAFF")
   @RequirePermissions("settings.manage")
-  findAll(@Query("placement") placement?: AdPlacement) {
-    return this.ads.findAll(placement);
+  findAll(
+    @Query("placement") placement?: AdPlacement,
+    @Query("campaignKey") campaignKey?: string,
+  ) {
+    return this.ads.findAll(placement, campaignKey);
   }
 
   @Post()

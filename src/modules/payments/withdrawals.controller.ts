@@ -29,7 +29,12 @@ export class WithdrawalsController {
 
   @Post()
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateWithdrawDto) {
-    return this.withdrawals.createForDriver(user.userId, dto.amount, dto.note);
+    return this.withdrawals.createForDriver(
+      user.userId,
+      dto.amount,
+      dto.note,
+      dto.idempotencyKey,
+    );
   }
 
   @UseGuards(RolesGuard, PermissionsGuard)
@@ -50,6 +55,22 @@ export class WithdrawalsController {
   @Get("summary")
   summary(@Query("status") status?: WithdrawStatus, @Query("search") search?: string) {
     return this.withdrawals.summary(status, search);
+  }
+
+  @UseGuards(RolesGuard, PermissionsGuard)
+  @Roles("STAFF")
+  @RequirePermissions("payments.read", "payments.manage")
+  @Get("payout-integrity")
+  payoutIntegrity(@Query("limit") limit?: string) {
+    return this.withdrawals.payoutIntegrity(limit ? Number(limit) : 50);
+  }
+
+  @UseGuards(RolesGuard, PermissionsGuard)
+  @Roles("STAFF")
+  @RequirePermissions("payments.read", "payments.manage")
+  @Get("settlement-proposal")
+  settlementProposal(@Query("limit") limit?: string) {
+    return this.withdrawals.settlementProposal(limit ? Number(limit) : 100);
   }
 
   @UseGuards(RolesGuard, PermissionsGuard)

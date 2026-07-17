@@ -8,7 +8,7 @@ import {
   MaxLength,
   Min,
 } from "class-validator";
-import { PaymentMethod, PaymentStatus, WalletTxType } from "@prisma/client";
+import { PaymentMethod, PaymentStatus } from "@prisma/client";
 
 /** إنشاء/تهيئة دفعة أو جلسة Checkout لرحلة */
 export class CreatePaymentCheckoutDto {
@@ -75,21 +75,6 @@ export class PaymentActionDto {
   reason?: string;
 }
 
-/** تعديل رصيد المحفظة يدويًا من اللوحة (إضافة/خصم) */
-export class WalletAdjustDto {
-  @IsEnum(WalletTxType)
-  declare type: WalletTxType;
-
-  @Type(() => Number)
-  @IsNumber()
-  @IsPositive()
-  declare amount: number;
-
-  @IsString()
-  @IsOptional()
-  reason?: string;
-}
-
 /** شحن محفظة راكب (top-up) */
 export class WalletTopUpDto {
   @Type(() => Number)
@@ -117,6 +102,15 @@ export class CreateWithdrawDto {
   @IsString()
   @IsOptional()
   note?: string;
+
+  /**
+   * مفتاح عدم التكرار (idempotency) اختياري يرسله العميل (مثل UUID)
+   * لمنع إنشاء طلب سحب مكرر عند إعادة المحاولة/ضعف الشبكة.
+   */
+  @IsString()
+  @IsOptional()
+  @MaxLength(100)
+  idempotencyKey?: string;
 }
 
 /** معالجة طلب السحب من المدير */

@@ -3,21 +3,34 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { Coupon, Prisma } from "@prisma/client";
+import { Coupon, CouponFundingSource, Prisma } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import { PaginationDto } from "../../common/dto/pagination.dto";
 import { CreateCouponDto, UpdateCouponDto } from "./dto/coupons.dto";
 import { round2 } from "../../common/money.util";
+import { SettingsService } from "../settings/settings.service";
 
 export interface CouponResult {
   coupon: Coupon;
   discount: number;
   finalFare: number;
+  fundingSource: CouponFundingSource;
+  platformShare: number;
 }
+
+/** مفتاح الإعداد العام لسياسة تمويل الكوبونات (يُدار من لوحة التحكم). */
+export const COUPON_FUNDING_SETTING_KEY = "coupons.funding";
+const DEFAULT_COUPON_FUNDING: {
+  source: CouponFundingSource;
+  platformShare: number;
+} = { source: "PLATFORM", platformShare: 0.5 };
 
 @Injectable()
 export class CouponsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly settings: SettingsService,
+  ) {}
 
   async create(dto: CreateCouponDto): Promise<Coupon> {
     const exists = await this.prisma.coupon.findUnique({
@@ -34,6 +47,8 @@ export class CouponsService {
         userId: dto.userId,
         expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : null,
         isActive: dto.isActive ?? true,
+        fundingSource: dto.fundingSource ?? null,
+        platformShare: dto.platformShare ?? null,
       },
     });
   }
@@ -72,6 +87,8 @@ export class CouponsService {
         userId: dto.userId,
         expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : undefined,
         isActive: dto.isActive,
+        fundingSource: dto.fundingSource,
+        platformShare: dto.platformShare,
       },
     });
   }
@@ -123,7 +140,19 @@ export class CouponsService {
       fare,
     );
     const finalFare = round2(fare - discount);
-    return { coupon, discount, finalFare };
+    // سياسة التمويل المؤثّرة: تجاوز الكوبون إن وُجد، وإلا الإعداد
+    // العام من لوحة التحكم، وإلا PLATFORM كافتراضٍ آمن. تُلتقط على الرحلة وقت الطلب.
+    const globalFunding = await this.settings.getValue<{
+      source?: CouponFundingSource;
+      platformShare?: number;
+    }>(COUPON_FUNDING_SETTING_KEY, DEFAULT_COUPON_FUNDING);
+    const fundingSource: CouponFundingSource =
+      coupon.fundingSource ?? globalFunding?.source ?? "PLATFORM";
+    const platformShare =
+      coupon.platformShare != null
+        ? Number(coupon.platformShare)
+        : (globalFunding?.platformShare ?? 0.5);
+    return { coupon, discount, finalFare, fundingSource, platformShare };
   }
 
   /** زيادة عدّاد الاستخدام ذريًا (مع حماية maxUses) */

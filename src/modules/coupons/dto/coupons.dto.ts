@@ -8,9 +8,10 @@ import {
   IsOptional,
   IsPositive,
   IsString,
+  Max,
   Min,
 } from "class-validator";
-import { DiscountType } from "@prisma/client";
+import { CouponFundingSource, DiscountType } from "@prisma/client";
 
 export class CreateCouponDto {
   @IsString()
@@ -46,6 +47,17 @@ export class CreateCouponDto {
   @IsBoolean()
   @IsOptional()
   isActive?: boolean;
+
+  @IsEnum(CouponFundingSource)
+  @IsOptional()
+  fundingSource?: CouponFundingSource;
+
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  @IsOptional()
+  platformShare?: number;
 }
 
 export class UpdateCouponDto {
@@ -80,6 +92,17 @@ export class UpdateCouponDto {
   @IsBoolean()
   @IsOptional()
   isActive?: boolean;
+
+  @IsEnum(CouponFundingSource)
+  @IsOptional()
+  fundingSource?: CouponFundingSource;
+
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  @IsOptional()
+  platformShare?: number;
 }
 
 export class ValidateCouponDto {

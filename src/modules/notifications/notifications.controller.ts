@@ -34,7 +34,6 @@ export class NotificationsController {
     private readonly deviceTokens: DeviceTokensService,
   ) {}
 
-  /** تسجيل توكن جهاز (أي مستخدم) */
   @Post("devices")
   registerDevice(
     @CurrentUser() user: AuthUser,
@@ -43,13 +42,11 @@ export class NotificationsController {
     return this.deviceTokens.register(user.userId, dto.token, dto.platform);
   }
 
-  /** إزالة توكن جهاز */
   @Delete("devices/:token")
   removeDevice(@Param("token") token: string) {
     return this.deviceTokens.remove(token);
   }
 
-  /** إشعارات المستخدم الحالي */
   @Get("me")
   myNotifications(@CurrentUser() user: AuthUser, @Query() q: PaginationDto) {
     const targets: NotificationTarget[] =
@@ -61,9 +58,6 @@ export class NotificationsController {
     return this.notifications.forUser(user.userId, targets, q);
   }
 
-  // ---------- إدارة (STAFF) ----------
-
-  /** إرسال إشعار (للجميع/السائقين/الركاب/مستخدم) — فوري أو مجدول */
   @UseGuards(RolesGuard, PermissionsGuard)
   @Roles("STAFF")
   @RequirePermissions("notifications.send")
@@ -72,7 +66,6 @@ export class NotificationsController {
     return this.notifications.send(dto);
   }
 
-  /** سجل الإشعارات */
   @UseGuards(RolesGuard, PermissionsGuard)
   @Roles("STAFF")
   @RequirePermissions("notifications.send")
@@ -80,11 +73,11 @@ export class NotificationsController {
   findAll(
     @Query() q: PaginationDto,
     @Query("target") target?: NotificationTarget,
+    @Query("campaignKey") campaignKey?: string,
   ) {
-    return this.notifications.findAll(q, target);
+    return this.notifications.findAll(q, target, campaignKey);
   }
 
-  /** إلغاء إشعار مجدول لم يُرسل بعد */
   @UseGuards(RolesGuard, PermissionsGuard)
   @Roles("STAFF")
   @RequirePermissions("notifications.send")

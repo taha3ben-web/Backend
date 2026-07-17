@@ -1,12 +1,14 @@
 import { Injectable } from "@nestjs/common";
 import { PrismaService } from "../../prisma/prisma.service";
 import { RedisService } from "../redis/redis.service";
+import { FinancialService } from "../financial/financial.service";
 
 @Injectable()
 export class DashboardService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
+    private readonly financial: FinancialService,
   ) {}
 
   async summary() {
@@ -54,49 +56,45 @@ export class DashboardService {
     startWeek.setDate(now.getDate() - 7);
     const startMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-    const sum = async (gte: Date) =>
-      (
-        await this.prisma.companyEarning.aggregate({
-          _sum: { amount: true },
-          where: { createdAt: { gte } },
-        })
-      )._sum.amount ?? 0;
-
-    const [totalCompany, totalDriver] = await this.prisma.$transaction([
-      this.prisma.companyEarning.aggregate({ _sum: { amount: true } }),
-      this.prisma.driverEarning.aggregate({ _sum: { net: true } }),
+    // Revenue derived from the Ledger (single source of truth).
+    const [totals, day, week, month] = await Promise.all([
+      this.financial.getLedgerRevenue(),
+      this.financial.getLedgerRevenue({ gte: startDay }),
+      this.financial.getLedgerRevenue({ gte: startWeek }),
+      this.financial.getLedgerRevenue({ gte: startMonth }),
     ]);
 
     return {
-      totalCompany: totalCompany._sum.amount ?? 0,
-      totalDriverPayouts: totalDriver._sum.net ?? 0,
-      revenueToday: await sum(startDay),
-      revenueWeek: await sum(startWeek),
-      revenueMonth: await sum(startMonth),
+      totalCompany: totals.commission,
+      totalDriverPayouts: totals.driverNet,
+      revenueToday: day.commission,
+      revenueWeek: week.commission,
+      revenueMonth: month.commission,
     };
   }
 
   async latest() {
-    const [trips, users, complaints, withdrawals] = await this.prisma.$transaction([
-      this.prisma.trip.findMany({
-        take: 8,
-        orderBy: { createdAt: "desc" },
-        include: { passenger: { select: { name: true } } },
-      }),
-      this.prisma.user.findMany({
-        take: 8,
-        orderBy: { createdAt: "desc" },
-        select: { id: true, name: true, type: true, createdAt: true },
-      }),
-      this.prisma.complaint.findMany({
-        take: 8,
-        orderBy: { createdAt: "desc" },
-      }),
-      this.prisma.withdrawRequest.findMany({
-        take: 8,
-        orderBy: { createdAt: "desc" },
-      }),
-    ]);
+    const [trips, users, complaints, withdrawals] =
+      await this.prisma.$transaction([
+        this.prisma.trip.findMany({
+          take: 8,
+          orderBy: { createdAt: "desc" },
+          include: { passenger: { select: { name: true } } },
+        }),
+        this.prisma.user.findMany({
+          take: 8,
+          orderBy: { createdAt: "desc" },
+          select: { id: true, name: true, type: true, createdAt: true },
+        }),
+        this.prisma.complaint.findMany({
+          take: 8,
+          orderBy: { createdAt: "desc" },
+        }),
+        this.prisma.withdrawRequest.findMany({
+          take: 8,
+          orderBy: { createdAt: "desc" },
+        }),
+      ]);
     return { trips, users, complaints, withdrawals };
   }
 
@@ -108,7 +106,12 @@ export class DashboardService {
     for (const id of ids) pipeline.hgetall(`driver:${id}`);
     const res = await pipeline.exec();
 
-    const drivers: Array<{ id: string; lat: number; lng: number; heading: number }> = [];
+    const drivers: Array<{
+      id: string;
+      lat: number;
+      lng: number;
+      heading: number;
+    }> = [];
     ids.forEach((id, i) => {
       const h = res?.[i]?.[1] as Record<string, string> | null | undefined;
       if (h?.lat) {
@@ -130,37 +133,52 @@ export class DashboardService {
       this.countGeoDrivers(),
     ]);
 
-    const [onlineDrivers, busyDrivers, activeTrips, openTickets, openComplaints, pendingWithdrawals, recentComplaints, recentWithdrawals, recentTrips] =
-      await this.prisma.$transaction([
-        this.prisma.driver.count({ where: { availability: "ONLINE" } }),
-        this.prisma.driver.count({ where: { availability: "ON_TRIP" } }),
-        this.prisma.trip.count({ where: { status: { in: ["ACCEPTED", "ARRIVING", "IN_PROGRESS"] } } }),
-        this.prisma.supportTicket.count({ where: { status: { in: ["OPEN", "PENDING"] } } }),
-        this.prisma.complaint.count({ where: { status: { in: ["OPEN", "REVIEWING"] } } }),
-        this.prisma.withdrawRequest.count({ where: { status: "PENDING" } }),
-        this.prisma.complaint.findMany({
-          take: 8,
-          orderBy: { createdAt: "desc" },
-          where: { status: { in: ["OPEN", "REVIEWING"] } },
-          include: {
-            fromUser: { select: { name: true, phone: true } },
-            againstUser: { select: { name: true, phone: true } },
-          },
-        }),
-        this.prisma.withdrawRequest.findMany({
-          take: 8,
-          orderBy: { createdAt: "desc" },
-          include: { user: { select: { name: true, phone: true } } },
-        }),
-        this.prisma.trip.findMany({
-          take: 8,
-          orderBy: { createdAt: "desc" },
-          include: {
-            passenger: { select: { name: true } },
-            driver: { select: { user: { select: { name: true } } } },
-          },
-        }),
-      ]);
+    const [
+      onlineDrivers,
+      busyDrivers,
+      activeTrips,
+      openTickets,
+      openComplaints,
+      pendingWithdrawals,
+      recentComplaints,
+      recentWithdrawals,
+      recentTrips,
+    ] = await this.prisma.$transaction([
+      this.prisma.driver.count({ where: { availability: "ONLINE" } }),
+      this.prisma.driver.count({ where: { availability: "ON_TRIP" } }),
+      this.prisma.trip.count({
+        where: { status: { in: ["ACCEPTED", "ARRIVING", "IN_PROGRESS"] } },
+      }),
+      this.prisma.supportTicket.count({
+        where: { status: { in: ["OPEN", "PENDING"] } },
+      }),
+      this.prisma.complaint.count({
+        where: { status: { in: ["OPEN", "REVIEWING"] } },
+      }),
+      this.prisma.withdrawRequest.count({ where: { status: "PENDING" } }),
+      this.prisma.complaint.findMany({
+        take: 8,
+        orderBy: { createdAt: "desc" },
+        where: { status: { in: ["OPEN", "REVIEWING"] } },
+        include: {
+          fromUser: { select: { name: true, phone: true } },
+          againstUser: { select: { name: true, phone: true } },
+        },
+      }),
+      this.prisma.withdrawRequest.findMany({
+        take: 8,
+        orderBy: { createdAt: "desc" },
+        include: { user: { select: { name: true, phone: true } } },
+      }),
+      this.prisma.trip.findMany({
+        take: 8,
+        orderBy: { createdAt: "desc" },
+        include: {
+          passenger: { select: { name: true } },
+          driver: { select: { user: { select: { name: true } } } },
+        },
+      }),
+    ]);
 
     const memory = process.memoryUsage();
 
@@ -188,11 +206,76 @@ export class DashboardService {
     };
   }
 
+  async readiness() {
+    const [db, redis] = await Promise.all([this.checkDb(), this.checkRedis()]);
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const [
+      sessionCount,
+      pendingSettingApprovals,
+      activeFeatureFlags,
+      publishedVehicleTypes,
+      recentAuditEvents,
+      recentActivityEvents,
+      globalKill,
+      configVersionSetting,
+    ] = await this.prisma.$transaction([
+      this.prisma.session.count(),
+      this.prisma.settingChangeRequest.count({ where: { status: "PENDING" } }),
+      this.prisma.featureFlag.count({ where: { enabled: true } }),
+      this.prisma.vehicleType.count({
+        where: { status: "PUBLISHED", isActive: true, deletedAt: null },
+      }),
+      this.prisma.auditLog.count({ where: { createdAt: { gte: since } } }),
+      this.prisma.activityLog.count({ where: { createdAt: { gte: since } } }),
+      this.prisma.featureFlagControl.findUnique({ where: { key: "global" } }),
+      this.prisma.setting.findUnique({
+        where: { key: "system.configVersion" },
+        select: { value: true, publishedValue: true, updatedAt: true },
+      }),
+    ]);
+
+    const alerts: string[] = [];
+    if (!db.ok) alerts.push("قاعدة البيانات متأثرة");
+    if (!redis.ok) alerts.push("Redis متأثر");
+    if (globalKill?.globalKillSwitch) alerts.push("Global kill switch مفعّل");
+    if (pendingSettingApprovals > 0)
+      alerts.push("توجد طلبات إعدادات بانتظار المراجعة");
+    if (publishedVehicleTypes === 0) alerts.push("لا توجد أنواع مركبات منشورة");
+
+    return {
+      ok: alerts.length === 0,
+      ts: new Date().toISOString(),
+      checks: { db, redis },
+      counters: {
+        sessionCount,
+        pendingSettingApprovals,
+        activeFeatureFlags,
+        publishedVehicleTypes,
+        recentAuditEvents,
+        recentActivityEvents,
+      },
+      featureFlags: {
+        globalKillSwitch: globalKill?.globalKillSwitch ?? false,
+        globalKillReason: globalKill?.globalKillReason ?? null,
+      },
+      config: {
+        value: configVersionSetting?.value ?? null,
+        publishedValue: configVersionSetting?.publishedValue ?? null,
+        updatedAt: configVersionSetting?.updatedAt ?? null,
+      },
+      alerts,
+    };
+  }
+
   private round2(n: number): number {
     return Math.round(n * 100) / 100;
   }
 
-  private async checkDb(): Promise<{ ok: boolean; latencyMs?: number; error?: string }> {
+  private async checkDb(): Promise<{
+    ok: boolean;
+    latencyMs?: number;
+    error?: string;
+  }> {
     const start = Date.now();
     try {
       await this.prisma.$queryRaw`SELECT 1`;
@@ -202,7 +285,11 @@ export class DashboardService {
     }
   }
 
-  private async checkRedis(): Promise<{ ok: boolean; latencyMs?: number; error?: string }> {
+  private async checkRedis(): Promise<{
+    ok: boolean;
+    latencyMs?: number;
+    error?: string;
+  }> {
     const start = Date.now();
     try {
       const pong = await this.redis.client.ping();

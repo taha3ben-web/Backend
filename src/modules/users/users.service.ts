@@ -1,15 +1,25 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
 import { Prisma, UserStatus, UserType } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import { PaginationDto } from "../../common/dto/pagination.dto";
 import { StorageService } from "../storage/storage.service";
-import { PassengerUploadUrlDto, UpdatePassengerProfileDto } from "./dto/passenger-self.dto";
+import {
+  PassengerUploadUrlDto,
+  UpdatePassengerProfileDto,
+} from "./dto/passenger-self.dto";
+import { FinancialService } from "../financial/financial.service";
 
 @Injectable()
 export class UsersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
+    private readonly financial: FinancialService,
   ) {}
 
   async findAll(q: PaginationDto, type?: UserType) {
@@ -52,12 +62,192 @@ export class UsersService {
     const user = await this.prisma.user.findUnique({
       where: { id },
       include: {
-        wallet: true,
         ratingsReceived: { take: 10, orderBy: { createdAt: "desc" } },
       },
     });
     if (!user) throw new NotFoundException("User not found");
-    return user;
+    const ledgerBalance = await this.financial.getUserBalance(id);
+    return {
+      ...user,
+      ledgerBalance,
+      // حقل توافق مؤقت للواجهات القديمة؛ المصدر الفعلي هو Ledger.
+      wallet: { ...ledgerBalance, source: "LEDGER" as const },
+    };
+  }
+
+  /**
+   * Customer 360 (قراءة فقط): يجمع ملف المستخدم مع ملخص الرحلات
+   * والمدفوعات والتقييمات والشكاوى وتذاكر الدعم وحالة الحجز في
+   * استجابة واحدة. لا يعدّل أي بيانات.
+   */
+  async customer360(id: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        name: true,
+        phone: true,
+        email: true,
+        type: true,
+        status: true,
+        avatarUrl: true,
+        locale: true,
+        createdAt: true,
+      },
+    });
+    if (!user) throw new NotFoundException("User not found");
+
+    const [
+      totalTrips,
+      completedTrips,
+      cancelledTrips,
+      spentAgg,
+      ratingAgg,
+      complaintsFrom,
+      complaintsAgainst,
+      ticketsOpen,
+      ticketsTotal,
+      activeHolds,
+    ] = await this.prisma.$transaction([
+      this.prisma.trip.count({ where: { passengerId: id } }),
+      this.prisma.trip.count({
+        where: { passengerId: id, status: "COMPLETED" },
+      }),
+      this.prisma.trip.count({
+        where: { passengerId: id, status: "CANCELLED" },
+      }),
+      this.prisma.trip.aggregate({
+        _sum: { fare: true },
+        where: { passengerId: id, status: "COMPLETED" },
+      }),
+      this.prisma.rating.aggregate({
+        _avg: { stars: true },
+        _count: { _all: true },
+        where: { targetId: id },
+      }),
+      this.prisma.complaint.count({ where: { fromUserId: id } }),
+      this.prisma.complaint.count({ where: { againstUserId: id } }),
+      this.prisma.supportTicket.count({
+        where: { userId: id, status: { in: ["OPEN", "PENDING"] } },
+      }),
+      this.prisma.supportTicket.count({ where: { userId: id } }),
+      this.prisma.riskHold.count({ where: { subjectId: id, active: true } }),
+    ]);
+
+    const [
+      recentTrips,
+      recentPayments,
+      recentRatings,
+      recentComplaints,
+      recentTickets,
+      holds,
+    ] = await this.prisma.$transaction([
+      this.prisma.trip.findMany({
+        where: { passengerId: id },
+        take: 10,
+        orderBy: { createdAt: "desc" },
+        select: {
+          id: true,
+          status: true,
+          rideClass: true,
+          fare: true,
+          currency: true,
+          pickupAddress: true,
+          destAddress: true,
+          createdAt: true,
+        },
+      }),
+      this.prisma.payment.findMany({
+        where: { userId: id },
+        take: 10,
+        orderBy: { createdAt: "desc" },
+        select: {
+          id: true,
+          amount: true,
+          method: true,
+          status: true,
+          tripId: true,
+          createdAt: true,
+        },
+      }),
+      this.prisma.rating.findMany({
+        where: { targetId: id },
+        take: 5,
+        orderBy: { createdAt: "desc" },
+        select: {
+          id: true,
+          stars: true,
+          comment: true,
+          createdAt: true,
+          author: { select: { name: true } },
+        },
+      }),
+      this.prisma.complaint.findMany({
+        where: { OR: [{ fromUserId: id }, { againstUserId: id }] },
+        take: 5,
+        orderBy: { createdAt: "desc" },
+        select: {
+          id: true,
+          message: true,
+          status: true,
+          fromUserId: true,
+          againstUserId: true,
+          createdAt: true,
+        },
+      }),
+      this.prisma.supportTicket.findMany({
+        where: { userId: id },
+        take: 5,
+        orderBy: { createdAt: "desc" },
+        select: {
+          id: true,
+          subject: true,
+          status: true,
+          priority: true,
+          breached: true,
+          createdAt: true,
+        },
+      }),
+      this.prisma.riskHold.findMany({
+        where: { subjectId: id, active: true },
+        orderBy: { createdAt: "desc" },
+        select: {
+          id: true,
+          reason: true,
+          subjectKind: true,
+          createdAt: true,
+        },
+      }),
+    ]);
+
+    const ledgerBalance = await this.financial.getUserBalance(id);
+
+    return {
+      profile: { ...user, ledgerBalance },
+      trips: {
+        total: totalTrips,
+        completed: completedTrips,
+        cancelled: cancelledTrips,
+        totalSpent: Number(spentAgg._sum.fare ?? 0),
+      },
+      ratings: {
+        average: ratingAgg._avg.stars
+          ? Math.round(ratingAgg._avg.stars * 10) / 10
+          : null,
+        count: ratingAgg._count._all,
+      },
+      complaints: { submitted: complaintsFrom, against: complaintsAgainst },
+      tickets: { open: ticketsOpen, total: ticketsTotal },
+      risk: { activeHolds },
+      recent: {
+        trips: recentTrips,
+        payments: recentPayments,
+        ratings: recentRatings,
+        complaints: recentComplaints,
+        tickets: recentTickets,
+        holds,
+      },
+    };
   }
 
   async trips(id: string, q: PaginationDto) {
@@ -108,7 +298,10 @@ export class UsersService {
         },
       });
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2002"
+      ) {
         throw new ConflictException("Phone number is already registered");
       }
       throw error;
@@ -127,7 +320,10 @@ export class UsersService {
     }
     const ext = contentType.includes("png") ? "png" : "jpg";
     const objectPath = `passenger-profiles/${userId}/avatar.${ext}`;
-    const uploadUrl = await this.storage.signedUploadUrl(objectPath, contentType);
+    const uploadUrl = await this.storage.signedUploadUrl(
+      objectPath,
+      contentType,
+    );
     const readUrl = await this.storage.signedReadUrl(objectPath, 60 * 24 * 7);
     return { uploadUrl, objectPath, readUrl, contentType };
   }

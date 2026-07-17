@@ -5,6 +5,10 @@ import { PermissionsGuard } from "../../common/guards/permissions.guard";
 import { Roles } from "../../common/decorators/roles.decorator";
 import { RequirePermissions } from "../../common/decorators/permissions.decorator";
 import { FinancialService } from "./financial.service";
+import {
+  CurrentUser,
+  AuthUser,
+} from "../../common/decorators/current-user.decorator";
 
 @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 @Roles("STAFF")
@@ -51,6 +55,39 @@ export class FinancialController {
     @Query("to") to?: string,
   ) {
     return this.financial.reconciliationSummary(from, to);
+  }
+
+  @RequirePermissions("payments.read", "reports.read")
+  @Get("reconciliation/incidents")
+  reconciliationIncidents(
+    @Query("page") page = "1",
+    @Query("limit") limit = "20",
+    @Query("status") status?: "OPEN" | "RESOLVED" | "IGNORED",
+  ) {
+    return this.financial.listReconciliationIncidents(
+      Math.max(1, Number(page) || 1),
+      Math.min(100, Math.max(1, Number(limit) || 20)),
+      status,
+    );
+  }
+
+  @RequirePermissions("payments.manage")
+  @Post("reconciliation/run")
+  runReconciliation() {
+    return this.financial.reconcileLedgerBalances();
+  }
+
+  @RequirePermissions("payments.manage")
+  @Post("reconciliation/incidents/resolve")
+  resolveReconciliationIncident(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: { id: string; status?: "RESOLVED" | "IGNORED" },
+  ) {
+    return this.financial.resolveReconciliationIncident(
+      dto.id,
+      user.userId,
+      dto.status ?? "RESOLVED",
+    );
   }
 
   @RequirePermissions("payments.read", "reports.read")

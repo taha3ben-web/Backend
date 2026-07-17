@@ -1,3 +1,4 @@
+import { DEFAULT_CURRENCY } from "../../common/money.util";
 import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
 import { PrismaService } from "../../prisma/prisma.service";
 
@@ -210,7 +211,7 @@ export class CatalogSeedService implements OnModuleInit {
         perMin: t.price.perMin,
         minFare: t.price.minFare,
         commissionPct: 15,
-        currency: "DZD",
+        currency: DEFAULT_CURRENCY,
         priority: 0,
       },
     });

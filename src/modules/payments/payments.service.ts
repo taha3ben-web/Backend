@@ -1,7 +1,9 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
 } from "@nestjs/common";
 import { PaymentMethod, PaymentStatus, Prisma } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
@@ -12,7 +14,14 @@ import {
   PaymentActionResult,
   PaymentProviderService,
 } from "./payment-provider.service";
+import { BlacklistKind, RiskService } from "../risk/risk.service";
 import { CreatePaymentCheckoutDto } from "./dto/payments.dto";
+import { TracerService } from "../../common/observability/tracer.service";
+import { AppException } from "../../common/api/app.exception";
+import { canPaymentTransition } from "./payment-transitions";
+
+const PAYMENT_VELOCITY_WINDOW_MS = 24 * 60 * 60 * 1000;
+const PAYMENT_VELOCITY_MAX_COUNT = 10;
 
 type MutablePayment = Prisma.PaymentGetPayload<{
   include: {
@@ -27,7 +36,19 @@ export class PaymentsService {
     private readonly prisma: PrismaService,
     private readonly financial: FinancialService,
     private readonly provider: PaymentProviderService,
+    private readonly risk: RiskService,
+    @Optional() private readonly tracer?: TracerService,
   ) {}
+
+  private withTrace<T>(
+    name: string,
+    attributes: Record<string, unknown>,
+    fn: () => Promise<T>,
+  ): Promise<T> {
+    return this.tracer
+      ? this.tracer.withSpan(name, async () => fn(), attributes)
+      : fn();
+  }
 
   async findAll(
     q: PaginationDto,
@@ -45,7 +66,9 @@ export class PaymentsService {
         orderBy: { createdAt: "desc" },
         include: {
           user: { select: { name: true, phone: true } },
-          trip: { select: { id: true, fare: true, status: true } },
+          trip: {
+            select: { id: true, fare: true, status: true, currency: true },
+          },
         },
       }),
       this.prisma.payment.count({ where }),
@@ -60,36 +83,42 @@ export class PaymentsService {
     search?: string,
   ) {
     const where = this.buildWhere(status, method, provider, search);
-    const [totalCount, totalAmount, capturedAmount, pendingCount, failedCount, refundedCount] =
-      await this.prisma.$transaction([
-        this.prisma.payment.count({ where }),
-        this.prisma.payment.aggregate({ where, _sum: { amount: true } }),
-        this.prisma.payment.aggregate({
-          where: {
-            ...where,
-            status: { in: ["CAPTURED", "PAID"] },
-          },
-          _sum: { amount: true },
-        }),
-        this.prisma.payment.count({
-          where: {
-            ...where,
-            status: { in: ["PENDING", "AUTHORIZED"] },
-          },
-        }),
-        this.prisma.payment.count({
-          where: {
-            ...where,
-            status: "FAILED",
-          },
-        }),
-        this.prisma.payment.count({
-          where: {
-            ...where,
-            status: "REFUNDED",
-          },
-        }),
-      ]);
+    const [
+      totalCount,
+      totalAmount,
+      capturedAmount,
+      pendingCount,
+      failedCount,
+      refundedCount,
+    ] = await this.prisma.$transaction([
+      this.prisma.payment.count({ where }),
+      this.prisma.payment.aggregate({ where, _sum: { amount: true } }),
+      this.prisma.payment.aggregate({
+        where: {
+          ...where,
+          status: { in: ["CAPTURED", "PAID"] },
+        },
+        _sum: { amount: true },
+      }),
+      this.prisma.payment.count({
+        where: {
+          ...where,
+          status: { in: ["PENDING", "AUTHORIZED"] },
+        },
+      }),
+      this.prisma.payment.count({
+        where: {
+          ...where,
+          status: "FAILED",
+        },
+      }),
+      this.prisma.payment.count({
+        where: {
+          ...where,
+          status: "REFUNDED",
+        },
+      }),
+    ]);
 
     return {
       totalCount,
@@ -113,121 +142,216 @@ export class PaymentsService {
         },
       },
     });
-    if (!payment) throw new NotFoundException("Payment not found");
-    return payment;
+    if (!payment) {
+      throw new AppException("PAYMENT_NOT_FOUND", { details: { paymentId: id } });
+    }
+    const [ledgerTransactions, riskEvents] = await Promise.all([
+      this.prisma.ledgerTransaction.findMany({
+        where: { referenceType: "PAYMENT", referenceId: id },
+        orderBy: { createdAt: "desc" },
+        include: {
+          reversalOf: { select: { id: true, command: true, status: true } },
+          reversedBy: { select: { id: true, command: true, status: true } },
+          entries: {
+            include: {
+              account: { select: { code: true, currency: true } },
+            },
+          },
+        },
+      }),
+      this.prisma.riskEvent.findMany({
+        where: {
+          subjectKind: "USER",
+          subjectId: payment.userId,
+          action: { startsWith: "payment." },
+        },
+        orderBy: { createdAt: "desc" },
+        take: 10,
+      }),
+    ]);
+    return { ...payment, ledgerTransactions, riskEvents };
+  }
+
+  async findRefunds(q: PaginationDto, provider?: string, search?: string) {
+    const where = this.buildWhere("REFUNDED", undefined, provider, search);
+    const [payments, total] = await this.prisma.$transaction([
+      this.prisma.payment.findMany({
+        where,
+        skip: (q.page - 1) * q.limit,
+        take: q.limit,
+        orderBy: { refundedAt: "desc" },
+        include: {
+          user: { select: { name: true, phone: true } },
+          trip: { select: { id: true, status: true, currency: true } },
+          events: {
+            where: { type: { contains: "refund" } },
+            orderBy: { createdAt: "desc" },
+            take: 10,
+          },
+        },
+      }),
+      this.prisma.payment.count({ where }),
+    ]);
+    const ids = payments.map((payment) => payment.id);
+    const reversals = ids.length
+      ? await this.prisma.ledgerTransaction.findMany({
+          where: {
+            referenceType: "PAYMENT",
+            referenceId: { in: ids },
+            command: "refundPayment",
+          },
+          orderBy: { createdAt: "desc" },
+          include: {
+            reversalOf: { select: { id: true, command: true, status: true } },
+          },
+        })
+      : [];
+    const reversalByPayment = new Map(
+      reversals.map((reversal) => [reversal.referenceId, reversal]),
+    );
+    return {
+      items: payments.map((payment) => ({
+        ...payment,
+        ledgerReversal: reversalByPayment.get(payment.id) ?? null,
+      })),
+      total,
+      page: q.page,
+      limit: q.limit,
+    };
   }
 
   async createCheckoutForTrip(tripId: string, dto: CreatePaymentCheckoutDto) {
-    const trip = await this.prisma.trip.findUnique({
-      where: { id: tripId },
-      select: {
-        id: true,
-        passengerId: true,
-        fare: true,
-        currency: true,
-        paymentMethod: true,
+    return this.withTrace(
+      "payments.create_checkout",
+      {
+        tripId,
+        requestedMethod: dto.method ?? null,
+        requestedProvider: dto.provider ?? null,
       },
-    });
-    if (!trip) throw new NotFoundException("Trip not found");
-    if (trip.fare == null) {
-      throw new BadRequestException("الرحلة بدون تكلفة محسوبة");
-    }
+      async () => {
+        const trip = await this.prisma.trip.findUnique({
+          where: { id: tripId },
+          select: {
+            id: true,
+            passengerId: true,
+            fare: true,
+            currency: true,
+            paymentMethod: true,
+          },
+        });
+        if (!trip)
+          throw new AppException("TRIP_NOT_FOUND", { details: { tripId } });
+        if (trip.fare == null) {
+          throw new AppException("TRIP_FARE_UNAVAILABLE", {
+            details: { tripId },
+          });
+        }
 
-    const existing = await this.prisma.payment.findUnique({
-      where: { tripId },
-      include: {
-        user: { select: { name: true, phone: true } },
-        trip: { select: { id: true, fare: true, status: true } },
-      },
-    });
-    if (
-      existing &&
-      existing.status !== "FAILED" &&
-      existing.status !== "REFUNDED" &&
-      existing.status !== "CANCELED"
-    ) {
-      return {
-        payment: existing,
-        checkout: {
-          provider: existing.provider,
-          providerPaymentId:
-            existing.providerPaymentId ?? `${existing.provider}:${existing.id}`,
-          providerStatus: existing.providerStatus ?? "reused",
-          checkoutUrl: null,
-          payload: { reused: true },
-        },
-      };
-    }
+        const existing = await this.prisma.payment.findUnique({
+          where: { tripId },
+          include: {
+            user: { select: { name: true, phone: true } },
+            trip: { select: { id: true, fare: true, status: true } },
+          },
+        });
+        if (
+          existing &&
+          existing.status !== "FAILED" &&
+          existing.status !== "REFUNDED" &&
+          existing.status !== "CANCELED"
+        ) {
+          return {
+            payment: existing,
+            checkout: {
+              provider: existing.provider,
+              providerPaymentId:
+                existing.providerPaymentId ??
+                `${existing.provider}:${existing.id}`,
+              providerStatus: existing.providerStatus ?? "reused",
+              checkoutUrl: null,
+              payload: { reused: true },
+            },
+          };
+        }
 
-    const methodValue = dto.method ?? trip.paymentMethod;
-    const amount = Number(trip.fare);
-    const bootstrapPaymentId = existing?.id ?? `${tripId}-bootstrap`;
-    const checkout = await this.provider.createCheckout({
-      paymentId: bootstrapPaymentId,
-      tripId,
-      method: methodValue,
-      amount,
-      currency: trip.currency,
-      provider: dto.provider,
-      returnUrl: dto.returnUrl,
-      cancelUrl: dto.cancelUrl,
-    });
+        const methodValue = dto.method ?? trip.paymentMethod;
+        const amount = Number(trip.fare);
 
-    const created = await this.prisma.$transaction(async (tx) => {
-      const now = new Date();
-      const payment = await tx.payment.upsert({
-        where: { tripId },
-        create: {
+        await this.assessPaymentRisk(trip.passengerId, amount, methodValue);
+
+        const bootstrapPaymentId = existing?.id ?? `${tripId}-bootstrap`;
+        const checkout = await this.provider.createCheckout({
+          paymentId: bootstrapPaymentId,
           tripId,
-          userId: trip.passengerId,
-          amount,
           method: methodValue,
-          provider: checkout.provider,
-          providerPaymentId: checkout.providerPaymentId,
-          providerStatus: checkout.providerStatus,
-          status: methodValue === "WALLET" ? "PAID" : "PENDING",
-          reference: dto.reference,
-          metadata: this.toJsonValue(checkout.payload),
-          authorizedAt: methodValue === "WALLET" ? now : null,
-          capturedAt: methodValue === "WALLET" ? now : null,
-        },
-        update: {
           amount,
-          method: methodValue,
-          provider: checkout.provider,
-          providerPaymentId: checkout.providerPaymentId,
-          providerStatus: checkout.providerStatus,
-          reference: dto.reference ?? undefined,
-          metadata: this.toJsonValue(checkout.payload),
-          status: methodValue === "WALLET" ? "PAID" : "PENDING",
-          statusReason: null,
-          failedAt: null,
-          canceledAt: null,
-          refundedAt: null,
-          authorizedAt: methodValue === "WALLET" ? now : null,
-          capturedAt: methodValue === "WALLET" ? now : null,
-        },
-        include: {
-          user: { select: { name: true, phone: true } },
-          trip: { select: { id: true, fare: true, status: true } },
-        },
-      });
+          currency: trip.currency,
+          provider: dto.provider,
+          returnUrl: dto.returnUrl,
+          cancelUrl: dto.cancelUrl,
+        });
 
-      await this.appendEvent(tx, payment.id, "checkout_initialized", {
-        status: payment.status,
-        provider: checkout.provider,
-        reference: dto.reference,
-        payload: checkout.payload,
-        idempotencyKey: `payment:checkout:${payment.id}`,
-      });
+        const created = await this.prisma.$transaction(async (tx) => {
+          const now = new Date();
+          const payment = await tx.payment.upsert({
+            where: { tripId },
+            create: {
+              tripId,
+              userId: trip.passengerId,
+              amount,
+              method: methodValue,
+              provider: checkout.provider,
+              providerPaymentId: checkout.providerPaymentId,
+              providerStatus: checkout.providerStatus,
+              status: methodValue === "WALLET" ? "PAID" : "PENDING",
+              reference: dto.reference,
+              metadata: this.toJsonValue(checkout.payload),
+              authorizedAt: methodValue === "WALLET" ? now : null,
+              capturedAt: methodValue === "WALLET" ? now : null,
+            },
+            update: {
+              amount,
+              method: methodValue,
+              provider: checkout.provider,
+              providerPaymentId: checkout.providerPaymentId,
+              providerStatus: checkout.providerStatus,
+              reference: dto.reference ?? undefined,
+              metadata: this.toJsonValue(checkout.payload),
+              status: methodValue === "WALLET" ? "PAID" : "PENDING",
+              statusReason: null,
+              failedAt: null,
+              canceledAt: null,
+              refundedAt: null,
+              authorizedAt: methodValue === "WALLET" ? now : null,
+              capturedAt: methodValue === "WALLET" ? now : null,
+            },
+            include: {
+              user: { select: { name: true, phone: true } },
+              trip: { select: { id: true, fare: true, status: true } },
+            },
+          });
 
-      return payment;
-    });
+          await this.appendEvent(tx, payment.id, "checkout_initialized", {
+            status: payment.status,
+            provider: checkout.provider,
+            reference: dto.reference,
+            payload: checkout.payload,
+            idempotencyKey: `payment:checkout:${payment.id}`,
+          });
 
-    return { payment: created, checkout };
+          return payment;
+        });
+
+        return { payment: created, checkout };
+      },
+    );
   }
 
-  async recordForTrip(tripId: string, method: PaymentMethod, reference?: string) {
+  async recordForTrip(
+    tripId: string,
+    method: PaymentMethod,
+    reference?: string,
+  ) {
     const checkout = await this.createCheckoutForTrip(tripId, {
       method,
       reference,
@@ -235,8 +359,15 @@ export class PaymentsService {
     return checkout.payment;
   }
 
-  async capture(id: string, reference?: string, reason?: string) {
+  async capture(
+    id: string,
+    reference?: string,
+    reason?: string,
+    actorId?: string,
+  ) {
     const payment = await this.findMutable(id);
+    const target = payment.method === "CARD" ? "CAPTURED" : "PAID";
+    this.assertTransition(payment.status, target);
     const operation = await this.provider.capture({
       paymentId: payment.id,
       provider: payment.provider,
@@ -245,15 +376,22 @@ export class PaymentsService {
     });
     return this.updateStatus(
       id,
-      payment.method === "CARD" ? "CAPTURED" : "PAID",
+      target,
       reference ?? operation.reference,
       reason ?? operation.statusReason,
       operation,
+      actorId,
     );
   }
 
-  async refund(id: string, reference?: string, reason?: string) {
+  async refund(
+    id: string,
+    reference?: string,
+    reason?: string,
+    actorId?: string,
+  ) {
     const payment = await this.findMutable(id);
+    this.assertTransition(payment.status, "REFUNDED");
     const operation = await this.provider.refund({
       paymentId: payment.id,
       provider: payment.provider,
@@ -266,11 +404,18 @@ export class PaymentsService {
       reference ?? operation.reference,
       reason ?? operation.statusReason,
       operation,
+      actorId,
     );
   }
 
-  async cancel(id: string, reference?: string, reason?: string) {
+  async cancel(
+    id: string,
+    reference?: string,
+    reason?: string,
+    actorId?: string,
+  ) {
     const payment = await this.findMutable(id);
+    this.assertTransition(payment.status, "CANCELED");
     const operation = await this.provider.cancel({
       paymentId: payment.id,
       provider: payment.provider,
@@ -281,6 +426,7 @@ export class PaymentsService {
       reference ?? operation.reference,
       reason ?? operation.statusReason,
       operation,
+      actorId,
     );
   }
 
@@ -289,85 +435,117 @@ export class PaymentsService {
     payload: Record<string, unknown>,
     eventId?: string,
   ) {
-    const normalized = this.provider.normalizeWebhook(providerName, payload, eventId);
+    return this.withTrace(
+      "payments.process_webhook",
+      { provider: providerName, eventId: eventId ?? null },
+      async () => {
+        const normalized = this.provider.normalizeWebhook(
+          providerName,
+          payload,
+          eventId,
+        );
 
-    const duplicate = await this.prisma.paymentEvent.findUnique({
-      where: { idempotencyKey: normalized.idempotencyKey },
-    });
-    if (duplicate) {
-      return { accepted: true, duplicate: true, paymentId: duplicate.paymentId };
-    }
-
-    const payment = await this.findPaymentForWebhook(this.prisma, normalized);
-    if (!payment) {
-      return { accepted: false, reason: "payment_not_found" };
-    }
-
-    if (normalized.status && payment.status !== normalized.status) {
-      this.assertTransition(payment.status, normalized.status);
-
-      if (
-        (normalized.status === "CAPTURED" || normalized.status === "PAID") &&
-        payment.method === "CARD"
-      ) {
-        await this.financial.captureCardPayment(payment.id);
-      }
-
-      if (
-        normalized.status === "REFUNDED" &&
-        payment.method === "CARD" &&
-        (payment.status === "CAPTURED" || payment.status === "PAID")
-      ) {
-        await this.financial.refundPayment(payment.id);
-      }
-    }
-
-    return this.prisma.$transaction(async (tx) => {
-      const duplicateInTx = await tx.paymentEvent.findUnique({
-        where: { idempotencyKey: normalized.idempotencyKey },
-      });
-      if (duplicateInTx) {
-        return { accepted: true, duplicate: true, paymentId: duplicateInTx.paymentId };
-      }
-
-      await this.appendEvent(tx, payment.id, `webhook:${normalized.eventType}`, {
-        status: normalized.status,
-        provider: normalized.provider,
-        reference: normalized.reference,
-        payload: normalized.payload,
-        idempotencyKey: normalized.idempotencyKey,
-      });
-
-      if (!normalized.status || payment.status === normalized.status) {
-        await tx.payment.update({
-          where: { id: payment.id },
-          data: {
-            providerStatus: normalized.providerStatus,
-            statusReason: normalized.reason ?? payment.statusReason,
-          },
+        const duplicate = await this.prisma.paymentEvent.findUnique({
+          where: { idempotencyKey: normalized.idempotencyKey },
         });
-        return { accepted: true, paymentId: payment.id, statusChanged: false };
-      }
+        if (duplicate) {
+          return {
+            accepted: true,
+            duplicate: true,
+            paymentId: duplicate.paymentId,
+          };
+        }
 
-      await tx.payment.update({
-        where: { id: payment.id },
-        data: this.buildStatusPatch(
-          payment,
-          normalized.status,
-          normalized.reference,
-          normalized.reason,
-          {
-            provider: normalized.provider,
-            providerStatus: normalized.providerStatus ?? normalized.eventType,
-            reference: normalized.reference,
-            statusReason: normalized.reason,
-            payload: normalized.payload,
-          },
-        ),
-      });
+        const payment = await this.findPaymentForWebhook(
+          this.prisma,
+          normalized,
+        );
+        if (!payment) {
+          return { accepted: false, reason: "payment_not_found" };
+        }
 
-      return { accepted: true, paymentId: payment.id, statusChanged: true };
-    });
+        if (normalized.status && payment.status !== normalized.status) {
+          this.assertTransition(payment.status, normalized.status);
+
+          if (
+            (normalized.status === "CAPTURED" ||
+              normalized.status === "PAID") &&
+            payment.method === "CARD"
+          ) {
+            await this.financial.captureCardPayment(payment.id);
+          }
+
+          if (
+            normalized.status === "REFUNDED" &&
+            payment.method === "CARD" &&
+            (payment.status === "CAPTURED" || payment.status === "PAID")
+          ) {
+            await this.financial.refundPayment(payment.id);
+          }
+        }
+
+        return this.prisma.$transaction(async (tx) => {
+          const duplicateInTx = await tx.paymentEvent.findUnique({
+            where: { idempotencyKey: normalized.idempotencyKey },
+          });
+          if (duplicateInTx) {
+            return {
+              accepted: true,
+              duplicate: true,
+              paymentId: duplicateInTx.paymentId,
+            };
+          }
+
+          await this.appendEvent(
+            tx,
+            payment.id,
+            `webhook:${normalized.eventType}`,
+            {
+              status: normalized.status,
+              provider: normalized.provider,
+              reference: normalized.reference,
+              payload: normalized.payload,
+              idempotencyKey: normalized.idempotencyKey,
+            },
+          );
+
+          if (!normalized.status || payment.status === normalized.status) {
+            await tx.payment.update({
+              where: { id: payment.id },
+              data: {
+                providerStatus: normalized.providerStatus,
+                statusReason: normalized.reason ?? payment.statusReason,
+              },
+            });
+            return {
+              accepted: true,
+              paymentId: payment.id,
+              statusChanged: false,
+            };
+          }
+
+          await tx.payment.update({
+            where: { id: payment.id },
+            data: this.buildStatusPatch(
+              payment,
+              normalized.status,
+              normalized.reference,
+              normalized.reason,
+              {
+                provider: normalized.provider,
+                providerStatus:
+                  normalized.providerStatus ?? normalized.eventType,
+                reference: normalized.reference,
+                statusReason: normalized.reason,
+                payload: normalized.payload,
+              },
+            ),
+          });
+
+          return { accepted: true, paymentId: payment.id, statusChanged: true };
+        });
+      },
+    );
   }
 
   async updateStatus(
@@ -376,6 +554,7 @@ export class PaymentsService {
     reference?: string,
     reason?: string,
     operation?: PaymentActionResult,
+    actorId?: string,
   ) {
     const payment = await this.findMutable(id);
     this.assertTransition(payment.status, status);
@@ -398,7 +577,13 @@ export class PaymentsService {
     return this.prisma.$transaction(async (tx) => {
       const updated = await tx.payment.update({
         where: { id },
-        data: this.buildStatusPatch(payment, status, reference, reason, operation),
+        data: this.buildStatusPatch(
+          payment,
+          status,
+          reference,
+          reason,
+          operation,
+        ),
         include: {
           user: { select: { name: true, phone: true } },
           trip: true,
@@ -416,8 +601,85 @@ export class PaymentsService {
         payload: operation?.payload,
       });
 
+      await tx.auditLog.create({
+        data: {
+          actorId: actorId ?? null,
+          action: "PAYMENT_STATUS_CHANGED",
+          entity: "Payment",
+          entityId: updated.id,
+          meta: {
+            from: payment.status,
+            to: status,
+            provider: updated.provider,
+            reference: reference ?? null,
+            reason: reason ?? null,
+          },
+        },
+      });
+
       return updated;
     });
+  }
+
+  private async assessPaymentRisk(
+    userId: string,
+    amount: number,
+    method: PaymentMethod,
+  ) {
+    const now = Date.now();
+    const windowStart = new Date(now - PAYMENT_VELOCITY_WINDOW_MS);
+    const [recent, aggregate, chargebackCount] = await this.prisma.$transaction(
+      [
+        this.prisma.payment.findMany({
+          where: {
+            userId,
+            createdAt: { gte: windowStart },
+          },
+          select: { createdAt: true, amount: true },
+        }),
+        this.prisma.payment.aggregate({
+          where: { userId, status: { in: ["CAPTURED", "PAID"] } },
+          _avg: { amount: true },
+        }),
+        this.prisma.payment.count({
+          where: { userId, status: "REFUNDED" },
+        }),
+      ],
+    );
+
+    const history = recent.map((r) => ({
+      at: r.createdAt.getTime(),
+      amount: Number(r.amount),
+    }));
+    const avgAmount = Number(aggregate._avg.amount ?? 0) || undefined;
+
+    const blacklistChecks: Array<{ kind: BlacklistKind; value: string }> = [
+      { kind: "USER", value: userId },
+    ];
+
+    const assessment = await this.risk.assess({
+      subjectKind: "USER",
+      subjectId: userId,
+      action: `payment.checkout.${method.toLowerCase()}`,
+      amount,
+      avgAmount,
+      chargebackCount,
+      blacklistChecks,
+      velocity: {
+        history,
+        limit: {
+          windowMs: PAYMENT_VELOCITY_WINDOW_MS,
+          maxCount: PAYMENT_VELOCITY_MAX_COUNT,
+        },
+        now,
+      },
+    });
+
+    if (RiskService.shouldBlock(assessment.decision)) {
+      throw new AppException("RISK_BLOCKED", {
+        details: { action: `payment.checkout.${method.toLowerCase()}` },
+      });
+    }
   }
 
   private buildStatusPatch(
@@ -458,20 +720,10 @@ export class PaymentsService {
   }
 
   private assertTransition(current: PaymentStatus, next: PaymentStatus) {
-    if (current === next) return;
-    const transitions: Record<PaymentStatus, PaymentStatus[]> = {
-      PENDING: ["AUTHORIZED", "CAPTURED", "PAID", "FAILED", "CANCELED"],
-      AUTHORIZED: ["CAPTURED", "PAID", "FAILED", "CANCELED"],
-      CAPTURED: ["REFUNDED"],
-      PAID: ["REFUNDED"],
-      FAILED: ["PENDING"],
-      REFUNDED: [],
-      CANCELED: [],
-    };
-    if (!transitions[current].includes(next)) {
-      throw new BadRequestException(
-        `لا يمكن نقل الدفعة من ${current} إلى ${next}`,
-      );
+    if (current === next || !canPaymentTransition(current, next)) {
+      throw new AppException("INVALID_PAYMENT_TRANSITION", {
+        details: { current, next },
+      });
     }
   }
 
@@ -483,7 +735,9 @@ export class PaymentsService {
         user: { select: { name: true, phone: true } },
       },
     });
-    if (!payment) throw new NotFoundException("Payment not found");
+    if (!payment) {
+      throw new AppException("PAYMENT_NOT_FOUND", { details: { paymentId: id } });
+    }
     return payment;
   }
 
@@ -564,7 +818,9 @@ export class PaymentsService {
     return {
       ...(status ? { status } : {}),
       ...(method ? { method } : {}),
-      ...(provider ? { provider: { equals: provider, mode: "insensitive" } } : {}),
+      ...(provider
+        ? { provider: { equals: provider, mode: "insensitive" } }
+        : {}),
       ...(search
         ? {
             OR: [

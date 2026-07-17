@@ -1,4 +1,6 @@
 import {
+  ArrayUnique,
+  IsArray,
   IsEnum,
   IsISO8601,
   IsObject,
@@ -17,10 +19,42 @@ export class SendNotificationDto {
   @IsOptional()
   channel?: NotificationChannel;
 
-  // مطلوب فقط عندما يكون الهدف USER
   @ValidateIf((o) => o.target === "USER")
   @IsString()
   userId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  campaignKey?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  appId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  clientOs?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsString({ each: true })
+  countryCodes?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsString({ each: true })
+  localeCodes?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsString({ each: true })
+  driverCityIds?: string[];
 
   @IsString()
   @MaxLength(120)
@@ -30,11 +64,20 @@ export class SendNotificationDto {
   @MaxLength(1000)
   declare body: string;
 
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  imageUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  deepLink?: string;
+
   @IsObject()
   @IsOptional()
   data?: Record<string, unknown>;
 
-  // تاريخ الجدولة (ISO). إن أُهمل يُرسل فورًا
   @IsISO8601()
   @IsOptional()
   scheduledAt?: string;

@@ -17,6 +17,10 @@ import { PermissionsGuard } from "../../common/guards/permissions.guard";
 import { Roles } from "../../common/decorators/roles.decorator";
 import { RequirePermissions } from "../../common/decorators/permissions.decorator";
 import {
+  AuthUser,
+  CurrentUser,
+} from "../../common/decorators/current-user.decorator";
+import {
   CreatePaymentCheckoutDto,
   PaymentActionDto,
   UpdatePaymentStatusDto,
@@ -52,6 +56,16 @@ export class PaymentsController {
   }
 
   @RequirePermissions("payments.read", "payments.manage")
+  @Get("refunds")
+  refunds(
+    @Query() q: PaginationDto,
+    @Query("provider") provider?: string,
+    @Query("search") search?: string,
+  ) {
+    return this.payments.findRefunds(q, provider, search);
+  }
+
+  @RequirePermissions("payments.read", "payments.manage")
   @Get(":id")
   findOne(@Param("id") id: string) {
     return this.payments.findOne(id);
@@ -68,25 +82,48 @@ export class PaymentsController {
 
   @RequirePermissions("payments.manage")
   @Patch(":id/status")
-  updateStatus(@Param("id") id: string, @Body() dto: UpdatePaymentStatusDto) {
-    return this.payments.updateStatus(id, dto.status, dto.reference, dto.reason);
+  updateStatus(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body() dto: UpdatePaymentStatusDto,
+  ) {
+    return this.payments.updateStatus(
+      id,
+      dto.status,
+      dto.reference,
+      dto.reason,
+      undefined,
+      user.userId,
+    );
   }
 
   @RequirePermissions("payments.manage")
   @Post(":id/capture")
-  capture(@Param("id") id: string, @Body() dto: PaymentActionDto) {
-    return this.payments.capture(id, dto.reference, dto.reason);
+  capture(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body() dto: PaymentActionDto,
+  ) {
+    return this.payments.capture(id, dto.reference, dto.reason, user.userId);
   }
 
   @RequirePermissions("payments.manage")
   @Post(":id/refund")
-  refund(@Param("id") id: string, @Body() dto: PaymentActionDto) {
-    return this.payments.refund(id, dto.reference, dto.reason);
+  refund(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body() dto: PaymentActionDto,
+  ) {
+    return this.payments.refund(id, dto.reference, dto.reason, user.userId);
   }
 
   @RequirePermissions("payments.manage")
   @Post(":id/cancel")
-  cancel(@Param("id") id: string, @Body() dto: PaymentActionDto) {
-    return this.payments.cancel(id, dto.reference, dto.reason);
+  cancel(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body() dto: PaymentActionDto,
+  ) {
+    return this.payments.cancel(id, dto.reference, dto.reason, user.userId);
   }
 }

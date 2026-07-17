@@ -26,8 +26,26 @@ export class CatalogController {
   vehicles(
     @Query("usageType") usageType?: string,
     @Query("audience") audience?: Audience,
+    @Query("appId") appId?: string,
+    @Query("clientOs") clientOs?: string,
+    @Query("countryCode") countryCode?: string,
+    @Query("cityId") cityId?: string,
+    @Query("appVersion") appVersion?: string,
+    @Query("segments") segments?: string,
   ) {
-    return this.catalog.publicCatalog(usageType, audience ?? "passenger");
+    return this.catalog.publicCatalog(usageType, audience ?? "passenger", {
+      appId,
+      clientOs,
+      countryCode,
+      cityId,
+      appVersion,
+      segments: segments
+        ? segments
+            .split(",")
+            .map((item) => item.trim())
+            .filter(Boolean)
+        : undefined,
+    });
   }
 
   /** رقم نسخة الكتالوج (لـ smart cache في التطبيقات). */
@@ -49,7 +67,7 @@ export class CatalogController {
   /**
    * سجل التعديلات (Audit Log) للوحة (STAFF فقط).
    * مثال: /api/catalog/audit?entity=VehicleType&entityId=<id>&page=1&limit=20
-  */
+   */
   @Get("audit")
   @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
   @Roles("STAFF")

@@ -1,5 +1,8 @@
 import { Module } from "@nestjs/common";
+import { RbacModule } from "../rbac/rbac.module";
+import { NotificationsModule } from "../notifications/notifications.module";
 import { DriversService } from "./drivers.service";
+import { DriverSanctionsService } from "./driver-sanctions.service";
 import { DriversController } from "./drivers.controller";
 import { VehiclesService } from "./vehicles.service";
 import { VehiclesController } from "./vehicles.controller";
@@ -12,8 +15,10 @@ import { DriverQrController } from "./driver-qr.controller";
 import { DriverQrPublicController } from "./driver-qr-public.controller";
 
 @Module({
+  imports: [RbacModule, NotificationsModule],
   providers: [
     DriversService,
+    DriverSanctionsService,
     VehiclesService,
     DocumentsService,
     DriverSelfService,
@@ -29,6 +34,7 @@ import { DriverQrPublicController } from "./driver-qr-public.controller";
   ],
   exports: [
     DriversService,
+    DriverSanctionsService,
     VehiclesService,
     DocumentsService,
     DriverSelfService,

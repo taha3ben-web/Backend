@@ -1,4 +1,10 @@
-import { round2, roundMoney } from "./money.util";
+import {
+  MONEY_SCALE,
+  fromMinorUnits,
+  round2,
+  roundMoney,
+  toMinorUnits,
+} from "./money.util";
 
 describe("money.util", () => {
   describe("round2", () => {
@@ -35,6 +41,37 @@ describe("money.util", () => {
       expect(roundMoney(1.23456, 3)).toBe(1.235);
       expect(roundMoney(1.005, 2)).toBe(1.01);
       expect(roundMoney(7, 0)).toBe(7);
+    });
+  });
+
+  describe("minor units (تمثيل موحّد للمال)", () => {
+    it("MONEY_SCALE يساوي 100", () => {
+      expect(MONEY_SCALE).toBe(100);
+    });
+
+    it("toMinorUnits يحوّل التمثيل الرئيسي إلى وحدات صغرى صحيحة", () => {
+      expect(toMinorUnits(12.34)).toBe(1234);
+      expect(toMinorUnits(0)).toBe(0);
+      expect(toMinorUnits(99.99)).toBe(9999);
+      // تصحيح خطأ الفاصلة العائمة عند حدّ نصف السنت
+      expect(toMinorUnits(292.675)).toBe(29268);
+    });
+
+    it("toMinorUnits آمن للمدخلات غير المنتهية", () => {
+      expect(toMinorUnits(NaN)).toBe(0);
+      expect(toMinorUnits(Infinity)).toBe(0);
+    });
+
+    it("fromMinorUnits يعكس toMinorUnits", () => {
+      expect(fromMinorUnits(1234)).toBe(12.34);
+      expect(fromMinorUnits(9999)).toBe(99.99);
+      expect(fromMinorUnits(0)).toBe(0);
+      expect(fromMinorUnits(toMinorUnits(292.68))).toBe(292.68);
+    });
+
+    it("يدعم مقاييس أخرى غير 100", () => {
+      expect(toMinorUnits(1.5, 1000)).toBe(1500);
+      expect(fromMinorUnits(1500, 1000)).toBe(1.5);
     });
   });
 });

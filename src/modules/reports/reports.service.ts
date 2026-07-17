@@ -1,3 +1,4 @@
+import { DEFAULT_CURRENCY } from "../../common/money.util";
 import { Injectable } from "@nestjs/common";
 import { PrismaService } from "../../prisma/prisma.service";
 import { DateRange, StatisticsService } from "./statistics.service";
@@ -96,7 +97,7 @@ export class ReportsService {
       title: "تقرير الإيرادات",
       columns: [
         { header: "البند", key: "metric", width: 240 },
-        { header: "القيمة (DZD)", key: "value", width: 140 },
+        { header: `القيمة (${DEFAULT_CURRENCY})`, key: "value", width: 140 },
       ],
       rows,
     };

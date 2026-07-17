@@ -23,6 +23,8 @@ async function main(): Promise<void> {
     { key: "transfer.read", description: "عرض تحويلات السائقين" },
     { key: "transfer.manage", description: "إدارة تحويلات السائقين" },
     { key: "coupons.manage", description: "إدارة الكوبونات" },
+    { key: "kyc.manage", description: "إدارة ومراجعة تحقق هوية المستخدمين" },
+    { key: "subscriptions.manage", description: "إدارة الاشتراكات" },
     { key: "pricing.manage", description: "إدارة التسعير" },
     { key: "notifications.send", description: "إرسال الإشعارات" },
     { key: "support.manage", description: "إدارة الدعم والشكاوى" },
@@ -38,6 +40,54 @@ async function main(): Promise<void> {
       where: { key: p.key },
       update: { description: p.description },
       create: p,
+    });
+  }
+
+  // ---------- khutat al-ishtirak al-iftiradiyya (tudar min lawhat al-tahakkum) ----------
+  const planDefs = [
+    {
+      code: "NOVA_PLUS_MONTHLY",
+      name: "NOVA Plus شهري",
+      description: "خصم 10% على كل رحلة بحدّ أقصى 200.",
+      price: 990,
+      interval: "MONTHLY" as const,
+      benefitDiscountPct: 10,
+      benefitMaxDiscount: 200,
+      sortOrder: 1,
+    },
+    {
+      code: "NOVA_PLUS_YEARLY",
+      name: "NOVA Plus سنوي",
+      description: "خصم 12% على كل رحلة بحدّ أقصى 250.",
+      price: 9900,
+      interval: "YEARLY" as const,
+      benefitDiscountPct: 12,
+      benefitMaxDiscount: 250,
+      sortOrder: 2,
+    },
+  ];
+  for (const pl of planDefs) {
+    await prisma.subscriptionPlan.upsert({
+      where: { code: pl.code },
+      update: {
+        name: pl.name,
+        description: pl.description,
+        price: pl.price,
+        interval: pl.interval,
+        benefitDiscountPct: pl.benefitDiscountPct,
+        benefitMaxDiscount: pl.benefitMaxDiscount,
+        sortOrder: pl.sortOrder,
+      },
+      create: {
+        code: pl.code,
+        name: pl.name,
+        description: pl.description,
+        price: pl.price,
+        interval: pl.interval,
+        benefitDiscountPct: pl.benefitDiscountPct,
+        benefitMaxDiscount: pl.benefitMaxDiscount,
+        sortOrder: pl.sortOrder,
+      },
     });
   }
 
@@ -59,6 +109,8 @@ async function main(): Promise<void> {
         "trips.manage",
         "pricing.manage",
         "coupons.manage",
+        "subscriptions.manage",
+        "kyc.manage",
         "notifications.send",
         "reports.read",
         "safety.manage",
@@ -224,6 +276,28 @@ async function main(): Promise<void> {
       value: { privacyPolicyUrl: "", termsUrl: "" },
     },
     {
+      // نسبة غرامة إلغاء السائق (%) من قيمة الرحلة الملغاة، تُحسم تلقائيًا من محفظة السائق.
+      // 0 = الميزة معطّلة. قابلة للضبط من لوحة التحكم (الإعدادات).
+      key: "trips.driverCancellationPenaltyPct",
+      group: "trips",
+      value: { pct: 0 },
+    },
+    {
+      // نظام عقوبات إلغاء السائق (كما في الشركات الكبرى): تصعيد تحذير/تعليق/حظر.
+      // enabled=false افتراضيًا (آمن) — يُفعّل ويُضبط من لوحة التحكم (الإعدادات).
+      // windowDays: النافذة المتدحرجة بالأيام؛ العتبات = عدد الإلغاءات؛ suspendHours = مدة التعليق.
+      key: "trips.driverCancellationSanctions",
+      group: "trips",
+      value: {
+        enabled: false,
+        windowDays: 7,
+        warnThreshold: 3,
+        suspendThreshold: 5,
+        suspendHours: 24,
+        banThreshold: 10,
+      },
+    },
+    {
       key: "integrations.firebase",
       group: "integrations",
       isSensitive: true,
@@ -255,6 +329,15 @@ async function main(): Promise<void> {
       group: "integrations",
       isSensitive: true,
       value: { sender: "NOVA", apiUrl: "" },
+    },
+    {
+      // سياسة تمويل خصومات الكوبونات (قابلة للإدارة بالكامل من لوحة التحكم).
+      // source: PLATFORM=الشركة تتحمّل كامل الخصم من عمولتها (قد تصبح سالبة)،
+      // DRIVER=السائق يتحمّله، SHARED=مشترك بحصة platformShare (0..1).
+      // لكل كوبون تجاوز هذا الافتراضي عبر fundingSource/platformShare.
+      key: "coupons.funding",
+      group: "coupons",
+      value: { source: "PLATFORM", platformShare: 0.5 },
     },
   ];
   for (const s of settingDefs) {

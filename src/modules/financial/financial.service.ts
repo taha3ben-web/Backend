@@ -3,21 +3,56 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from "@nestjs/common";
 import { Cron, CronExpression } from "@nestjs/schedule";
 import { FinancialAccountType, Prisma } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import type { FinancialCommand, PostingLine } from "./financial.types";
-import { computeSettlement } from "../trips/settlement.util";
+import {
+  deriveTripEarnings,
+  splitCouponFunding,
+} from "../trips/settlement.util";
+import { DEFAULT_CURRENCY, round2, toMinorUnits } from "../../common/money.util";
+import { accountBalanceDifference, isReconciled } from "./reconciliation.util";
+import {
+  canSettlementTransition,
+  type SettlementStatus,
+} from "../trips/settlement-transitions";
+import { OutboxService } from "../../common/infra/outbox.service";
+import { DistributedLockService } from "../../common/infra/distributed-lock.service";
+import { AlertService } from "../../common/observability/alert.service";
+import { PricingEngineService } from "../pricing-engine/pricing-engine.service";
+import { CountryConfigService } from "../country-config/country-config.service";
+import { TracerService } from "../../common/observability/tracer.service";
+import { AppException } from "../../common/api/app.exception";
 
 const PLATFORM_PARTY_ID = "00000000-0000-0000-0000-000000000001";
-const MONEY_SCALE = 100;
-const toMinor = (value: number): number => Math.round(value * MONEY_SCALE);
+const DRIVER_CANCELLATION_PENALTY_KEY = "trips.driverCancellationPenaltyPct";
+const DEFAULT_DRIVER_CANCELLATION_PENALTY_PCT = 0;
 
 @Injectable()
 export class FinancialService {
   private readonly logger = new Logger(FinancialService.name);
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly outbox: OutboxService,
+    private readonly lock: DistributedLockService,
+    private readonly pricingEngine: PricingEngineService,
+    @Optional() private readonly countryConfig?: CountryConfigService,
+    @Optional() private readonly alerts?: AlertService,
+    @Optional() private readonly tracer?: TracerService,
+  ) {}
+
+  private withTrace<T>(
+    name: string,
+    attributes: Record<string, unknown>,
+    fn: () => Promise<T>,
+  ): Promise<T> {
+    return this.tracer
+      ? this.tracer.withSpan(name, async () => fn(), attributes)
+      : fn();
+  }
 
   private assertCurrency(currency: string): void {
     if (!/^[A-Z]{3}$/.test(currency))
@@ -30,10 +65,10 @@ export class FinancialService {
       );
     const debit = lines
       .filter((line) => line.direction === "DEBIT")
-      .reduce((sum, line) => sum + toMinor(line.amount), 0);
+      .reduce((sum, line) => sum + toMinorUnits(line.amount), 0);
     const credit = lines
       .filter((line) => line.direction === "CREDIT")
-      .reduce((sum, line) => sum + toMinor(line.amount), 0);
+      .reduce((sum, line) => sum + toMinorUnits(line.amount), 0);
     if (debit <= 0 || debit !== credit)
       throw new BadRequestException("Unbalanced ledger transaction");
   }
@@ -54,6 +89,34 @@ export class FinancialService {
       update: { displayName: user.name },
     });
     const code = `USER:${userId}:${currency}:AVAILABLE`;
+    return tx.financialAccount.upsert({
+      where: { code },
+      create: { partyId: party.id, code, type: "LIABILITY", currency },
+      update: { isActive: true },
+    });
+  }
+
+  /**
+   * حساب المحفظة المقفلة للمستخدم (USER:...:LOCKED — LIABILITY): رصيد غير قابل
+   * للسحب (تعويض خصم الكوبون الممنوح للسائق وتموّله الشركة). منفصل تمامًا
+   * عن AVAILABLE فلا يدخل في فحص السحب/التحويل.
+   */
+  private async lockedUserAccount(
+    tx: Prisma.TransactionClient,
+    userId: string,
+    currency: string,
+  ) {
+    const user = await tx.user.findUnique({
+      where: { id: userId },
+      select: { id: true, name: true },
+    });
+    if (!user) throw new NotFoundException("Financial party user not found");
+    const party = await tx.financialParty.upsert({
+      where: { userId },
+      create: { type: "USER", userId, displayName: user.name },
+      update: { displayName: user.name },
+    });
+    const code = `USER:${userId}:${currency}:LOCKED`;
     return tx.financialAccount.upsert({
       where: { code },
       create: { partyId: party.id, code, type: "LIABILITY", currency },
@@ -100,26 +163,32 @@ export class FinancialService {
         referenceType: input.referenceType,
         referenceId: input.referenceId,
         reversalOfId: input.reversalOfId,
+        createdBy: input.createdBy ?? "SYSTEM",
+        reason: input.reason,
         status: "PENDING",
       },
     });
     for (const line of input.lines) {
-      if (!Number.isFinite(line.amount) || toMinor(line.amount) <= 0)
+      if (!Number.isFinite(line.amount) || toMinorUnits(line.amount) <= 0)
         throw new BadRequestException("Ledger amount must be positive");
+      // نحدّث الرصيد أولاً لالتقاط balanceAfter (لقطة الرصيد الجاري بعد هذا القيد)
+      const account = await tx.financialAccount.update({
+        where: { id: line.accountId },
+        data: {
+          balanceCache: {
+            increment: line.direction === "CREDIT" ? line.amount : -line.amount,
+          },
+        },
+      });
       await tx.ledgerEntry.create({
         data: {
           transactionId: row.id,
           accountId: line.accountId,
           direction: line.direction,
           amount: line.amount,
-        },
-      });
-      await tx.financialAccount.update({
-        where: { id: line.accountId },
-        data: {
-          balanceCache: {
-            increment: line.direction === "CREDIT" ? line.amount : -line.amount,
-          },
+          currency: account.currency,
+          role: line.role ?? account.type,
+          balanceAfter: account.balanceCache,
         },
       });
     }
@@ -130,119 +199,353 @@ export class FinancialService {
     });
   }
 
+  /**
+   * يمنح رصيدًا ترويجيًا لمحفظة مستخدم عبر إدخال مزدوج متوازن ضمن معاملة قائمة:
+   *   DEBIT  حساب مصروف الترويج (PLATFORM:PROMOTIONS �� EXPENSE)
+   *   CREDIT محفظة المستخدم (USER:...:AVAILABLE — LIABILITY)
+   * يعيد استخدام post/userAccount/platformAccount (بلا تكرار) وهو idempotent عبر idempotencyKey.
+   * إضافي بالكامل: لا يغيّر أي سلوك مالي قائم. يُستدعى من داخل معاملة المُستدعي ليبقى ذريًا مع عمله.
+   */
+  async grantPromotionalCredit(
+    tx: Prisma.TransactionClient,
+    input: {
+      userId: string;
+      amount: number;
+      currency: string;
+      referenceType?: string;
+      referenceId?: string;
+      reason?: string;
+      idempotencyKey: string;
+    },
+  ): Promise<void> {
+    this.assertCurrency(input.currency);
+    if (!Number.isFinite(input.amount) || toMinorUnits(input.amount) <= 0) {
+      throw new BadRequestException("Promotional credit must be positive");
+    }
+    const userAcc = await this.userAccount(tx, input.userId, input.currency);
+    const promoExpense = await this.platformAccount(
+      tx,
+      "PROMOTIONS",
+      "EXPENSE",
+      input.currency,
+    );
+    await this.post(tx, {
+      command: "grantPromotionalCredit",
+      idempotencyKey: input.idempotencyKey,
+      currency: input.currency,
+      referenceType: input.referenceType,
+      referenceId: input.referenceId,
+      reason: input.reason,
+      lines: [
+        { accountId: promoExpense.id, direction: "DEBIT", amount: input.amount },
+        { accountId: userAcc.id, direction: "CREDIT", amount: input.amount },
+      ],
+    });
+  }
+
+  /**
+   * yakhsim rasman min mihfazat al-mustakhdim (USER:...:AVAILABLE) ila hisab
+   * iyrad lil-minassa ('aks grantPromotionalCredit) 'abr idkhal muzdawaj
+   * mutawazin dimna mu'amala qa'ima:
+   *   DEBIT  mihfazat al-mustakhdim (LIABILITY)
+   *   CREDIT iyrad al-minassa (PLATFORM:<revenueSuffix> - REVENUE)
+   * yarfud al-rasid ghayr al-kafi (la yasmah bi-rasid salib) wa-huwa idempotent
+   * 'abr idempotencyKey. idafi bi-l-kamil: la yughayyir ayya suluk mali qa'im.
+   */
+  async chargeWalletFee(
+    tx: Prisma.TransactionClient,
+    input: {
+      userId: string;
+      amount: number;
+      currency: string;
+      revenueSuffix: string;
+      referenceType?: string;
+      referenceId?: string;
+      reason?: string;
+      idempotencyKey: string;
+    },
+  ): Promise<void> {
+    this.assertCurrency(input.currency);
+    if (!Number.isFinite(input.amount) || toMinorUnits(input.amount) <= 0) {
+      throw new BadRequestException("Wallet fee must be positive");
+    }
+    // idempotency: in sabaqa tanfidh hadha al-qayd fa-la nukarrir al-khasm.
+    const already = await tx.ledgerTransaction.findUnique({
+      where: { idempotencyKey: input.idempotencyKey },
+    });
+    if (already) return;
+    const userAcc = await this.userAccount(tx, input.userId, input.currency);
+    if (Number(userAcc.balanceCache) + 1e-9 < input.amount) {
+      throw new AppException("SUBSCRIPTION_INSUFFICIENT_BALANCE");
+    }
+    const revenue = await this.platformAccount(
+      tx,
+      input.revenueSuffix,
+      "REVENUE",
+      input.currency,
+    );
+    await this.post(tx, {
+      command: "chargeWalletFee",
+      idempotencyKey: input.idempotencyKey,
+      currency: input.currency,
+      referenceType: input.referenceType,
+      referenceId: input.referenceId,
+      reason: input.reason,
+      lines: [
+        { accountId: userAcc.id, direction: "DEBIT", amount: input.amount },
+        { accountId: revenue.id, direction: "CREDIT", amount: input.amount },
+      ],
+    });
+  }
+
   async settleTrip(tripId: string): Promise<void> {
-    try {
-      await this.prisma.$transaction(
-        async (tx) => {
-          const trip = await tx.trip.findUnique({
-            where: { id: tripId },
-            include: { driver: { select: { userId: true } } },
-          });
-          if (
-            !trip ||
-            trip.status !== "COMPLETED" ||
-            !trip.driver ||
-            trip.fare == null
-          )
-            throw new NotFoundException("Completed settleable trip not found");
-          const { gross, commission, net } = computeSettlement(
-            Number(trip.fare),
-            trip.commissionPct / 100,
-          );
-          const driver = await this.userAccount(
-            tx,
-            trip.driver.userId,
-            trip.currency,
-          );
-          const revenue = await this.platformAccount(
-            tx,
-            "COMMISSION",
-            "REVENUE",
-            trip.currency,
-          );
-          const debit =
-            trip.paymentMethod === "WALLET"
-              ? await this.userAccount(tx, trip.passengerId, trip.currency)
-              : trip.paymentMethod === "CARD"
-                ? await this.platformAccount(
-                    tx,
-                    "CARD_RECEIVABLE",
-                    "ASSET",
-                    trip.currency,
-                  )
-                : await this.platformAccount(
-                    tx,
-                    "CASH_CLEARING",
-                    "ASSET",
-                    trip.currency,
-                  );
-          await this.post(tx, {
-            command: "settleTrip",
-            idempotencyKey: `trip:settle:${tripId}`,
-            currency: trip.currency,
-            referenceType: "TRIP",
-            referenceId: tripId,
-            lines: [
-              { accountId: debit.id, direction: "DEBIT", amount: gross },
-              { accountId: driver.id, direction: "CREDIT", amount: net },
-              {
-                accountId: revenue.id,
-                direction: "CREDIT",
-                amount: commission,
+    return this.withTrace("financial.settle_trip", { tripId }, async () => {
+      try {
+        await this.prisma.$transaction(
+          async (tx) => {
+            const trip = await tx.trip.findUnique({
+              where: { id: tripId },
+              include: {
+                driver: { select: { userId: true } },
+                city: { select: { country: true } },
               },
-            ],
-          });
-          await tx.payment.upsert({
-            where: { tripId },
-            create: {
+            });
+            if (
+              !trip ||
+              trip.status !== "COMPLETED" ||
+              !trip.driver ||
+              trip.fare == null
+            )
+              throw new AppException("SETTLEMENT_NOT_ELIGIBLE", {
+                details: { tripId },
+              });
+            const currentSettlement = (trip.settlementStatus ??
+              "PENDING") as SettlementStatus;
+            if (!canSettlementTransition(currentSettlement, "POSTED")) {
+              // التسوية مُرحّلة بالفعل أو غير مؤهّلة — لا شيء لتنفيذه (idempotent).
+              return;
+            }
+            const countryCode = trip.city?.country?.trim().toUpperCase();
+            if (countryCode && this.countryConfig) {
+              const expectedCurrency =
+                await this.countryConfig.currencyFor(countryCode);
+              if (expectedCurrency !== trip.currency) {
+                throw new AppException("CURRENCY_COUNTRY_MISMATCH", {
+                  details: { tripId, countryCode, currency: trip.currency },
+                });
+              }
+            }
+            // trip.fare هي ما يدفعه الراكب فعليًا (الكوبون طُبّق وقت الطلب)، ولا
+            // نطبّق الخصم ثانيةً هنا. سياسة تحمّل الكوبون (Stage 62): تتحمّله الشركة
+            // بالكامل من عمولتها (قد تصبح سالبة)، وتُحسب العمولة على الأجرة الكاملة
+            // قبل الخصم فيبقى صافي السائق كرحلة بلا كوبون، ويُضاف تعويض الخصم للسائق
+            // كرصيد مقفل غير قابل للسحب (USER:...:LOCKED).
+            const discount = Math.max(Number(trip.discountAmount ?? 0), 0);
+            const riderPays = round2(Number(trip.fare));
+            const grossFare = round2(riderPays + discount);
+            const commissionGross = round2(
+              (grossFare * trip.commissionPct) / 100,
+            );
+            // سياسة تمويل الكوبون تُقرَّر وقت الطلب وتُخزَّن على الرحلة، وتُدار
+            // بالكامل من لوحة التحكم (إعداد عام coupons.funding + تجاوز لكل
+            // كوبون): PLATFORM=الشركة تتحمّل كامل الخصم، DRIVER=السائق،
+            // SHARED=يُقسّم بحصة platformShare. لا شيء مبرمَج ثابتًا هنا.
+            const { driverFunded } = splitCouponFunding(
+              discount,
+              trip.couponFundingSource,
+              trip.couponPlatformShare != null
+                ? Number(trip.couponPlatformShare)
+                : undefined,
+            );
+            // صافي السائق المستحق = أرباحه الكاملة ناقص ما يتحمّله من الخصم.
+            const driverNet = round2(
+              grossFare - commissionGross - driverFunded,
+            );
+            // السائق يسحب كامل ما دفعه الراكب (بحدّ أقصى إجماليه المستحق)؛
+            // العمولة تُقتطع أولًا من تعويض الخصم لا من رصيده المتاح، فيبقى
+            // المقفل = ما تتحمّله الشركة فعليًا (تعويض الخصم ناقص العمولة، ولا يقلّ عن صفر).
+            const driverAvailable = round2(Math.min(driverNet, riderPays));
+            const commissionCredit = round2(riderPays - driverAvailable);
+            const driverLocked = round2(driverNet - driverAvailable);
+            const driver = await this.userAccount(
+              tx,
+              trip.driver.userId,
+              trip.currency,
+            );
+            const revenue = await this.platformAccount(
+              tx,
+              "COMMISSION",
+              "REVENUE",
+              trip.currency,
+            );
+            const debit =
+              trip.paymentMethod === "WALLET"
+                ? await this.userAccount(tx, trip.passengerId, trip.currency)
+                : trip.paymentMethod === "CARD"
+                  ? await this.platformAccount(
+                      tx,
+                      "CARD_RECEIVABLE",
+                      "ASSET",
+                      trip.currency,
+                    )
+                  : await this.platformAccount(
+                      tx,
+                      "CASH_CLEARING",
+                      "ASSET",
+                      trip.currency,
+                    );
+            // القيد الأساسي: توزيع ما دفعه الراكب فعليًا بين رصيد السائق المتاح
+            // والعمولة. بلا كوبون (discount=0) يطابق السلوك السابق حرفيًا.
+            let base = { gross: 0, commission: 0, net: 0 };
+            if (riderPays > 0) {
+              const baseLines: PostingLine[] = [
+                { accountId: debit.id, direction: "DEBIT", amount: riderPays },
+              ];
+              if (driverAvailable > 0) {
+                baseLines.push({
+                  accountId: driver.id,
+                  direction: "CREDIT",
+                  amount: driverAvailable,
+                });
+              }
+              if (commissionCredit > 0) {
+                baseLines.push({
+                  accountId: revenue.id,
+                  direction: "CREDIT",
+                  amount: commissionCredit,
+                });
+              }
+              const posted = await this.post(tx, {
+                command: "settleTrip",
+                idempotencyKey: `trip:settle:${tripId}`,
+                currency: trip.currency,
+                referenceType: "TRIP",
+                referenceId: tripId,
+                lines: baseLines,
+              });
+              const accountCodeById = new Map<string, string>([
+                [debit.id, debit.code],
+                [driver.id, driver.code],
+                [revenue.id, revenue.code],
+              ]);
+              base = deriveTripEarnings(
+                posted.entries.map((entry) => ({
+                  direction: entry.direction,
+                  amount: Number(entry.amount),
+                  accountCode: accountCodeById.get(entry.accountId) ?? "",
+                })),
+              );
+            }
+            // تعويض الكوبون: الشركة تموّل الفرق من عمولتها (DEBIT عمولة)
+            // وتضيفه للسائق كرصيد مقفل غير قابل للسحب (CREDIT USER:...:LOCKED). idempotent.
+            if (driverLocked > 0) {
+              const driverLockedAcc = await this.lockedUserAccount(
+                tx,
+                trip.driver.userId,
+                trip.currency,
+              );
+              await this.post(tx, {
+                command: "settleCouponCompensation",
+                idempotencyKey: `trip:couponcomp:${tripId}`,
+                currency: trip.currency,
+                referenceType: "TRIP",
+                referenceId: tripId,
+                reason: "coupon_driver_compensation",
+                lines: [
+                  {
+                    accountId: revenue.id,
+                    direction: "DEBIT",
+                    amount: driverLocked,
+                  },
+                  {
+                    accountId: driverLockedAcc.id,
+                    direction: "CREDIT",
+                    amount: driverLocked,
+                  },
+                ],
+              });
+            }
+            await tx.payment.upsert({
+              where: { tripId },
+              create: {
+                tripId,
+                userId: trip.passengerId,
+                amount: riderPays,
+                method: trip.paymentMethod,
+                status: trip.paymentMethod === "CARD" ? "PENDING" : "PAID",
+              },
+              update: {},
+            });
+            // إسقاط الأرباح يُشتقّ من قيود دفتر الأستاذ المرحّل�� (مصدر
+            // الحقيقة الوحيد) لا من قي��ة محسوبة مستقلة، ثم يُكتب عبر نفس
+            // مسار إعادة البناء (projectTripEarnings) لإزالة التخزين المزدوج.
+            const net = round2(base.net + driverLocked);
+            const commission = round2(base.commission - driverLocked);
+            const gross = round2(net + commission);
+            await this.projectTripEarnings(tx, {
               tripId,
-              userId: trip.passengerId,
-              amount: gross,
-              method: trip.paymentMethod,
-              status: trip.paymentMethod === "CARD" ? "PENDING" : "PAID",
-            },
-            update: {},
-          });
-          await tx.driverEarning.upsert({
-            where: { tripId },
-            create: {
               driverId: trip.driverId as string,
-              tripId,
               gross,
               commission,
               net,
-            },
-            update: {},
-          });
-          await tx.companyEarning.upsert({
-            where: { tripId },
-            create: { tripId, amount: commission, source: "ledger_projection" },
-            update: {},
-          });
-          await tx.trip.update({
-            where: { id: tripId },
+            });
+            await tx.trip.update({
+              where: { id: tripId },
+              data: {
+                settledAt: new Date(),
+                settlementError: null,
+                settlementStatus: "POSTED",
+                settlementAttempts: { increment: 1 },
+              },
+            });
+            await tx.tripEvent.create({
+              data: {
+                tripId,
+                type: "settlement:posted",
+                actor: "SYSTEM",
+                meta: { gross, net, commission },
+              },
+            });
+            // حدث دائم داخل نفس المعاملة (transactional outbox) — يُسلّم لاحقًا مع إعادة محاولة + DLQ.
+            await this.outbox.enqueue(
+              tx,
+              "trip.settled",
+              { tripId, gross, net, commission, currency: trip.currency },
+              { dedupeKey: `trip:settled:${tripId}` },
+            );
+          },
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+        );
+      } catch (error) {
+        await this.prisma.trip.updateMany({
+          where: { id: tripId, settledAt: null },
+          data: {
+            settlementAttempts: { increment: 1 },
+            settlementStatus: "FAILED",
+            settlementError:
+              error instanceof Error
+                ? error.message.slice(0, 500)
+                : "Unknown settlement error",
+          },
+        });
+        await this.prisma.tripEvent
+          .create({
             data: {
-              settledAt: new Date(),
-              settlementError: null,
-              settlementAttempts: { increment: 1 },
+              tripId,
+              type: "settlement:failed",
+              actor: "SYSTEM",
+              meta: {
+                error:
+                  error instanceof Error
+                    ? error.message.slice(0, 500)
+                    : "Unknown settlement error",
+              },
             },
-          });
-        },
-        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-      );
-    } catch (error) {
-      await this.prisma.trip.updateMany({
-        where: { id: tripId, settledAt: null },
-        data: {
-          settlementAttempts: { increment: 1 },
-          settlementError:
-            error instanceof Error
-              ? error.message.slice(0, 500)
-              : "Unknown settlement error",
-        },
-      });
-      throw error;
-    }
+          })
+          .catch(() => undefined);
+        throw error;
+      }
+    });
   }
 
   @Cron(CronExpression.EVERY_MINUTE)
@@ -268,43 +571,240 @@ export class FinancialService {
     }
   }
 
-  async reserveWithdrawal(withdrawalId: string): Promise<void> {
-    await this.prisma.$transaction(
-      async (tx) => {
-        const request = await tx.withdrawRequest.findUnique({
-          where: { id: withdrawalId },
-        });
-        if (!request) throw new NotFoundException("Withdrawal not found");
-        const user = await this.userAccount(tx, request.userId, "DZD");
-        if (Number(user.balanceCache) < Number(request.amount))
-          throw new BadRequestException("Insufficient funds");
-        const reserve = await this.platformAccount(
-          tx,
-          "WITHDRAWAL_RESERVE",
-          "LIABILITY",
-          "DZD",
+  /**
+   * غرامة إلغاء السائق: تُحسم تلقائيًا من محفظة السائق عبر دفتر الأستاذ
+   * (مصدر الحقيقة المالي) عند إلغائه للرحلة. الغرامة = نسبة % مضبوطة من
+   * لوحة التحكم مضروبة في قيمة الرحلة الملغاة (fare). قيد مزدوج متوازن +
+   * idempotent (مفتاح trip:drvcancelpen:<tripId>): DEBIT محفظة السائق،
+   * CREDIT إيراد المنصة. لا رسوم على الراكب إطلاقًا.
+   */
+  async settleDriverCancellationPenalty(tripId: string): Promise<void> {
+    return this.withTrace(
+      "financial.settle_driver_cancellation_penalty",
+      { tripId },
+      async () => {
+        try {
+          await this.prisma.$transaction(
+            async (tx) => {
+              const trip = await tx.trip.findUnique({
+                where: { id: tripId },
+                include: { driver: { select: { userId: true } } },
+              });
+              if (
+                !trip ||
+                trip.status !== "CANCELLED" ||
+                trip.cancelledBy !== "DRIVER" ||
+                !trip.driver ||
+                trip.fare == null ||
+                Number(trip.fare) <= 0
+              ) {
+                // ليست رحلة ألغاها السائق أو بلا قيمة — لا غرامة (idempotent).
+                return;
+              }
+              if (trip.cancellationSettledAt) return; // عولجت سابقًا.
+              const pct = await this.loadDriverCancellationPenaltyPct();
+              const penalty = round2((Number(trip.fare) * pct) / 100);
+              const currency = trip.currency;
+              if (penalty <= 0) {
+                // النسبة صفر (الميزة غير مفعّلة من اللوحة) — علّمها كمعالَجة بلا حسم.
+                await tx.trip.update({
+                  where: { id: tripId },
+                  data: {
+                    cancellationSettledAt: new Date(),
+                    cancellationSettlementError: null,
+                    cancellationSettlementAttempts: { increment: 1 },
+                  },
+                });
+                await tx.tripEvent.create({
+                  data: {
+                    tripId,
+                    type: "driver_cancel_penalty:none",
+                    actor: "SYSTEM",
+                    meta: { pct, fare: Number(trip.fare) },
+                  },
+                });
+                return;
+              }
+              const driverAcc = await this.userAccount(
+                tx,
+                trip.driver.userId,
+                currency,
+              );
+              const revenue = await this.platformAccount(
+                tx,
+                "DRIVER_CANCELLATION_PENALTY",
+                "REVENUE",
+                currency,
+              );
+              await this.post(tx, {
+                command: "settleDriverCancellationPenalty",
+                idempotencyKey: `trip:drvcancelpen:${tripId}`,
+                currency,
+                referenceType: "TRIP",
+                referenceId: tripId,
+                reason: "Driver cancellation penalty",
+                lines: [
+                  {
+                    accountId: driverAcc.id,
+                    direction: "DEBIT",
+                    amount: penalty,
+                  },
+                  {
+                    accountId: revenue.id,
+                    direction: "CREDIT",
+                    amount: penalty,
+                  },
+                ],
+              });
+              await tx.trip.update({
+                where: { id: tripId },
+                data: {
+                  cancellationFee: penalty,
+                  cancellationSettledAt: new Date(),
+                  cancellationSettlementError: null,
+                  cancellationSettlementAttempts: { increment: 1 },
+                },
+              });
+              await tx.tripEvent.create({
+                data: {
+                  tripId,
+                  type: "driver_cancel_penalty:settled",
+                  actor: "SYSTEM",
+                  meta: { penalty, pct, fare: Number(trip.fare) },
+                },
+              });
+            },
+            { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+          );
+        } catch (error) {
+          await this.prisma.trip
+            .updateMany({
+              where: { id: tripId, cancellationSettledAt: null },
+              data: {
+                cancellationSettlementAttempts: { increment: 1 },
+                cancellationSettlementError:
+                  error instanceof Error
+                    ? error.message.slice(0, 500)
+                    : "Unknown driver cancellation penalty error",
+              },
+            })
+            .catch(() => undefined);
+          this.logger.warn(
+            `Driver cancellation penalty failed for ${tripId}: ${error instanceof Error ? error.message : String(error)}`,
+          );
+          throw error;
+        }
+      },
+    );
+  }
+
+  /** نسبة غرامة إلغاء السائق (0..100) من الإعدادات (قابلة للضبط من اللوحة)، افتراضيًا 0. */
+  private async loadDriverCancellationPenaltyPct(): Promise<number> {
+    try {
+      const setting = await this.prisma.setting.findUnique({
+        where: { key: DRIVER_CANCELLATION_PENALTY_KEY },
+      });
+      const raw = (setting?.publishedValue ?? setting?.value) as unknown as {
+        pct?: unknown;
+      } | null;
+      let pct = Number(raw?.pct);
+      if (!Number.isFinite(pct)) pct = DEFAULT_DRIVER_CANCELLATION_PENALTY_PCT;
+      return Math.min(100, Math.max(0, pct));
+    } catch {
+      return DEFAULT_DRIVER_CANCELLATION_PENALTY_PCT;
+    }
+  }
+
+  @Cron(CronExpression.EVERY_MINUTE)
+  async retryUnsettledDriverCancellationPenalties(): Promise<void> {
+    const trips = await this.prisma.trip.findMany({
+      where: {
+        status: "CANCELLED",
+        cancelledBy: "DRIVER",
+        cancellationSettledAt: null,
+        fare: { gt: 0 },
+        cancellationSettlementAttempts: { lt: 20 },
+      },
+      select: { id: true },
+      orderBy: { updatedAt: "asc" },
+      take: 100,
+    });
+    for (const trip of trips) {
+      try {
+        await this.settleDriverCancellationPenalty(trip.id);
+      } catch (error) {
+        this.logger.warn(
+          `Driver cancellation penalty retry failed for ${trip.id}: ${error instanceof Error ? error.message : String(error)}`,
         );
-        await this.post(tx, {
-          command: "reserveWithdrawal",
-          idempotencyKey: `withdrawal:reserve:${withdrawalId}`,
-          currency: "DZD",
-          referenceType: "WITHDRAWAL",
-          referenceId: withdrawalId,
-          lines: [
-            {
-              accountId: user.id,
-              direction: "DEBIT",
-              amount: Number(request.amount),
+      }
+    }
+  }
+
+  async reserveWithdrawal(withdrawalId: string): Promise<void> {
+    return this.withTrace(
+      "financial.reserve_withdrawal",
+      { withdrawalId },
+      async () => {
+        // قفل موزّع لكل مستخدم يمنع تسابق طلبات السحب المتزامنة (TOCTOU على الرصيد) عبر عدة نسخ.
+        const pre = await this.prisma.withdrawRequest.findUnique({
+          where: { id: withdrawalId },
+          select: { userId: true },
+        });
+        if (!pre) {
+          throw new AppException("WITHDRAWAL_NOT_FOUND", {
+            details: { withdrawalId },
+          });
+        }
+        await this.lock.withLock(`withdraw:user:${pre.userId}`, async () => {
+          await this.prisma.$transaction(
+            async (tx) => {
+              const request = await tx.withdrawRequest.findUnique({
+                where: { id: withdrawalId },
+              });
+              if (!request) {
+                throw new AppException("WITHDRAWAL_NOT_FOUND", {
+                  details: { withdrawalId },
+                });
+              }
+              const user = await this.userAccount(
+                tx,
+                request.userId,
+                DEFAULT_CURRENCY,
+              );
+              if (Number(user.balanceCache) < Number(request.amount))
+                throw new AppException("INSUFFICIENT_BALANCE", {
+                  details: { withdrawalId, userId: request.userId },
+                });
+              const reserve = await this.platformAccount(
+                tx,
+                "WITHDRAWAL_RESERVE",
+                "LIABILITY",
+                DEFAULT_CURRENCY,
+              );
+              await this.post(tx, {
+                command: "reserveWithdrawal",
+                idempotencyKey: `withdrawal:reserve:${withdrawalId}`,
+                currency: DEFAULT_CURRENCY,
+                referenceType: "WITHDRAWAL",
+                referenceId: withdrawalId,
+                lines: [
+                  {
+                    accountId: user.id,
+                    direction: "DEBIT",
+                    amount: Number(request.amount),
+                  },
+                  {
+                    accountId: reserve.id,
+                    direction: "CREDIT",
+                    amount: Number(request.amount),
+                  },
+                ],
+              });
             },
-            {
-              accountId: reserve.id,
-              direction: "CREDIT",
-              amount: Number(request.amount),
-            },
-          ],
+            { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+          );
         });
       },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
   }
 
@@ -386,13 +886,18 @@ export class FinancialService {
         tx,
         "WITHDRAWAL_RESERVE",
         "LIABILITY",
-        "DZD",
+        DEFAULT_CURRENCY,
       );
-      const cash = await this.platformAccount(tx, "CASH", "ASSET", "DZD");
+      const cash = await this.platformAccount(
+        tx,
+        "CASH",
+        "ASSET",
+        DEFAULT_CURRENCY,
+      );
       await this.post(tx, {
         command: "completeWithdrawal",
         idempotencyKey: `withdrawal:complete:${id}`,
-        currency: "DZD",
+        currency: DEFAULT_CURRENCY,
         referenceType: "WITHDRAWAL",
         referenceId: id,
         lines: [
@@ -425,12 +930,21 @@ export class FinancialService {
             "Driver funding request must be approved first",
           );
         }
-        const user = await this.userAccount(tx, request.driver.userId, "DZD");
-        const cash = await this.platformAccount(tx, "CASH", "ASSET", "DZD");
+        const user = await this.userAccount(
+          tx,
+          request.driver.userId,
+          DEFAULT_CURRENCY,
+        );
+        const cash = await this.platformAccount(
+          tx,
+          "CASH",
+          "ASSET",
+          DEFAULT_CURRENCY,
+        );
         await this.post(tx, {
           command: "fundDriverWallet",
           idempotencyKey: `driverFunding:fund:${requestId}`,
-          currency: "DZD",
+          currency: DEFAULT_CURRENCY,
           referenceType: "DRIVER_FUNDING",
           referenceId: requestId,
           lines: [
@@ -470,12 +984,12 @@ export class FinancialService {
         const sender = await this.userAccount(
           tx,
           transfer.fromDriver.userId,
-          "DZD",
+          DEFAULT_CURRENCY,
         );
         const receiver = await this.userAccount(
           tx,
           transfer.toDriver.userId,
-          "DZD",
+          DEFAULT_CURRENCY,
         );
         if (Number(sender.balanceCache) < Number(transfer.amount)) {
           throw new BadRequestException(
@@ -485,7 +999,7 @@ export class FinancialService {
         await this.post(tx, {
           command: "transferDriverFunds",
           idempotencyKey: `driverTransfer:complete:${transferId}`,
-          currency: "DZD",
+          currency: DEFAULT_CURRENCY,
           referenceType: "DRIVER_TRANSFER",
           referenceId: transferId,
           lines: [
@@ -798,7 +1312,7 @@ export class FinancialService {
           type: "WITHDRAWAL_LEDGER_GAP",
           referenceId: row.id,
           title: "سحب مدفوع بلا قيد دفتر",
-          detail: `${row.user.name} / ${Number(row.amount)} DZD`,
+          detail: `${row.user.name} / ${Number(row.amount)} ${DEFAULT_CURRENCY}`,
           createdAt: row.processedAt ?? row.createdAt,
           severity: "high" as const,
         })),
@@ -809,7 +1323,7 @@ export class FinancialService {
           type: "FUNDING_LEDGER_GAP",
           referenceId: row.id,
           title: "شحن منفذ بلا قيد دفتر",
-          detail: `${row.driver.user.name} / ${Number(row.amount)} DZD`,
+          detail: `${row.driver.user.name} / ${Number(row.amount)} ${DEFAULT_CURRENCY}`,
           createdAt: row.fundedAt ?? row.createdAt,
           severity: "medium" as const,
         })),
@@ -1051,12 +1565,369 @@ export class FinancialService {
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
   }
-  async getUserBalance(userId: string, currency = "DZD") {
+  async getUserBalance(userId: string, currency = DEFAULT_CURRENCY) {
     const account = await this.prisma.financialAccount.findUnique({
       where: { code: `USER:${userId}:${currency}:AVAILABLE` },
     });
     return { balance: Number(account?.balanceCache ?? 0), currency };
   }
+
+  /**
+   * الرصيد المقفل غير القابل للسحب (USER:...:LOCKED) — مثل تعويض خصم
+   * الكوبون الممنوح للسائق. منفصل عن الرصيد المتاح فلا يدخل السحب/التحويل.
+   */
+  async getLockedBalance(userId: string, currency = DEFAULT_CURRENCY) {
+    const account = await this.prisma.financialAccount.findUnique({
+      where: { code: `USER:${userId}:${currency}:LOCKED` },
+    });
+    return { locked: Number(account?.balanceCache ?? 0), currency };
+  }
+
+  /**
+   * المسار الوحيد لكتابة إسقاط أرباح الرحلة (DriverEarning/CompanyEarning)
+   * من قيم مشتقّة من دفتر الأستاذ. يُستدعى من التسوية ومن إعادة
+   * بناء الإسقاطات، فتبقى هذه الجداول مجرّد إسقاط (projection) للحقيقة
+   * لا مصدرًا مستقلاً. آمن للتكرار (idempotent).
+   */
+  private async projectTripEarnings(
+    client: Prisma.TransactionClient,
+    params: {
+      tripId: string;
+      driverId: string;
+      gross: number;
+      commission: number;
+      net: number;
+    },
+  ): Promise<void> {
+    const { tripId, driverId, gross, commission, net } = params;
+    await client.driverEarning.upsert({
+      where: { tripId },
+      create: { driverId, tripId, gross, commission, net },
+      update: { driverId, gross, commission, net },
+    });
+    await client.companyEarning.upsert({
+      where: { tripId },
+      create: { tripId, amount: commission, source: "ledger_projection" },
+      update: { amount: commission, source: "ledger_projection" },
+    });
+  }
+
+  /**
+   * Derive DriverEarning/CompanyEarning for a trip purely from the Ledger
+   * (the single source of truth), then upsert the read-model projections so
+   * they match. Proves the earnings tables are reconstructable, not
+   * independent sources. Safe to run repeatedly (idempotent).
+   */
+  async rebuildTripProjections(
+    tripId: string,
+  ): Promise<{ tripId: string; rebuilt: boolean }> {
+    const txn = await this.prisma.ledgerTransaction.findUnique({
+      where: { idempotencyKey: `trip:settle:${tripId}` },
+      include: { entries: { include: { account: true } } },
+    });
+    if (!txn || txn.status !== "POSTED") return { tripId, rebuilt: false };
+
+    const trip = await this.prisma.trip.findUnique({
+      where: { id: tripId },
+      select: { driverId: true },
+    });
+    if (!trip?.driverId) return { tripId, rebuilt: false };
+
+    // Derive earnings purely from the ledger entries (single source of truth).
+    const base = deriveTripEarnings(
+      txn.entries.map((entry) => ({
+        direction: entry.direction,
+        amount: Number(entry.amount),
+        accountCode: entry.account.code,
+      })),
+    );
+    const couponComp = await this.prisma.ledgerTransaction.findUnique({
+      where: { idempotencyKey: `trip:couponcomp:${tripId}` },
+      include: { entries: { include: { account: true } } },
+    });
+    const lockedComp =
+      couponComp && couponComp.status === "POSTED"
+        ? round2(
+            couponComp.entries
+              .filter(
+                (entry) =>
+                  entry.direction === "CREDIT" &&
+                  entry.account.code.startsWith("USER:"),
+              )
+              .reduce((sum, entry) => sum + Number(entry.amount), 0),
+          )
+        : 0;
+    const net = round2(base.net + lockedComp);
+    const commission = round2(base.commission - lockedComp);
+    const gross = round2(net + commission);
+
+    await this.prisma.$transaction((tx) =>
+      this.projectTripEarnings(tx, {
+        tripId,
+        driverId: trip.driverId,
+        gross,
+        commission,
+        net,
+      }),
+    );
+    return { tripId, rebuilt: true };
+  }
+
+  /**
+   * Rebuild earning projections for the most recent settled trips from the
+   * Ledger. Use to backfill/repair the read models after schema or logic
+   * changes without ever treating them as an authoritative source.
+   */
+  async rebuildAllTripProjections(
+    limit = 500,
+  ): Promise<{ scanned: number; rebuilt: number }> {
+    const settled = await this.prisma.ledgerTransaction.findMany({
+      where: { command: "settleTrip", status: "POSTED", referenceType: "TRIP" },
+      select: { referenceId: true },
+      orderBy: { createdAt: "desc" },
+      take: limit,
+    });
+    let rebuilt = 0;
+    for (const txn of settled) {
+      if (!txn.referenceId) continue;
+      const result = await this.rebuildTripProjections(txn.referenceId);
+      if (result.rebuilt) rebuilt += 1;
+    }
+    return { scanned: settled.length, rebuilt };
+  }
+  /**
+   * Revenue totals computed directly from the Ledger (single source of truth),
+   * NOT from the DriverEarning/CompanyEarning read models.
+   * - commission: platform revenue credited on settleTrip transactions.
+   * - driverNet: amount credited to driver user accounts on settleTrip.
+   * - gross: commission + driverNet (total settled fare).
+   */
+  async getLedgerRevenue(range?: { gte?: Date; lte?: Date }): Promise<{
+    commission: number;
+    driverNet: number;
+    gross: number;
+  }> {
+    const createdAt =
+      range && (range.gte || range.lte)
+        ? {
+            ...(range.gte ? { gte: range.gte } : {}),
+            ...(range.lte ? { lte: range.lte } : {}),
+          }
+        : undefined;
+    const transaction: Prisma.LedgerTransactionWhereInput = {
+      command: { in: ["settleTrip", "settleCouponCompensation"] },
+      status: "POSTED",
+      ...(createdAt ? { createdAt } : {}),
+    };
+    const [commissionCredit, commissionDebit, driverNet] =
+      await this.prisma.$transaction([
+        this.prisma.ledgerEntry.aggregate({
+          where: {
+            direction: "CREDIT",
+            transaction,
+            account: { code: { startsWith: "PLATFORM:COMMISSION:" } },
+          },
+          _sum: { amount: true },
+        }),
+        this.prisma.ledgerEntry.aggregate({
+          where: {
+            direction: "DEBIT",
+            transaction,
+            account: { code: { startsWith: "PLATFORM:COMMISSION:" } },
+          },
+          _sum: { amount: true },
+        }),
+        this.prisma.ledgerEntry.aggregate({
+          where: {
+            direction: "CREDIT",
+            transaction,
+            account: { code: { startsWith: "USER:" } },
+          },
+          _sum: { amount: true },
+        }),
+      ]);
+    const commissionNum = round2(
+      Number(commissionCredit._sum.amount ?? 0) -
+        Number(commissionDebit._sum.amount ?? 0),
+    );
+    const driverNetNum = Number(driverNet._sum.amount ?? 0);
+    return {
+      commission: commissionNum,
+      driverNet: driverNetNum,
+      gross: Number((commissionNum + driverNetNum).toFixed(2)),
+    };
+  }
+
+  /**
+   * Periodic ledger integrity check: compares each account's balanceCache with
+   * the balance derived from its POSTED ledger entries (Σ CREDIT − Σ DEBIT).
+   * Any drift beyond tolerance is persisted as an OPEN reconciliation incident;
+   * an account that reconciles auto-resolves its stale OPEN incidents.
+   */
+  async reconcileLedgerBalances(options?: { tolerance?: number }): Promise<{
+    scannedAccounts: number;
+    mismatches: number;
+    openIncidents: number;
+    resolvedIncidents: number;
+  }> {
+    const tolerance = options?.tolerance ?? 0.005;
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        id: string;
+        code: string;
+        currency: string;
+        cached: Prisma.Decimal;
+        derived: Prisma.Decimal;
+      }>
+    >`
+      SELECT a.id, a.code, a.currency, a."balanceCache" AS cached,
+             COALESCE(SUM(CASE WHEN t.status = 'POSTED' AND e.direction = 'CREDIT' THEN e.amount
+                               WHEN t.status = 'POSTED' AND e.direction = 'DEBIT' THEN -e.amount
+                               ELSE 0 END), 0) AS derived
+      FROM "FinancialAccount" a
+      LEFT JOIN "LedgerEntry" e ON e."accountId" = a.id
+      LEFT JOIN "LedgerTransaction" t ON t.id = e."transactionId"
+      GROUP BY a.id, a.code, a.currency, a."balanceCache"
+    `;
+    let mismatches = 0;
+    let resolvedIncidents = 0;
+    for (const row of rows) {
+      const cached = Number(row.cached);
+      const derived = Number(row.derived);
+      const difference = accountBalanceDifference(cached, derived);
+      if (!isReconciled(cached, derived, tolerance)) {
+        mismatches += 1;
+        const detail = `balanceCache=${cached} ledger=${derived} diff=${difference}`;
+        const open = await this.prisma.ledgerReconciliationIncident.findFirst({
+          where: { accountId: row.id, status: "OPEN" },
+        });
+        if (open) {
+          await this.prisma.ledgerReconciliationIncident.update({
+            where: { id: open.id },
+            data: {
+              cachedBalance: cached,
+              derivedBalance: derived,
+              difference,
+              detail,
+            },
+          });
+        } else {
+          await this.prisma.ledgerReconciliationIncident.create({
+            data: {
+              accountId: row.id,
+              accountCode: row.code,
+              currency: row.currency,
+              cachedBalance: cached,
+              derivedBalance: derived,
+              difference,
+              detail,
+              status: "OPEN",
+            },
+          });
+        }
+        this.logger.error(
+          `Ledger reconciliation mismatch on ${row.code}: ${detail}`,
+        );
+        // تنبيه خارجي (best-effort) — عدم تطابق رصيد يمسّ المال.
+        void this.alerts?.emit({
+          kind: "reconciliation.mismatch",
+          severity: "CRITICAL",
+          title: `عدم تطابق دفتر الأستاذ (${row.code})`,
+          message: detail,
+          context: {
+            accountId: row.id,
+            accountCode: row.code,
+            currency: row.currency,
+            difference,
+          },
+        });
+      } else {
+        const stale = await this.prisma.ledgerReconciliationIncident.updateMany(
+          {
+            where: { accountId: row.id, status: "OPEN" },
+            data: {
+              status: "RESOLVED",
+              resolvedBy: "SYSTEM",
+              resolvedAt: new Date(),
+            },
+          },
+        );
+        resolvedIncidents += stale.count;
+      }
+    }
+    const openIncidents = await this.prisma.ledgerReconciliationIncident.count({
+      where: { status: "OPEN" },
+    });
+    return {
+      scannedAccounts: rows.length,
+      mismatches,
+      openIncidents,
+      resolvedIncidents,
+    };
+  }
+
+  @Cron("0 */30 * * * *")
+  async scheduledLedgerReconciliation(): Promise<void> {
+    try {
+      const result = await this.reconcileLedgerBalances();
+      if (result.mismatches > 0) {
+        this.logger.error(
+          `Ledger reconciliation found ${result.mismatches} mismatch(es); ${result.openIncidents} open incident(s).`,
+        );
+        void this.alerts?.emit({
+          kind: "reconciliation.summary",
+          severity: "CRITICAL",
+          title: "فحص التطابق الدوري وجد اختلافات",
+          message: `${result.mismatches} اختلاف، ${result.openIncidents} حادثة مفتوحة.`,
+          context: {
+            mismatches: result.mismatches,
+            openIncidents: result.openIncidents,
+          },
+        });
+      }
+    } catch (error) {
+      this.logger.error(
+        `Ledger reconciliation cron failed: ${(error as Error).message}`,
+      );
+    }
+  }
+
+  async listReconciliationIncidents(
+    page: number,
+    limit: number,
+    status?: "OPEN" | "RESOLVED" | "IGNORED",
+  ) {
+    const where: Prisma.LedgerReconciliationIncidentWhereInput = status
+      ? { status }
+      : {};
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.ledgerReconciliationIncident.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.ledgerReconciliationIncident.count({ where }),
+    ]);
+    return { items, total, page, limit };
+  }
+
+  async resolveReconciliationIncident(
+    id: string,
+    resolvedBy: string,
+    status: "RESOLVED" | "IGNORED" = "RESOLVED",
+  ) {
+    const existing = await this.prisma.ledgerReconciliationIncident.findUnique({
+      where: { id },
+    });
+    if (!existing)
+      throw new NotFoundException("Reconciliation incident not found");
+    return this.prisma.ledgerReconciliationIncident.update({
+      where: { id },
+      data: { status, resolvedBy, resolvedAt: new Date() },
+    });
+  }
+
   async listAccounts(page: number, limit: number, search?: string) {
     const where: Prisma.FinancialAccountWhereInput = search
       ? {

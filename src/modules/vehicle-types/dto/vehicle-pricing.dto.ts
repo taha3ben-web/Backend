@@ -29,13 +29,25 @@ export class CreateVehiclePricingRuleDto {
   // نوع العميل والعروض
   @IsOptional() @IsString() customerType?: string;
   @IsOptional() @IsString() couponCode?: string;
+  @IsOptional() @IsArray() @IsString({ each: true }) appIds?: string[];
+  @IsOptional() @IsArray() @IsString({ each: true }) clientOs?: string[];
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  audienceSegments?: string[];
+  @IsOptional() @IsString() minAppVersion?: string;
+  @IsOptional() @IsString() maxAppVersion?: string;
 
   // النافذة الزمنية / المناسبات / الذروة
   @IsOptional() @IsString() validFrom?: string;
   @IsOptional() @IsString() validTo?: string;
   @IsOptional() @IsArray() @IsInt({ each: true }) daysOfWeek?: number[];
-  @IsOptional() @Matches(HHMM, { message: "startTime بصيغة HH:MM" }) startTime?: string;
-  @IsOptional() @Matches(HHMM, { message: "endTime بصيغة HH:MM" }) endTime?: string;
+  @IsOptional()
+  @Matches(HHMM, { message: "startTime بصيغة HH:MM" })
+  startTime?: string;
+  @IsOptional()
+  @Matches(HHMM, { message: "endTime بصيغة HH:MM" })
+  endTime?: string;
   @IsOptional() @IsNumber() @Min(0) peakMultiplier?: number;
 
   // القيم
@@ -48,6 +60,7 @@ export class CreateVehiclePricingRuleDto {
   @IsOptional() @IsNumber() @Min(0) negotiationMax?: number;
   @IsOptional() @IsNumber() @Min(0) commissionPct?: number;
   @IsOptional() @IsString() currency?: string;
+  @IsOptional() @IsObject() metadata?: Record<string, unknown>;
 
   @IsOptional() @IsInt() priority?: number;
   @IsOptional() @IsBoolean() isActive?: boolean;
@@ -62,6 +75,14 @@ export class UpdateVehiclePricingRuleDto {
   @IsOptional() @IsString() country?: string;
   @IsOptional() @IsString() customerType?: string;
   @IsOptional() @IsString() couponCode?: string;
+  @IsOptional() @IsArray() @IsString({ each: true }) appIds?: string[];
+  @IsOptional() @IsArray() @IsString({ each: true }) clientOs?: string[];
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  audienceSegments?: string[];
+  @IsOptional() @IsString() minAppVersion?: string;
+  @IsOptional() @IsString() maxAppVersion?: string;
   @IsOptional() @IsString() validFrom?: string;
   @IsOptional() @IsString() validTo?: string;
   @IsOptional() @IsArray() @IsInt({ each: true }) daysOfWeek?: number[];
@@ -77,6 +98,7 @@ export class UpdateVehiclePricingRuleDto {
   @IsOptional() @IsNumber() @Min(0) negotiationMax?: number;
   @IsOptional() @IsNumber() @Min(0) commissionPct?: number;
   @IsOptional() @IsString() currency?: string;
+  @IsOptional() @IsObject() metadata?: Record<string, unknown>;
   @IsOptional() @IsInt() priority?: number;
   @IsOptional() @IsBoolean() isActive?: boolean;
 }

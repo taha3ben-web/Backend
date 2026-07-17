@@ -1,3 +1,4 @@
+import { DEFAULT_CURRENCY } from "../../common/money.util";
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../../prisma/prisma.service";
 import {
@@ -36,7 +37,7 @@ export class PricingAdminService {
         perMin: dto.perMin,
         minFare: dto.minFare,
         maxFare: dto.maxFare,
-        currency: dto.currency ?? "DZD",
+        currency: dto.currency ?? DEFAULT_CURRENCY,
         isActive: dto.isActive ?? true,
       },
     });

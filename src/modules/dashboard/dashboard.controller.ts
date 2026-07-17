@@ -41,4 +41,10 @@ export class DashboardController {
   operations() {
     return this.dashboard.operations();
   }
+
+  @Get("readiness")
+  @RequirePermissions("audit.read", "reports.read", "staff.manage")
+  readiness() {
+    return this.dashboard.readiness();
+  }
 }
