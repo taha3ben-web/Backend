@@ -165,6 +165,7 @@ export class OutboxService {
   async stats(): Promise<Record<string, number>> {
     const grouped = await this.prisma.outboxEvent.groupBy({
       by: ["status"],
+      orderBy: { status: "asc" },
       _count: { _all: true },
     });
     const result: Record<string, number> = {

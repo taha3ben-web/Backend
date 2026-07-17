@@ -59,9 +59,9 @@ export class SettingsController {
     return this.settings.bulkUpsert(dto);
   }
 
-  @Post(":key/publish")
-  publish(@Param("key") key: string, @CurrentUser() user: AuthUser) {
-    return this.settings.publish(key, user.userId);
+  @Post(":key/request-review")
+  requestReview(@Param("key") key: string, @CurrentUser() user: AuthUser) {
+    return this.settings.requestReview(key, user.userId);
   }
 
   @Post(":key/discard-draft")

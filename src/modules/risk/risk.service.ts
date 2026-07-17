@@ -1,4 +1,5 @@
 import { Injectable } from "@nestjs/common";
+import { Prisma, RiskDecisionKind } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import {
   RiskAssessment,
@@ -223,9 +224,9 @@ export class RiskService {
     subjectId?: string;
   }) {
     const { page, limit, subjectKind, decision, subjectId } = opts;
-    const where = {
+    const where: Prisma.RiskEventWhereInput = {
       ...(subjectKind ? { subjectKind } : {}),
-      ...(decision ? { decision } : {}),
+      ...(decision ? { decision: decision as RiskDecisionKind } : {}),
       ...(subjectId ? { subjectId } : {}),
     };
     const [items, total] = await this.prisma.$transaction([
@@ -263,11 +264,13 @@ export class RiskService {
       this.prisma.riskEvent.groupBy({
         by: ["decision"],
         where: { createdAt },
+        orderBy: { decision: "asc" },
         _count: { _all: true },
       }),
       this.prisma.riskEvent.groupBy({
         by: ["level"],
         where: { createdAt },
+        orderBy: { level: "asc" },
         _count: { _all: true },
       }),
       this.prisma.riskEvent.findMany({
@@ -292,9 +295,15 @@ export class RiskService {
     ]);
 
     const decisions: Record<string, number> = { ALLOW: 0, REVIEW: 0, BLOCK: 0 };
-    for (const g of decisionGroups) decisions[g.decision] = g._count._all;
+    for (const g of decisionGroups) {
+      decisions[g.decision] =
+        typeof g._count === "object" ? (g._count._all ?? 0) : 0;
+    }
     const levels: Record<string, number> = { LOW: 0, MEDIUM: 0, HIGH: 0 };
-    for (const g of levelGroups) levels[g.level] = g._count._all;
+    for (const g of levelGroups) {
+      levels[g.level] =
+        typeof g._count === "object" ? (g._count._all ?? 0) : 0;
+    }
 
     const bySubject = new Map<
       string,

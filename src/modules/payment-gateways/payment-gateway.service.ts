@@ -62,11 +62,13 @@ export class PaymentGatewayService {
       }),
       this.prisma.paymentEvent.groupBy({
         by: ["provider"],
+        orderBy: { provider: "asc" },
         where: { createdAt: { gte: since } },
         _count: { _all: true },
       }) as unknown as Promise<ProviderGroupRow[]>,
       this.prisma.paymentEvent.groupBy({
         by: ["type"],
+        orderBy: { type: "asc" },
         where: { createdAt: { gte: since } },
         _count: { _all: true },
       }) as unknown as Promise<TypeGroupRow[]>,

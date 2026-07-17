@@ -315,6 +315,8 @@ model User {
   identityVerifications         UserIdentityVerification[] @relation("UserIdentities")
   reviewedIdentityVerifications UserIdentityVerification[] @relation("IdentityReviewer")
   verifiedVehicles              Vehicle[]                  @relation("VehicleVerifier")
+  requestedSettingChanges       SettingChangeRequest[]     @relation("SettingChangeRequester")
+  reviewedSettingChanges        SettingChangeRequest[]     @relation("SettingChangeReviewer")
 
   @@index([type])
   @@index([status])
@@ -1137,6 +1139,13 @@ enum SettingPublicationStatus {
   PUBLISHED
 }
 
+enum SettingChangeRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
 model Setting {
   id                String                   @id @default(uuid())
   key               String                   @unique
@@ -1151,10 +1160,34 @@ model Setting {
   publishedAt       DateTime?
   updatedAt         DateTime                 @updatedAt
   revisions         SettingRevision[]
+  changeRequests    SettingChangeRequest[]
 
   @@index([group])
   @@index([isPublic, isSensitive])
   @@index([publicationStatus, isPublic, isSensitive])
+}
+
+model SettingChangeRequest {
+  id                  String                     @id @default(uuid())
+  settingId           String
+  setting             Setting                    @relation(fields: [settingId], references: [id], onDelete: Cascade)
+  requestedValue      Json
+  sourceVersion       Int
+  requestType         String                     @default("UPDATE")
+  rollbackFromVersion Int?
+  status              SettingChangeRequestStatus @default(PENDING)
+  requestedById       String
+  requestedBy         User                       @relation("SettingChangeRequester", fields: [requestedById], references: [id], onDelete: Restrict)
+  reviewedById        String?
+  reviewedBy          User?                      @relation("SettingChangeReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  reviewNote          String?
+  createdAt           DateTime                   @default(now())
+  reviewedAt          DateTime?
+
+  @@index([settingId, status])
+  @@index([status, createdAt])
+  @@index([requestedById])
+  @@index([reviewedById])
 }
 
 model SettingRevision {

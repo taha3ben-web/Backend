@@ -6,6 +6,7 @@ import {
 } from "@nestjs/common";
 import { Observable } from "rxjs";
 import { tap } from "rxjs/operators";
+import { Prisma } from "@prisma/client";
 import { AuditService } from "./audit.service";
 
 const TRACKED_METHODS = new Set(["POST", "PATCH", "PUT", "DELETE"]);
@@ -51,7 +52,7 @@ export class AuditInterceptor implements NestInterceptor {
             params: this.sanitizeForAudit(req.params ?? null),
             query: this.sanitizeForAudit(req.query ?? null),
             body: this.sanitizeBodyForPath(path, req.body ?? null),
-          },
+          } as Prisma.InputJsonValue,
         });
       }),
     );

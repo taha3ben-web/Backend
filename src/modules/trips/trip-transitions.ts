@@ -1,18 +1,12 @@
-// حالات الرحلة مُعرّفة محليًا حتى تبقى آلة الحالة والاختبارات مستقلة
-// عن توليد Prisma Client. القيم مطابقة تمامًا لـ enum TripStatus في schema.prisma.
-export type TripStatus =
-  | "SEARCHING"
-  | "ACCEPTED"
-  | "ARRIVING"
-  | "IN_PROGRESS"
-  | "COMPLETED"
-  | "CANCELLED";
+import type { TripStatus } from "@prisma/client";
+export type { TripStatus };
 
 /**
  * الانتقالات المسموح بها لحالة الرحلة (آلة حالات).
  * COMPLETED و CANCELLED حالتان نهائيتان لا خروج منهما.
  */
 export const TRANSITIONS: Record<TripStatus, TripStatus[]> = {
+  SCHEDULED: ["SEARCHING", "CANCELLED"],
   SEARCHING: ["ACCEPTED", "CANCELLED"],
   ACCEPTED: ["ARRIVING", "CANCELLED"],
   ARRIVING: ["IN_PROGRESS", "CANCELLED"],

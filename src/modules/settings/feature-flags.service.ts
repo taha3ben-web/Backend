@@ -461,7 +461,7 @@ export class FeatureFlagsService {
   }
 
   private async normalizeTargeting(
-    dto: Partial<CreateFeatureFlagDto & UpdateFeatureFlagDto>,
+    dto: CreateFeatureFlagDto | UpdateFeatureFlagDto,
     current?: {
       cityIds: string[];
       countryCodes: string[];

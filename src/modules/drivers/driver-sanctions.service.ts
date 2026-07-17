@@ -16,7 +16,7 @@ import { PaginationDto } from "../../common/dto/pagination.dto";
 
 const SANCTIONS_KEY = "trips.driverCancellationSanctions";
 
-interface SanctionsConfig {
+export interface SanctionsConfig {
   enabled: boolean;
   windowDays: number;
   warnThreshold: number;
@@ -128,6 +128,7 @@ export class DriverSanctionsService {
     try {
       const grouped = await this.prisma.trip.groupBy({
         by: ["driverId"],
+        orderBy: { driverId: "asc" },
         where: {
           driverId: { not: null },
           status: "CANCELLED",
@@ -140,7 +141,8 @@ export class DriverSanctionsService {
         .filter((g) => Boolean(g.driverId))
         .map((g) => ({
           driverId: g.driverId as string,
-          count: g._count._all,
+          count:
+            typeof g._count === "object" ? (g._count._all ?? 0) : 0,
         }));
     } catch (err) {
       this.logger.warn(`تعذّر تجميع إلغاءات السائقين: ${String(err)}`);

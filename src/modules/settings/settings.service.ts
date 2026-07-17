@@ -526,8 +526,8 @@ export class SettingsService {
         const updatedSetting = await tx.setting.update({
           where: { id: request.settingId },
           data: {
-            value: request.requestedValue,
-            publishedValue: request.requestedValue,
+            value: request.requestedValue as Prisma.InputJsonValue,
+            publishedValue: request.requestedValue as Prisma.InputJsonValue,
             publicationStatus: SettingPublicationStatus.PUBLISHED,
             publishedVersion,
             publishedAt: new Date(),
@@ -666,7 +666,7 @@ export class SettingsService {
         const updated = await tx.setting.update({
           where: { key },
           data: {
-            value: revision.value,
+            value: revision.value as Prisma.InputJsonValue,
             publicationStatus: SettingPublicationStatus.DRAFT,
             version: { increment: 1 },
           },
@@ -717,7 +717,7 @@ export class SettingsService {
     const restored = await this.prisma.setting.update({
       where: { key },
       data: {
-        value: setting.publishedValue,
+        value: setting.publishedValue as Prisma.InputJsonValue,
         publicationStatus: SettingPublicationStatus.PUBLISHED,
         version: { increment: 1 },
       },

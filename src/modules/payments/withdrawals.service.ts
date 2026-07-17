@@ -175,11 +175,13 @@ export class WithdrawalsService {
       await this.prisma.$transaction([
         this.prisma.driverEarning.groupBy({
           by: ["driverId"],
+          orderBy: { driverId: "asc" },
           _sum: { net: true, gross: true, commission: true },
           _count: { _all: true },
         }),
         this.prisma.withdrawRequest.groupBy({
           by: ["driverId", "status"],
+          orderBy: [{ driverId: "asc" }, { status: "asc" }],
           _sum: { amount: true },
           _count: { _all: true },
         }),
@@ -237,14 +239,15 @@ export class WithdrawalsService {
 
     for (const g of earnGroups) {
       const r = ensure(g.driverId);
-      r.netEarnings = Number(g._sum.net ?? 0);
-      r.grossEarnings = Number(g._sum.gross ?? 0);
-      r.commission = Number(g._sum.commission ?? 0);
-      r.trips = g._count._all;
+      r.netEarnings = Number(g._sum?.net ?? 0);
+      r.grossEarnings = Number(g._sum?.gross ?? 0);
+      r.commission = Number(g._sum?.commission ?? 0);
+      r.trips =
+        typeof g._count === "object" ? (g._count._all ?? 0) : 0;
     }
     for (const g of withdrawGroups) {
       const r = ensure(g.driverId);
-      const amt = Number(g._sum.amount ?? 0);
+      const amt = Number(g._sum?.amount ?? 0);
       if (g.status === "PAID") r.paid += amt;
       else if (g.status === "PENDING" || g.status === "APPROVED")
         r.pending += amt;
@@ -306,20 +309,22 @@ export class WithdrawalsService {
       }),
       this.prisma.driverEarning.groupBy({
         by: ["driverId"],
+        orderBy: { driverId: "asc" },
         _sum: { net: true },
       }),
       this.prisma.withdrawRequest.groupBy({
         by: ["driverId"],
         where: { status: "PAID" },
+        orderBy: { driverId: "asc" },
         _sum: { amount: true },
       }),
     ]);
 
     const netMap = new Map(
-      earnGroups.map((g) => [g.driverId, Number(g._sum.net ?? 0)]),
+      earnGroups.map((g) => [g.driverId, Number(g._sum?.net ?? 0)]),
     );
     const paidMap = new Map(
-      paidGroups.map((g) => [g.driverId, Number(g._sum.amount ?? 0)]),
+      paidGroups.map((g) => [g.driverId, Number(g._sum?.amount ?? 0)]),
     );
     // الرصيد المتبقّي القابل للتغطية لكل سائق (يُستهلك تدريجيًا).
     const backing = new Map<string, number>();

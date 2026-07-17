@@ -433,7 +433,9 @@ export class StatisticsService {
     }));
   }
 
-  private num(v: Prisma.Decimal | null | undefined): number {
+  private num(
+    v: Prisma.Decimal | number | bigint | null | undefined,
+  ): number {
     return v ? Number(v) : 0;
   }
 }

@@ -71,6 +71,7 @@ export class QueueInsightService {
   async insight(): Promise<QueueInsight & { generatedAt: string }> {
     const grouped = (await this.prisma.outboxEvent.groupBy({
       by: ["status"],
+      orderBy: { status: "asc" },
       _count: { _all: true },
     })) as unknown as StatusGroupRow[];
 
@@ -98,6 +99,7 @@ export class QueueInsightService {
   async backlogByName(limit = 20): Promise<QueueBacklogByName[]> {
     const grouped = (await this.prisma.outboxEvent.groupBy({
       by: ["name", "status"],
+      orderBy: [{ name: "asc" }, { status: "asc" }],
       _count: { _all: true },
     })) as unknown as NameStatusGroupRow[];
 
