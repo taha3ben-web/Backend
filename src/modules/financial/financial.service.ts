@@ -1632,6 +1632,7 @@ export class FinancialService {
       select: { driverId: true },
     });
     if (!trip?.driverId) return { tripId, rebuilt: false };
+    const driverId = trip.driverId;
 
     // Derive earnings purely from the ledger entries (single source of truth).
     const base = deriveTripEarnings(
@@ -1664,7 +1665,7 @@ export class FinancialService {
     await this.prisma.$transaction((tx) =>
       this.projectTripEarnings(tx, {
         tripId,
-        driverId: trip.driverId,
+        driverId,
         gross,
         commission,
         net,

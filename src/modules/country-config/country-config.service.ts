@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
+import { CountryTaxMode, Prisma } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import { DEFAULT_CURRENCY } from "../../common/money.util";
 import {
@@ -126,11 +127,11 @@ export class CountryConfigService {
       locale: input.locale ?? base.locale,
       timezone: input.timezone ?? base.timezone,
       taxRatePct: input.taxRatePct ?? base.taxRatePct,
-      taxMode: (input.taxMode ?? base.taxMode) as string,
+      taxMode: (input.taxMode ?? base.taxMode) as CountryTaxMode,
       paymentMethods: (input.paymentMethods ??
         base.paymentMethods) as unknown as string[],
       isActive: input.isActive ?? true,
-    };
+    } satisfies Prisma.CountryConfigUncheckedCreateInput;
 
     const row = await this.prisma.countryConfig.upsert({
       where: { code },

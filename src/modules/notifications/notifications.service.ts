@@ -243,21 +243,22 @@ export class NotificationsService {
       where.locale = { in: notification.localeCodes };
     }
 
-    if (
-      notification.driverCityIds.length > 0 &&
-      notification.target === "DRIVERS"
-    ) {
-      where.driver = { cityId: { in: notification.driverCityIds } };
-    }
-
-    if (
-      notification.countryCodes.length > 0 &&
-      notification.target === "DRIVERS"
-    ) {
-      where.driver = {
-        ...(where.driver ?? {}),
-        city: { country: { in: notification.countryCodes } },
-      };
+    if (notification.target === "DRIVERS") {
+      const driverWhere: Prisma.DriverWhereInput = {};
+      if (notification.driverCityIds.length > 0) {
+        driverWhere.cityId = { in: notification.driverCityIds };
+      }
+      if (notification.countryCodes.length > 0) {
+        driverWhere.city = {
+          is: { country: { in: notification.countryCodes } },
+        };
+      }
+      if (
+        notification.driverCityIds.length > 0 ||
+        notification.countryCodes.length > 0
+      ) {
+        where.driver = { is: driverWhere };
+      }
     }
 
     const users = await this.prisma.user.findMany({

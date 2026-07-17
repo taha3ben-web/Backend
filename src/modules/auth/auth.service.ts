@@ -327,7 +327,7 @@ export class AuthService {
       }),
       this.prisma.session.deleteMany({ where: { userId } }),
     ]);
-    await this.safeRecordActivity(userId, "AUTH_LOGOUT_ALL", null, null);
+    await this.safeRecordActivity(userId, "AUTH_LOGOUT_ALL", null);
     return { ok: true };
   }
 
