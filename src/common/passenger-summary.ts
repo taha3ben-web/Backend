@@ -25,11 +25,13 @@ export async function loadPassengerSummaries(
     prisma.trip.groupBy({
       by: ["passengerId"],
       where: { passengerId: { in: ids }, status: "COMPLETED" },
+      orderBy: { passengerId: "asc" },
       _count: { _all: true },
     }),
     prisma.rating.groupBy({
       by: ["targetId"],
       where: { targetId: { in: ids } },
+      orderBy: { targetId: "asc" },
       _avg: { stars: true },
       _count: { _all: true },
     }),

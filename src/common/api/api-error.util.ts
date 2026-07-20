@@ -186,6 +186,22 @@ export const API_ERROR_CODES = {
       fr: "Le chauffeur est introuvable.",
     },
   },
+  DRIVER_NOT_APPROVED: {
+    httpStatus: 403,
+    messages: {
+      ar: "حساب السائق غير مُعتمد بعد.",
+      en: "The driver account is not approved yet.",
+      fr: "Le compte chauffeur n'est pas encore approuvé.",
+    },
+  },
+  DRIVER_VERIFIED_VEHICLE_REQUIRED: {
+    httpStatus: 403,
+    messages: {
+      ar: "يلزم وجود مركبة موثّقة ومعتمدة لتقديم عرض.",
+      en: "A verified, approved vehicle is required.",
+      fr: "Un véhicule vérifié et approuvé est requis.",
+    },
+  },
   WITHDRAWAL_NOT_FOUND: {
     httpStatus: 404,
     messages: {
@@ -424,6 +440,14 @@ export const API_ERROR_CODES = {
       ar: "عرض السعر غير موجود.",
       en: "The fare quote was not found.",
       fr: "Le devis de prix est introuvable.",
+    },
+  },
+  FARE_QUOTE_NOT_ELIGIBLE: {
+    httpStatus: 409,
+    messages: {
+      ar: "السائق غير مؤهّل لهذا العرض.",
+      en: "The driver is not eligible for this fare quote.",
+      fr: "Le chauffeur n'est pas éligible à ce devis.",
     },
   },
   FARE_QUOTE_EXPIRED: {
