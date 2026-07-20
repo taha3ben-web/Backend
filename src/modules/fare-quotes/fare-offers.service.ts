@@ -5,7 +5,19 @@ import { PrismaService } from "../../prisma/prisma.service";
 import { AppException } from "../../common/api/app.exception";
 import { RealtimeGateway } from "../realtime/realtime.gateway";
 import { NotificationsService } from "../notifications/notifications.service";
-import { CreateFareOfferDto, AdminFareOfferQueryDto } from "./dto/fare-offer.dto";
+import {
+  CreateFareOfferDto,
+  AdminFareOfferQueryDto,
+} from "./dto/fare-offer.dto";
+import { loadPassengerSummaries } from "../../common/passenger-summary";
+
+type DriverBidProfile = Prisma.DriverGetPayload<{
+  include: {
+    vehicles: {
+      select: { rideClass: true; vehicleTypeId: true };
+    };
+  };
+}>;
 
 /**
  * خدمة عروض السائقين المضادة (FareOffer — مزايدة inDrive).
@@ -76,17 +88,108 @@ export class FareOffersService {
     this.notifications
       .notifyUser(userId, title, body, "PUSH", data)
       .catch((err) =>
-        this.logger.warn(
-          `push "${title}" failed: ${(err as Error).message}`,
-        ),
+        this.logger.warn(`push "${title}" failed: ${(err as Error).message}`),
       );
   }
 
   /** يحلّ سجل السائق من userId (Driver.id متوافق مع Trip.driverId). */
-  private async requireDriver(userId: string) {
-    const driver = await this.prisma.driver.findUnique({ where: { userId } });
+  private async requireDriver(userId: string): Promise<DriverBidProfile> {
+    const driver = await this.prisma.driver.findUnique({
+      where: { userId },
+      include: {
+        vehicles: {
+          where: { isActive: true, verificationStatus: "APPROVED" },
+          select: { rideClass: true, vehicleTypeId: true },
+        },
+      },
+    });
     if (!driver) throw new AppException("DRIVER_NOT_FOUND");
     return driver;
+  }
+
+  private assertDriverCanBid(driver: DriverBidProfile): void {
+    if (driver.status !== "APPROVED") {
+      throw new AppException("DRIVER_NOT_APPROVED");
+    }
+    if (driver.availability !== "ONLINE") {
+      throw new AppException("FARE_OFFER_DRIVER_UNAVAILABLE");
+    }
+    if (!driver.vehicles.length) {
+      throw new AppException("DRIVER_VERIFIED_VEHICLE_REQUIRED");
+    }
+  }
+
+  private driverMatchesQuote(
+    driver: DriverBidProfile,
+    quote: FareQuote,
+  ): boolean {
+    if (quote.cityId && quote.cityId !== driver.cityId) return false;
+    return driver.vehicles.some(
+      (vehicle) =>
+        vehicle.rideClass === quote.rideClass &&
+        (!quote.vehicleTypeId || vehicle.vehicleTypeId === quote.vehicleTypeId),
+    );
+  }
+
+  /** السائق: طلبات تفاوض مفتوحة تناسب المدينة والمركبة المعتمدتين. */
+  async listDriverOpportunities(userId: string, limit = 20) {
+    const driver = await this.requireDriver(userId);
+    this.assertDriverCanBid(driver);
+    const quotes = await this.prisma.fareQuote.findMany({
+      where: {
+        status: "PROPOSED",
+        expiresAt: { gt: new Date() },
+        ...(driver.cityId
+          ? { OR: [{ cityId: null }, { cityId: driver.cityId }] }
+          : { cityId: null }),
+      },
+      orderBy: { proposedAt: "asc" },
+      take: Math.min(Math.max(limit * 3, 20), 100),
+    });
+    const matching = quotes
+      .filter((quote) => this.driverMatchesQuote(driver, quote))
+      .slice(0, Math.min(Math.max(limit, 1), 50));
+    const mine = matching.length
+      ? await this.prisma.fareOffer.findMany({
+          where: {
+            driverId: driver.id,
+            fareQuoteId: { in: matching.map((quote) => quote.id) },
+            status: "PENDING",
+          },
+        })
+      : [];
+    const mineByQuote = new Map(
+      mine.map((offer) => [offer.fareQuoteId, offer]),
+    );
+    const passengerById = await loadPassengerSummaries(
+      this.prisma,
+      matching.map((quote) => quote.passengerId),
+    );
+    return matching.map((quote) => ({
+      id: quote.id,
+      rideClass: quote.rideClass,
+      vehicleTypeId: quote.vehicleTypeId,
+      cityId: quote.cityId,
+      pickupLat: quote.pickupLat,
+      pickupLng: quote.pickupLng,
+      pickupAddress: quote.pickupAddress,
+      destLat: quote.destLat,
+      destLng: quote.destLng,
+      destAddress: quote.destAddress,
+      distanceKm: quote.distanceKm,
+      durationSec: quote.durationSec,
+      currency: quote.currency,
+      suggestedFare: Number(quote.suggestedFare),
+      proposedFare: quote.proposedFare ? Number(quote.proposedFare) : null,
+      minFare: Number(quote.minFare),
+      maxFare: Number(quote.maxFare),
+      commissionPct: quote.commissionPct,
+      expiresAt: quote.expiresAt.toISOString(),
+      passenger: passengerById.get(quote.passengerId) ?? null,
+      myOffer: mineByQuote.has(quote.id)
+        ? this.serialize(mineByQuote.get(quote.id)!)
+        : null,
+    }));
   }
 
   /** يحمّل عرض سعر يخصّ الراكب أو يرمي خطأ عدم وجود. */
@@ -126,11 +229,24 @@ export class FareOffersService {
   /** السائق: تقديم عرض مضاد (أو تحديث عرضه المعلّق الحالي). */
   async createOffer(userId: string, dto: CreateFareOfferDto) {
     const driver = await this.requireDriver(userId);
+    this.assertDriverCanBid(driver);
     const quote = await this.prisma.fareQuote.findUnique({
       where: { id: dto.fareQuoteId },
     });
     if (!quote) throw new AppException("FARE_QUOTE_NOT_FOUND");
     this.assertQuoteOpen(quote);
+    if (!this.driverMatchesQuote(driver, quote)) {
+      throw new AppException("FARE_QUOTE_NOT_ELIGIBLE");
+    }
+
+    const roundedAmount = Math.round(dto.amount * 100) / 100;
+    const min = Number(quote.minFare);
+    const max = Number(quote.maxFare);
+    if (roundedAmount < min || roundedAmount > max) {
+      throw new AppException("FARE_OFFER_OUT_OF_RANGE", {
+        details: { min, max, proposed: roundedAmount },
+      });
+    }
 
     const existing = await this.prisma.fareOffer.findFirst({
       where: {
@@ -140,7 +256,7 @@ export class FareOffersService {
       },
     });
 
-    const amount = new Prisma.Decimal(dto.amount);
+    const amount = new Prisma.Decimal(roundedAmount);
     if (existing) {
       const updated = await this.prisma.fareOffer.update({
         where: { id: existing.id },
@@ -243,7 +359,18 @@ export class FareOffersService {
             id: true,
             rating: true,
             totalTrips: true,
-            user: { select: { name: true } },
+            user: { select: { name: true, avatarUrl: true } },
+            vehicles: {
+              where: { isActive: true, verificationStatus: "APPROVED" },
+              orderBy: { createdAt: "desc" },
+              take: 1,
+              select: {
+                make: true,
+                model: true,
+                plate: true,
+                color: true,
+              },
+            },
           },
         })
       : [];
@@ -256,8 +383,10 @@ export class FareOffersService {
           ? {
               id: d.id,
               name: d.user?.name ?? null,
+              avatarUrl: d.user?.avatarUrl ?? null,
               rating: d.rating,
               totalTrips: d.totalTrips,
+              vehicle: d.vehicles[0] ?? null,
             }
           : null,
       };
@@ -270,11 +399,7 @@ export class FareOffersService {
    * لا توجد حركة Ledger هنا: الرحلة تُنشأ بحالة ACCEPTED، والتسوية المالية
    * تبقى عند إكمال الرحلة (settleTrip) معتمدة على trip.fare + commissionPct.
    */
-  async acceptOffer(
-    passengerUserId: string,
-    quoteId: string,
-    offerId: string,
-  ) {
+  async acceptOffer(passengerUserId: string, quoteId: string, offerId: string) {
     const quote = await this.requireQuoteOwned(passengerUserId, quoteId);
     this.assertQuoteOpen(quote);
     if (quote.tripId) {
@@ -456,11 +581,7 @@ export class FareOffersService {
   }
 
   /** الراكب: رفض عرض سائق معيّن. */
-  async rejectOffer(
-    passengerUserId: string,
-    quoteId: string,
-    offerId: string,
-  ) {
+  async rejectOffer(passengerUserId: string, quoteId: string, offerId: string) {
     await this.requireQuoteOwned(passengerUserId, quoteId);
     const offer = await this.prisma.fareOffer.findUnique({
       where: { id: offerId },

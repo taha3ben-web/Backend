@@ -277,6 +277,25 @@ export class PaymentsService {
         const methodValue = dto.method ?? trip.paymentMethod;
         const amount = Number(trip.fare);
 
+        // Wallet payments settle immediately against the passenger's ledger
+        // balance, so a request must never be accepted when funds are
+        // insufficient (otherwise the wallet could go negative).
+        if (methodValue === "WALLET") {
+          const { balance } = await this.financial.getUserBalance(
+            trip.passengerId,
+            trip.currency,
+          );
+          if (balance < amount) {
+            throw new AppException("INSUFFICIENT_BALANCE", {
+              details: {
+                required: amount,
+                balance,
+                currency: trip.currency,
+              },
+            });
+          }
+        }
+
         await this.assessPaymentRisk(trip.passengerId, amount, methodValue);
 
         const bootstrapPaymentId = existing?.id ?? `${tripId}-bootstrap`;

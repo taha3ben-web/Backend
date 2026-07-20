@@ -1,0 +1,68 @@
+import { PrismaService } from "../prisma/prisma.service";
+
+export interface PublicPassengerSummary {
+  id: string;
+  name: string;
+  avatarUrl: string | null;
+  completedTrips: number;
+  rating: number | null;
+  ratingCount: number;
+}
+
+/** ملخص عام آمن: لا هاتف ولا بريد، واستعلامات مجمعة بدل N+1. */
+export async function loadPassengerSummaries(
+  prisma: PrismaService,
+  passengerIds: string[],
+): Promise<Map<string, PublicPassengerSummary>> {
+  const ids = [...new Set(passengerIds.filter(Boolean))];
+  if (!ids.length) return new Map();
+
+  const [users, completed, ratings] = await prisma.$transaction([
+    prisma.user.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, name: true, avatarUrl: true },
+    }),
+    prisma.trip.groupBy({
+      by: ["passengerId"],
+      where: { passengerId: { in: ids }, status: "COMPLETED" },
+      _count: { _all: true },
+    }),
+    prisma.rating.groupBy({
+      by: ["targetId"],
+      where: { targetId: { in: ids } },
+      _avg: { stars: true },
+      _count: { _all: true },
+    }),
+  ]);
+
+  const completedById = new Map(
+    completed.map((row) => [row.passengerId, row._count._all]),
+  );
+  const ratingById = new Map(ratings.map((row) => [row.targetId, row]));
+
+  return new Map(
+    users.map((user) => {
+      const rating = ratingById.get(user.id);
+      const average = rating?._avg.stars ?? null;
+      return [
+        user.id,
+        {
+          id: user.id,
+          name: user.name,
+          avatarUrl: user.avatarUrl,
+          completedTrips: completedById.get(user.id) ?? 0,
+          rating: average == null ? null : Math.round(average * 10) / 10,
+          ratingCount: rating?._count._all ?? 0,
+        },
+      ];
+    }),
+  );
+}
+
+export async function loadPassengerSummary(
+  prisma: PrismaService,
+  passengerId: string,
+): Promise<PublicPassengerSummary | null> {
+  const summaries = await loadPassengerSummaries(prisma, [passengerId]);
+  return summaries.get(passengerId) ?? null;
+}

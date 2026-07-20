@@ -7,7 +7,7 @@ import {
   IsOptional,
   IsString,
 } from "class-validator";
-import { RideClass } from "@prisma/client";
+import { PaymentMethod, RideClass } from "@prisma/client";
 
 /** طلب رحلة جديدة من الراكب */
 export class RequestRideDto {
@@ -52,6 +52,11 @@ export class RequestRideDto {
   @IsString()
   @IsOptional()
   couponCode?: string;
+
+  // طريقة الدفع المختارة من الراكب (نقدي/محفظة/بطاقة). الافتراضي نقدي.
+  @IsEnum(PaymentMethod)
+  @IsOptional()
+  paymentMethod?: PaymentMethod;
 }
 
 /** تقدير الأجرة قبل الطلب */

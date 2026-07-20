@@ -183,19 +183,23 @@ export class RealtimeGateway
       body.heading ?? 0,
     );
 
+    // حالة الانشغال: السائق مرتبط برحلة نشطة في Redis (تُغذّي عدّاد
+    // متاح/مشغول في خريطة المدير الحية).
+    const tripId = await this.redis.client.get(`driver:${user.userId}:trip`);
+
     const payload = {
       driverId: user.userId,
       lat: body.lat,
       lng: body.lng,
       heading: body.heading ?? 0,
       speed: body.speed ?? 0,
+      busy: !!tripId,
     };
 
     // خريطة المدير الحية
     this.server.to("admins").emit("driver:moved", payload);
 
     // راكب الرحلة النشطة (إن وجدت)
-    const tripId = await this.redis.client.get(`driver:${user.userId}:trip`);
     if (tripId) {
       this.server
         .to(`trip:${tripId}`)
@@ -234,6 +238,9 @@ export class RealtimeGateway
       destLng: number;
       destAddress?: string;
       rideClass?: string;
+      vehicleTypeId?: string;
+      couponCode?: string;
+      paymentMethod?: "CASH" | "CARD" | "WALLET";
       cityId?: string;
     },
   ): Promise<void> {

@@ -26,6 +26,7 @@ import { driverOfferKey } from "./matching-lock.util";
 import { CityScalingService } from "../city-scaling/city-scaling.service";
 import { TracerService } from "../../common/observability/tracer.service";
 import { AppException } from "../../common/api/app.exception";
+import { loadPassengerSummary } from "../../common/passenger-summary";
 
 interface PendingOffer {
   resolve: (accepted: boolean) => void;
@@ -35,7 +36,11 @@ interface PendingOffer {
 // إعدادات المطابقة
 const SEARCH_RADIUS_KM = 5;
 const MAX_CANDIDATES = 10;
-const OFFER_TIMEOUT_MS = 15_000; // مهلة قبول كل سائق
+const OFFER_TIMEOUT_MS = 20_000; // مهلة ظهور الطلب وقبوله لكل سائق
+const OFFER_BATCH_SIZE = Math.min(
+  Math.max(Number(process.env.MATCHING_OFFER_BATCH_SIZE) || 5, 2),
+  MAX_CANDIDATES,
+);
 
 // قناة Redis Pub/Sub لإيصال رد السائق (قبول/رفض) عبر كل نسخ الخادم.
 // حرجة للتوسّع الأفقي: عند تشغيل عدة نسخ خلف Load Balancer قد يتصل
@@ -45,14 +50,14 @@ const CH_OFFER_RESPONSE = "matching:offer_response";
 
 // حدّ أمان لاسترداد الرحلات العالقة في SEARCHING إذا تعطّلت النسخة
 // التي كانت تُشغّل حلقة المطابقة (فشل تعافٍ). أكبر من أقصى زمن بحث
-// نظري (radiusان × 10 مرشحين × 15s ≈ 5 دقائق).
+// نظري (radiusان × 10 مرشحين × 20s ≈ 7 دقائق).
 const STUCK_SEARCH_MS = 10 * 60 * 1000;
 
 /**
  * محرك المطابقة:
  * 1. الراكب يطلب رحلة ← تقدير أجرة + إنشاء Trip (SEARCHING)
  * 2. إيجاد أقرب السائقين المتاحين عبر Redis GEO
- * 3. عرض الرحلة عليهم واحدًا تلو الآخر مع مهلة قبول
+ * 3. عرض الرحلة على دفعة سائقين مؤهلين في الوقت نفسه
  * 4. أول من يقبل يفوز ← تعيين السائق (ACCEPTED)
  * 5. إن رفض الجميع / انتهت المهلة ← لا يوجد سائق
  */
@@ -199,6 +204,27 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
           await this.coupons.redeem(applied.coupon.id);
         }
 
+        // تحقّق من كفاية رصيد المحفظة وقت الطلب عند اختيار الدفع بالمحفظة،
+        // ونرفض الطلب برسالة واضحة قبل إنشاء الرحلة عند عدم الكفاية.
+        if (dto.paymentMethod === "WALLET") {
+          const walletAccount = await this.prisma.financialAccount.findUnique({
+            where: {
+              code: `USER:${passengerId}:${quote.currency}:AVAILABLE`,
+            },
+            select: { balanceCache: true },
+          });
+          const available = Number(walletAccount?.balanceCache ?? 0);
+          if (available + 1e-9 < fare) {
+            throw new AppException("INSUFFICIENT_BALANCE", {
+              details: {
+                required: fare,
+                available,
+                currency: quote.currency,
+              },
+            });
+          }
+        }
+
         const trip = await this.prisma.trip.create({
           data: {
             passengerId,
@@ -216,6 +242,7 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
             fare,
             commissionPct: quote.commissionPct,
             currency: quote.currency,
+            paymentMethod: dto.paymentMethod ?? undefined,
             cityId: dto.cityId,
             couponId,
             discountAmount,
@@ -247,7 +274,7 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
-  /** حلقة البحث عن سائق وعرض الرحلة بالتتابع */
+  /** حلقة البحث: دفعات متزامنة، وأول تعيين ذري ناجح يفوز. */
   private async runMatching(tripId: string): Promise<void> {
     return this.withTrace("matching.run", { tripId }, async () => {
       try {
@@ -271,41 +298,24 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
             trip.vehicleTypeId,
           );
 
-          for (const driverUserId of candidates) {
+          for (
+            let offset = 0;
+            offset < candidates.length;
+            offset += OFFER_BATCH_SIZE
+          ) {
             if (this.cancelled.has(tripId)) break;
-            tried.add(driverUserId);
+            const batch = candidates.slice(offset, offset + OFFER_BATCH_SIZE);
+            batch.forEach((driverUserId) => tried.add(driverUserId));
 
-            // تأكد أن الرحلة ما زال�� قيد البحث (يلتقط الإلغاء عبر النسخ أيضًا)
+            // تأكد أن الرحلة ما زالت قيد البحث (يلتقط الإلغاء عبر النسخ أيضًا).
             const fresh = await this.prisma.trip.findUnique({
               where: { id: tripId },
               select: { status: true },
             });
             if (!fresh || fresh.status !== "SEARCHING") return;
 
-            // حجز عرض موزّع (fail-open): يمنع عرض السائق نفسه من رحلتين/
-            // نسختين متزامنتين. القفل تحسين وليس ضمان الصحة (المطالبة
-            // الذرّية في assignDriver تضمنها)، لذا نتابع عند فشل Redis.
-            const offerKey = driverOfferKey(driverUserId);
-            let reserved = true;
-            try {
-              reserved = await this.redis.acquireLock(
-                offerKey,
-                tripId,
-                OFFER_TIMEOUT_MS,
-              );
-            } catch {
-              reserved = true;
-            }
-            if (!reserved) continue; // محجوز لعرض آخر — جرّب التالي
-
-            const accepted = await this.offerToDriver(trip, driverUserId);
-            await this.redis
-              .releaseLock(offerKey, tripId)
-              .catch(() => undefined);
-            if (accepted) {
-              const assigned = await this.assignDriver(tripId, driverUserId);
-              if (assigned) return; // نجحت المطابقة
-            }
+            const assigned = await this.offerToBatch(trip, batch);
+            if (assigned) return;
           }
         }
 
@@ -338,6 +348,90 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * يعرض الطلب على دفعة كاملة بالتزامن. قد يضغط أكثر من سائق «قبول»،
+   * لكن assignDriver تقفل السائق وتتحقق من SEARCHING داخل معاملة؛ لذلك
+   * أول معاملة ناجحة فقط تفوز وتُغلق البطاقات عند بقية السائقين.
+   */
+  private async offerToBatch(
+    trip: Trip,
+    driverUserIds: string[],
+  ): Promise<boolean> {
+    const reserved = (
+      await Promise.all(
+        driverUserIds.map(async (driverUserId) => {
+          try {
+            const acquired = await this.redis.acquireLock(
+              driverOfferKey(driverUserId),
+              trip.id,
+              OFFER_TIMEOUT_MS,
+            );
+            return acquired ? driverUserId : null;
+          } catch {
+            return driverUserId; // fail-open؛ التعيين الذري يبقى الضمان.
+          }
+        }),
+      )
+    ).filter((id): id is string => id !== null);
+
+    if (!reserved.length) return false;
+
+    return new Promise<boolean>((resolve) => {
+      let settled = false;
+      let remaining = reserved.length;
+
+      const complete = async (driverUserId: string, accepted: boolean) => {
+        if (settled) {
+          await this.redis
+            .releaseLock(driverOfferKey(driverUserId), trip.id)
+            .catch(() => undefined);
+          return;
+        }
+
+        const assigned = accepted
+          ? await this.assignDriver(trip.id, driverUserId)
+          : false;
+        await this.redis
+          .releaseLock(driverOfferKey(driverUserId), trip.id)
+          .catch(() => undefined);
+
+        if (assigned && !settled) {
+          settled = true;
+          this.closeCompetingOffers(trip.id, driverUserId, reserved);
+          resolve(true);
+          return;
+        }
+
+        remaining -= 1;
+        if (!settled && remaining === 0) resolve(false);
+      };
+
+      for (const driverUserId of reserved) {
+        void this.offerToDriver(trip, driverUserId)
+          .then((accepted) => complete(driverUserId, accepted))
+          .catch(() => complete(driverUserId, false));
+      }
+    });
+  }
+
+  /** يغلق عروض المنافسين فور اختيار السائق الفائز. */
+  private closeCompetingOffers(
+    tripId: string,
+    winnerUserId: string,
+    driverUserIds: string[],
+  ): void {
+    for (const driverUserId of driverUserIds) {
+      if (driverUserId === winnerUserId) continue;
+      const closed = this.resolvePending(`${tripId}:${driverUserId}`, false);
+      if (closed) {
+        this.realtime.emitToUser(driverUserId, "ride:offer_expired", {
+          tripId,
+          reason: "accepted_by_another_driver",
+        });
+      }
+    }
+  }
+
+  /**
    * إيجاد مرشحين متاحين (APPROVED + ONLINE + بلا رحلة حالية).
    * يفوّض الاختيار والترتيب إلى محرك المطابقة المستقل (MatchingEngineService)
    * الذي يطبّق الاستراتيجية الحالية (الافتراضي: أقرب سائق). حلقة العروض تبقى هنا.
@@ -364,8 +458,12 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** إرسال عرض للسائق وانتظار ردّه ضمن المهلة */
-  private offerToDriver(trip: Trip, driverUserId: string): Promise<boolean> {
+  private async offerToDriver(
+    trip: Trip,
+    driverUserId: string,
+  ): Promise<boolean> {
     const key = `${trip.id}:${driverUserId}`;
+    const passenger = await loadPassengerSummary(this.prisma, trip.passengerId);
 
     this.realtime.emitToUser(driverUserId, "ride:offer", {
       tripId: trip.id,
@@ -378,9 +476,11 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
       rideClass: trip.rideClass,
       vehicleTypeId: trip.vehicleTypeId,
       fare: trip.fare,
+      commissionPct: trip.commissionPct,
       currency: trip.currency,
       distanceKm: trip.distanceKm,
       expiresInMs: OFFER_TIMEOUT_MS,
+      passenger,
     });
 
     return new Promise<boolean>((resolve) => {

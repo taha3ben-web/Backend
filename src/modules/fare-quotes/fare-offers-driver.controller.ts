@@ -33,11 +33,20 @@ export class FareOffersDriverController {
   }
 
   @Get()
-  listMine(
+  listMine(@CurrentUser() user: AuthUser, @Query("limit") limit?: string) {
+    return this.service.listDriverOffers(
+      user.userId,
+      limit ? Number(limit) : undefined,
+    );
+  }
+
+  /** طلبات تفاوض مفتوحة ومطابقة للسائق ومركبته الحالية. */
+  @Get("opportunities")
+  listOpportunities(
     @CurrentUser() user: AuthUser,
     @Query("limit") limit?: string,
   ) {
-    return this.service.listDriverOffers(
+    return this.service.listDriverOpportunities(
       user.userId,
       limit ? Number(limit) : undefined,
     );

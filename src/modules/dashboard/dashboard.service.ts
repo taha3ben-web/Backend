@@ -103,7 +103,10 @@ export class DashboardService {
     if (ids.length === 0) return { drivers: [], count: 0 };
 
     const pipeline = this.redis.client.pipeline();
-    for (const id of ids) pipeline.hgetall(`driver:${id}`);
+    for (const id of ids) {
+      pipeline.hgetall(`driver:${id}`);
+      pipeline.get(`driver:${id}:trip`);
+    }
     const res = await pipeline.exec();
 
     const drivers: Array<{
@@ -111,15 +114,18 @@ export class DashboardService {
       lat: number;
       lng: number;
       heading: number;
+      busy: boolean;
     }> = [];
     ids.forEach((id, i) => {
-      const h = res?.[i]?.[1] as Record<string, string> | null | undefined;
+      const h = res?.[i * 2]?.[1] as Record<string, string> | null | undefined;
+      const trip = res?.[i * 2 + 1]?.[1] as string | null | undefined;
       if (h?.lat) {
         drivers.push({
           id,
           lat: Number(h.lat),
           lng: Number(h.lng),
           heading: Number(h.heading ?? 0),
+          busy: !!trip,
         });
       }
     });
