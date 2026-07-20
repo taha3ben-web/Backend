@@ -37,10 +37,23 @@ export async function loadPassengerSummaries(
     }),
   ]);
 
+  // Prisma widens groupBy aggregate types (`_count`/`_avg`) to `true | {...}`
+  // when the calls are batched inside `$transaction([...])`, so we assert the
+  // concrete result shapes that Prisma actually returns at runtime.
+  const completedRows = completed as unknown as Array<{
+    passengerId: string;
+    _count: { _all: number };
+  }>;
+  const ratingRows = ratings as unknown as Array<{
+    targetId: string;
+    _avg: { stars: number | null };
+    _count: { _all: number };
+  }>;
+
   const completedById = new Map(
-    completed.map((row) => [row.passengerId, row._count._all]),
+    completedRows.map((row) => [row.passengerId, row._count._all]),
   );
-  const ratingById = new Map(ratings.map((row) => [row.targetId, row]));
+  const ratingById = new Map(ratingRows.map((row) => [row.targetId, row]));
 
   return new Map(
     users.map((user) => {
