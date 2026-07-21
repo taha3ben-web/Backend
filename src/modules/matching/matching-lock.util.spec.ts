@@ -30,9 +30,7 @@ describe("matching-lock.util (تزامن المطابقة الموزّعة)", ()
     });
 
     it("يُرجع قائمة فارغة حين يُحجز الجميع (تزاحم كامل)", () => {
-      expect(
-        filterUnreserved(["d1", "d2"], new Set(["d1", "d2"])),
-      ).toEqual([]);
+      expect(filterUnreserved(["d1", "d2"], new Set(["d1", "d2"]))).toEqual([]);
     });
 
     it("يُرجع القائمة كاملة حين لا حجوزات", () => {

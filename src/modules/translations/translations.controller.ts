@@ -1,0 +1,8 @@
+import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
+import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard"; import { RolesGuard } from "../../common/guards/roles.guard"; import { PermissionsGuard } from "../../common/guards/permissions.guard"; import { Roles } from "../../common/decorators/roles.decorator"; import { RequirePermissions } from "../../common/decorators/permissions.decorator"; import { CurrentUser, AuthUser } from "../../common/decorators/current-user.decorator"; import { TranslationsService } from "./translations.service"; import { UpdateTranslationBundleDto,UpsertTranslationBundleDto } from "./dto/translations.dto";
+@Controller("translations") export class TranslationsController {constructor(private readonly service:TranslationsService){}
+ @Get("public/:locale") publicBundle(@Param("locale") locale:string,@Query("knownVersion") v?:string){return this.service.publicBundle(locale,v?Number(v):undefined)}
+ @Get() @UseGuards(JwtAuthGuard,RolesGuard,PermissionsGuard) @Roles("STAFF") @RequirePermissions("settings.manage") list(){return this.service.list()}
+ @Post() @UseGuards(JwtAuthGuard,RolesGuard,PermissionsGuard) @Roles("STAFF") @RequirePermissions("settings.manage") upsert(@Body() dto:UpsertTranslationBundleDto,@CurrentUser() u:AuthUser){return this.service.upsert(dto,u.userId)}
+ @Patch(":id") @UseGuards(JwtAuthGuard,RolesGuard,PermissionsGuard) @Roles("STAFF") @RequirePermissions("settings.manage") update(@Param("id") id:string,@Body() dto:UpdateTranslationBundleDto,@CurrentUser() u:AuthUser){return this.service.update(id,dto,u.userId)}
+}

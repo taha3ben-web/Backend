@@ -69,8 +69,10 @@ export class FareQuotesService {
     const ruleMin = result.breakdown.negotiationMin;
     const ruleMax = result.breakdown.negotiationMax;
 
-    let min = ruleMin != null ? ruleMin : round2(suggested * (1 - DEFAULT_BAND_PCT));
-    let max = ruleMax != null ? ruleMax : round2(suggested * (1 + DEFAULT_BAND_PCT));
+    let min =
+      ruleMin != null ? ruleMin : round2(suggested * (1 - DEFAULT_BAND_PCT));
+    let max =
+      ruleMax != null ? ruleMax : round2(suggested * (1 + DEFAULT_BAND_PCT));
 
     // الحد الأدنى لا ينزل تحت أرضية الأجرة ولا يكون سالبًا.
     min = Math.max(min, floor, 0);

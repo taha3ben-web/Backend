@@ -90,6 +90,9 @@ export class StorageService {
     return url;
   }
 
+  async objectMetadata(objectPath: string): Promise<{ contentType: string; bytes: number; etag: string }> { this.ensureEnabled(); const [m] = await this.getBucket().file(objectPath).getMetadata(); return { contentType: m.contentType ?? "application/octet-stream", bytes: Number(m.size ?? 0), etag: String(m.md5Hash ?? m.etag ?? m.generation ?? "") }; }
+  readStream(objectPath: string) { this.ensureEnabled(); return this.getBucket().file(objectPath).createReadStream(); }
+
   /** يحذف ملفًا من الـ bucket (يتجاهل إن لم يوجد). */
   async delete(objectPath: string): Promise<void> {
     this.ensureEnabled();

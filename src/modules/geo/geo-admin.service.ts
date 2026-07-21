@@ -51,9 +51,9 @@ export class GeoAdminService {
 
     if (dto.provider !== undefined) {
       const provider = dto.provider.toLowerCase();
-      const normalized = (
-        SUPPORTED_PROVIDERS as readonly string[]
-      ).includes(provider)
+      const normalized = (SUPPORTED_PROVIDERS as readonly string[]).includes(
+        provider,
+      )
         ? provider
         : DEFAULT_MAPS_PROVIDER;
       await this.settings.upsert({

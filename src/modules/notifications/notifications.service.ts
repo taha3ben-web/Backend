@@ -28,7 +28,8 @@ export class NotificationsService {
   async send(dto: SendNotificationDto): Promise<Notification> {
     const scheduledAt = dto.scheduledAt ? new Date(dto.scheduledAt) : null;
     const now = new Date();
-    const isFuture = scheduledAt != null && scheduledAt.getTime() > now.getTime();
+    const isFuture =
+      scheduledAt != null && scheduledAt.getTime() > now.getTime();
 
     const notification = await this.prisma.notification.create({
       data: {
@@ -189,6 +190,7 @@ export class NotificationsService {
   async forUser(userId: string, type: NotificationTarget[], q: PaginationDto) {
     const where: Prisma.NotificationWhereInput = {
       OR: [{ userId }, { target: { in: type } }],
+      userStates: { none: { userId, deletedAt: { not: null } } },
     };
     const [items, total] = await this.prisma.$transaction([
       this.prisma.notification.findMany({
@@ -196,10 +198,82 @@ export class NotificationsService {
         skip: (q.page - 1) * q.limit,
         take: q.limit,
         orderBy: { createdAt: "desc" },
+        include: { userStates: { where: { userId }, select: { readAt: true } } },
       }),
       this.prisma.notification.count({ where }),
     ]);
-    return { items, total, page: q.page, limit: q.limit };
+    return {
+      items: items.map(({ userStates, ...item }) => ({
+        ...item,
+        readAt: userStates[0]?.readAt ?? null,
+        isRead: userStates[0]?.readAt != null,
+      })),
+      total,
+      page: q.page,
+      limit: q.limit,
+    };
+  }
+
+  async setRead(userId: string, type: NotificationTarget[], notificationId: string, read: boolean) {
+    await this.assertVisible(userId, type, notificationId);
+    const now = new Date();
+    return this.prisma.userNotificationState.upsert({
+      where: { userId_notificationId: { userId, notificationId } },
+      create: { userId, notificationId, readAt: read ? now : null },
+      update: { readAt: read ? now : null },
+    });
+  }
+
+  async deleteForUser(userId: string, type: NotificationTarget[], notificationId: string) {
+    await this.assertVisible(userId, type, notificationId);
+    await this.prisma.userNotificationState.upsert({
+      where: { userId_notificationId: { userId, notificationId } },
+      create: { userId, notificationId, deletedAt: new Date() },
+      update: { deletedAt: new Date() },
+    });
+    return { ok: true };
+  }
+
+  async markAllRead(userId: string, type: NotificationTarget[]) {
+    const ids = await this.visibleIds(userId, type);
+    if (!ids.length) return { updated: 0 };
+    const now = new Date();
+    await this.prisma.$transaction([
+      this.prisma.userNotificationState.createMany({ data: ids.map((notificationId) => ({ userId, notificationId, readAt: now })), skipDuplicates: true }),
+      this.prisma.userNotificationState.updateMany({ where: { userId, notificationId: { in: ids }, deletedAt: null }, data: { readAt: now } }),
+    ]);
+    return { updated: ids.length };
+  }
+
+  async deleteAllForUser(userId: string, type: NotificationTarget[]) {
+    const ids = await this.visibleIds(userId, type);
+    if (!ids.length) return { deleted: 0 };
+    const now = new Date();
+    await this.prisma.$transaction([
+      this.prisma.userNotificationState.createMany({ data: ids.map((notificationId) => ({ userId, notificationId, deletedAt: now })), skipDuplicates: true }),
+      this.prisma.userNotificationState.updateMany({ where: { userId, notificationId: { in: ids } }, data: { deletedAt: now } }),
+    ]);
+    return { deleted: ids.length };
+  }
+
+  private async assertVisible(userId: string, type: NotificationTarget[], id: string) {
+    const notification = await this.prisma.notification.findFirst({
+      where: {
+        id,
+        OR: [{ userId }, { target: { in: type } }],
+        userStates: { none: { userId, deletedAt: { not: null } } },
+      },
+      select: { id: true },
+    });
+    if (!notification) throw new NotFoundException("Notification not found");
+  }
+
+  private async visibleIds(userId: string, type: NotificationTarget[]) {
+    const rows = await this.prisma.notification.findMany({
+      where: { OR: [{ userId }, { target: { in: type } }], userStates: { none: { userId, deletedAt: { not: null } } } },
+      select: { id: true },
+    });
+    return rows.map((row) => row.id);
   }
 
   async cancelScheduled(id: string) {

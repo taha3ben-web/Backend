@@ -13,6 +13,7 @@ import {
   UpdatePassengerProfileDto,
 } from "./dto/passenger-self.dto";
 import { FinancialService } from "../financial/financial.service";
+import { SettingsService } from "../settings/settings.service";
 
 @Injectable()
 export class UsersService {
@@ -20,6 +21,7 @@ export class UsersService {
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
     private readonly financial: FinancialService,
+    private readonly settings: SettingsService,
   ) {}
 
   async findAll(q: PaginationDto, type?: UserType) {
@@ -49,6 +51,9 @@ export class UsersService {
           email: true,
           type: true,
           status: true,
+          gender: true,
+          locale: true,
+          onboardingCompletedAt: true,
           createdAt: true,
         },
       }),
@@ -273,13 +278,15 @@ export class UsersService {
         email: true,
         avatarUrl: true,
         locale: true,
+        gender: true,
+        onboardingCompletedAt: true,
         status: true,
         createdAt: true,
         updatedAt: true,
       },
     });
     if (!user) throw new NotFoundException("Passenger profile not found");
-    return { ...user, profileComplete: !user.phone.startsWith("fb_") };
+    return { ...user, profileComplete: user.onboardingCompletedAt !== null };
   }
 
   async updatePassengerProfile(userId: string, dto: UpdatePassengerProfileDto) {
@@ -288,15 +295,20 @@ export class UsersService {
       throw new BadRequestException("Account is not active");
     }
     try {
-      await this.prisma.user.update({
+      const updated = await this.prisma.user.update({
         where: { id: userId },
         data: {
           name: dto.name?.trim(),
           phone: dto.phone?.trim(),
           avatarUrl: dto.avatarUrl?.trim(),
           locale: dto.locale?.trim(),
+          gender: dto.gender,
         },
+        select: { name: true, avatarUrl: true, locale: true, gender: true, onboardingCompletedAt: true },
       });
+      if (!updated.onboardingCompletedAt && updated.name.trim().length >= 2 && updated.avatarUrl && updated.locale && updated.gender) {
+        await this.prisma.user.update({ where: { id: userId }, data: { onboardingCompletedAt: new Date() } });
+      }
     } catch (error) {
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -326,6 +338,46 @@ export class UsersService {
     );
     const readUrl = await this.storage.signedReadUrl(objectPath, 60 * 24 * 7);
     return { uploadUrl, objectPath, readUrl, contentType };
+  }
+
+  getPassengerDeletionRequest(userId: string) {
+    return this.prisma.accountDeletionRequest.findFirst({
+      where: { userId, status: "PENDING" },
+      orderBy: { requestedAt: "desc" },
+    });
+  }
+
+  async requestPassengerDeletion(userId: string, confirmation: string, reason?: string) {
+    await this.getPassengerProfile(userId);
+    const policy = await this.settings.getValue<{ enabled?: boolean; gracePeriodDays?: number; confirmationText?: string }>("passenger.accountDeletion");
+    if (!policy?.enabled || !Number.isInteger(policy.gracePeriodDays) || !policy.confirmationText) {
+      throw new BadRequestException("Account deletion is not configured");
+    }
+    if (policy.gracePeriodDays! < 1 || policy.gracePeriodDays! > 90 || confirmation !== policy.confirmationText) {
+      throw new BadRequestException("Account deletion confirmation is invalid");
+    }
+    const existing = await this.getPassengerDeletionRequest(userId);
+    if (existing) throw new ConflictException("Account deletion is already pending");
+    const scheduledFor = new Date(Date.now() + policy.gracePeriodDays! * 86_400_000);
+    const request = await this.prisma.accountDeletionRequest.create({
+      data: { userId, scheduledFor, reason: reason?.trim() || null },
+    });
+    await this.prisma.$transaction([
+      this.prisma.refreshToken.updateMany({ where: { userId, revoked: false }, data: { revoked: true } }),
+      this.prisma.session.deleteMany({ where: { userId } }),
+      this.prisma.deviceToken.deleteMany({ where: { userId } }),
+      this.prisma.auditLog.create({ data: { actorId: userId, action: "PASSENGER_ACCOUNT_DELETION_REQUESTED", entity: "AccountDeletionRequest", entityId: request.id, meta: { scheduledFor } } }),
+    ]);
+    return request;
+  }
+
+  async cancelPassengerDeletion(userId: string) {
+    const request = await this.getPassengerDeletionRequest(userId);
+    if (!request) throw new NotFoundException("Pending account deletion request not found");
+    return this.prisma.accountDeletionRequest.update({
+      where: { id: request.id },
+      data: { status: "CANCELED", canceledAt: new Date() },
+    });
   }
 
   setStatus(id: string, status: UserStatus) {

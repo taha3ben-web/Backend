@@ -23,7 +23,7 @@ export class EmailProvider {
       apiKey: this.config.get<string>("notifications.email.apiKey") ?? "",
       from:
         this.config.get<string>("notifications.email.from") ??
-        "NOVA Ride <no-reply@novaride.app>",
+        "flaminGO <no-reply@novaride.app>",
     };
   }
 

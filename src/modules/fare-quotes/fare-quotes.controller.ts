@@ -8,6 +8,8 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
+import { RolesGuard } from "../../common/guards/roles.guard";
+import { Roles } from "../../common/decorators/roles.decorator";
 import {
   CurrentUser,
   AuthUser,
@@ -21,7 +23,8 @@ import { CreateFareQuoteDto, ProposeFareDto } from "./dto/fare-quote.dto";
  * الراكب يطلب عرضًا (سعر مقترَح + نطاق) ثم يقترح سعره ضمن النطاق.
  */
 @Controller("fare-quotes")
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles("PASSENGER")
 export class FareQuotesController {
   constructor(
     private readonly service: FareQuotesService,

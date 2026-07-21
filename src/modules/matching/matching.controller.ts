@@ -13,12 +13,15 @@ import { PricingService } from "./pricing.service";
 import { RequestRideDto, QuoteDto } from "./dto/matching.dto";
 import { PaginationDto } from "../../common/dto/pagination.dto";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
+import { RolesGuard } from "../../common/guards/roles.guard";
+import { Roles } from "../../common/decorators/roles.decorator";
 import {
   CurrentUser,
   AuthUser,
 } from "../../common/decorators/current-user.decorator";
 
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles("PASSENGER")
 @Controller("rides")
 export class MatchingController {
   constructor(

@@ -166,6 +166,6 @@ export class OtpService {
 
   private buildMessage(code: string): string {
     const minutes = Math.max(1, Math.round(this.cfg.ttlSec / 60));
-    return `NOVA Ride: رمز التحقق الخاص بك هو ${code}، صالح لمدة ${minutes} دقيقة. لا تشاركه مع أحد.`;
+    return `flaminGO: رمز التحقق الخاص بك هو ${code}، صالح لمدة ${minutes} دقيقة. لا تشاركه مع أحد.`;
   }
 }

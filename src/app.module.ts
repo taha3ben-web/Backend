@@ -57,6 +57,9 @@ import { GeoModule } from "./modules/geo/geo.module";
 import { FeatureFlagsModule } from "./modules/settings/feature-flags.module";
 import { BootstrapModule } from "./modules/bootstrap/bootstrap.module";
 import { FareQuotesModule } from "./modules/fare-quotes/fare-quotes.module";
+import { TranslationsModule } from "./modules/translations/translations.module";
+import { ManagedAssetsModule } from "./modules/managed-assets/managed-assets.module";
+import { TripCommunicationModule } from "./modules/trip-communication/trip-communication.module";
 
 @Module({
   imports: [
@@ -109,6 +112,9 @@ import { FareQuotesModule } from "./modules/fare-quotes/fare-quotes.module";
     FeatureFlagsModule,
     BootstrapModule,
     FareQuotesModule,
+    TranslationsModule,
+    ManagedAssetsModule,
+    TripCommunicationModule,
     SessionsModule,
     VehicleTypesModule,
     AdsModule,

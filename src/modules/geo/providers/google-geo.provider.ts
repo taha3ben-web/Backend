@@ -172,7 +172,9 @@ export class GoogleGeoProvider implements GeoProvider {
       c.types.includes("country"),
     )?.long_name;
     const city = entry.address_components?.find(
-      (c) => c.types.includes("locality") || c.types.includes("administrative_area_level_2"),
+      (c) =>
+        c.types.includes("locality") ||
+        c.types.includes("administrative_area_level_2"),
     )?.long_name;
     return {
       address: entry.formatted_address,

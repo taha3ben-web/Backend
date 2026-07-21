@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
 import { ComplaintStatus, Prisma } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import { PaginationDto } from "../../common/dto/pagination.dto";
@@ -10,11 +15,31 @@ export class ComplaintsService {
 
   /** مستخدم يقدّم شكوى (ربما ضد طرف آخر أو مرتبطة برحلة) */
   async create(fromUserId: string, dto: CreateComplaintDto) {
+    let againstUserId = dto.againstUserId;
+    if (dto.tripId) {
+      const trip = await this.prisma.trip.findUnique({
+        where: { id: dto.tripId },
+        select: { passengerId: true, driverId: true },
+      });
+      if (!trip) throw new NotFoundException("Trip not found");
+      const isPassenger = trip.passengerId === fromUserId;
+      const isDriver = trip.driverId === fromUserId;
+      if (!isPassenger && !isDriver) {
+        throw new ForbiddenException("Trip is not accessible");
+      }
+      const otherPartyId = isPassenger ? trip.driverId : trip.passengerId;
+      if (againstUserId && againstUserId !== otherPartyId) {
+        throw new ForbiddenException("Reported user is not the other trip party");
+      }
+      againstUserId = otherPartyId ?? undefined;
+    } else if (againstUserId) {
+      throw new BadRequestException("A trip is required when reporting a user");
+    }
     return this.prisma.complaint.create({
       data: {
         fromUserId,
         tripId: dto.tripId,
-        againstUserId: dto.againstUserId,
+        againstUserId,
         message: dto.message,
         status: "OPEN",
       },

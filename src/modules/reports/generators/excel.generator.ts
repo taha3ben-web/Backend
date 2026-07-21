@@ -21,7 +21,7 @@ export async function buildExcel(
   sheets: ReportSheet[],
 ): Promise<Buffer> {
   const wb = new Workbook();
-  wb.creator = "NOVA Ride";
+  wb.creator = "flaminGO";
   wb.created = new Date();
 
   for (const sheet of sheets) {

@@ -10,6 +10,8 @@ import {
 } from "@nestjs/common";
 import { SavedPlacesService } from "./saved-places.service";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
+import { RolesGuard } from "../../common/guards/roles.guard";
+import { Roles } from "../../common/decorators/roles.decorator";
 import {
   CurrentUser,
   AuthUser,
@@ -24,7 +26,8 @@ import {
  * أماكن المستخدم المحفوظة (موجّهة للتطبيق) تحت مسار geo/places.
  * كل مستخدم يدير أماكنه فقط.
  */
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles("PASSENGER")
 @Controller("geo/places")
 export class SavedPlacesController {
   constructor(private readonly places: SavedPlacesService) {}

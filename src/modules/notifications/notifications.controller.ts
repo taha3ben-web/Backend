@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Param,
+  Patch,
   Post,
   Query,
   UseGuards,
@@ -15,6 +16,7 @@ import { PaginationDto } from "../../common/dto/pagination.dto";
 import {
   SendNotificationDto,
   RegisterDeviceDto,
+  MarkNotificationReadDto,
 } from "./dto/notifications.dto";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
 import { RolesGuard } from "../../common/guards/roles.guard";
@@ -43,19 +45,33 @@ export class NotificationsController {
   }
 
   @Delete("devices/:token")
-  removeDevice(@Param("token") token: string) {
-    return this.deviceTokens.remove(token);
+  removeDevice(@CurrentUser() user: AuthUser, @Param("token") token: string) {
+    return this.deviceTokens.remove(user.userId, token);
   }
 
   @Get("me")
   myNotifications(@CurrentUser() user: AuthUser, @Query() q: PaginationDto) {
-    const targets: NotificationTarget[] =
-      user.role === "DRIVER"
-        ? ["ALL", "DRIVERS"]
-        : user.role === "PASSENGER"
-          ? ["ALL", "PASSENGERS"]
-          : ["ALL"];
-    return this.notifications.forUser(user.userId, targets, q);
+    return this.notifications.forUser(user.userId, this.targets(user), q);
+  }
+
+  @Patch("me/:id/read")
+  markRead(@CurrentUser() user: AuthUser, @Param("id") id: string, @Body() dto: MarkNotificationReadDto) {
+    return this.notifications.setRead(user.userId, this.targets(user), id, dto.read);
+  }
+
+  @Post("me/read-all")
+  markAllRead(@CurrentUser() user: AuthUser) {
+    return this.notifications.markAllRead(user.userId, this.targets(user));
+  }
+
+  @Delete("me/:id")
+  deleteMine(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.notifications.deleteForUser(user.userId, this.targets(user), id);
+  }
+
+  @Delete("me")
+  deleteAllMine(@CurrentUser() user: AuthUser) {
+    return this.notifications.deleteAllForUser(user.userId, this.targets(user));
   }
 
   @UseGuards(RolesGuard, PermissionsGuard)
@@ -84,5 +100,13 @@ export class NotificationsController {
   @Delete(":id")
   cancel(@Param("id") id: string) {
     return this.notifications.cancelScheduled(id);
+  }
+
+  private targets(user: AuthUser): NotificationTarget[] {
+    return user.role === "DRIVER"
+      ? ["ALL", "DRIVERS"]
+      : user.role === "PASSENGER"
+        ? ["ALL", "PASSENGERS"]
+        : ["ALL"];
   }
 }

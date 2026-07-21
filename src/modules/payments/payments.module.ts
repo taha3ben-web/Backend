@@ -13,9 +13,11 @@ import { DriverFundingService } from "./driver-funding.service";
 import { DriverFundingController } from "./driver-funding.controller";
 import { DriverTransfersService } from "./driver-transfers.service";
 import { DriverTransfersController } from "./driver-transfers.controller";
+import { SettingsModule } from "../settings/settings.module";
+import { PassengerPaymentsController } from "./passenger-payments.controller";
 
 @Module({
-  imports: [FinancialModule, RiskModule],
+  imports: [FinancialModule, RiskModule, SettingsModule],
   providers: [
     WalletService,
     PaymentsService,
@@ -31,6 +33,7 @@ import { DriverTransfersController } from "./driver-transfers.controller";
     PaymentWebhooksController,
     DriverFundingController,
     DriverTransfersController,
+    PassengerPaymentsController,
   ],
   exports: [
     WalletService,

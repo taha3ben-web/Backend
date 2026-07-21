@@ -135,7 +135,7 @@ export class FinancialService {
       create: {
         id: PLATFORM_PARTY_ID,
         type: "PLATFORM",
-        displayName: "NOVA Ride",
+        displayName: "flaminGO",
       },
       update: {},
     });

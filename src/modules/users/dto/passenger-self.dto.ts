@@ -1,4 +1,5 @@
-import { IsOptional, IsString, MaxLength, MinLength } from "class-validator";
+import { IsEnum, IsOptional, IsString, MaxLength, MinLength } from "class-validator";
+import { Gender } from "@prisma/client";
 
 export class UpdatePassengerProfileDto {
   @IsOptional()
@@ -22,10 +23,26 @@ export class UpdatePassengerProfileDto {
   @IsString()
   @MaxLength(12)
   locale?: string;
+
+  @IsOptional()
+  @IsEnum(Gender)
+  gender?: Gender;
 }
 
 export class PassengerUploadUrlDto {
   @IsOptional()
   @IsString()
   contentType?: string;
+}
+
+export class RequestAccountDeletionDto {
+  @IsString()
+  @MinLength(1)
+  @MaxLength(160)
+  confirmation!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  reason?: string;
 }

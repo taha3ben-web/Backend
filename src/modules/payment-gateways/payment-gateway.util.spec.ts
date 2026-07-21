@@ -47,18 +47,9 @@ describe("payment-gateway.util", () => {
       expect(cash?.signatureScheme).toBe("none");
     });
 
-    it("manual_gateway يقوده webhook ويدعم البطاقة", () => {
-      const manual = resolveGatewayProviders({}).find(
-        (p) => p.key === "manual_gateway",
-      );
-      expect(manual?.webhookDriven).toBe(true);
-      expect(manual?.methods).toContain("CARD");
-      expect(manual?.protectionConfigured).toBe(false);
-    });
-
     it("يضيف مزوّدي بطاقات إضافيين دون تكرار الأساسيين", () => {
       const providers = resolveGatewayProviders({
-        PAYMENT_PROVIDERS: "stripe,manual_gateway",
+        PAYMENT_PROVIDERS: "stripe",
         PAYMENT_WEBHOOK_SECRET: "s",
         PAYMENT_WEBHOOK_SCHEME: "base64",
       });
@@ -78,7 +69,7 @@ describe("payment-gateway.util", () => {
       expect(isProtectionConfigured(resolveGatewayProviders({}))).toBe(false);
     });
     it("يعدّ مزوّدي الـ webhook", () => {
-      expect(countWebhookProviders(resolveGatewayProviders({}))).toBe(1);
+      expect(countWebhookProviders(resolveGatewayProviders({}))).toBe(0);
     });
   });
 

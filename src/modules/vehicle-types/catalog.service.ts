@@ -57,46 +57,56 @@ export class CatalogService {
           ? { visibleToPassengers: true }
           : {};
 
-    const categories = await this.prisma.vehicleCategory.findMany({
-      where: {
-        isActive: true,
-        deletedAt: null,
-        status: "PUBLISHED",
-        ...(usageType && usageType !== "BOTH"
-          ? { usageType: { in: [usageType, "BOTH"] } }
-          : {}),
-      },
-      orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
-      include: {
-        types: {
-          where: {
-            isActive: true,
-            deletedAt: null,
-            status: "PUBLISHED",
-            ...typeVisibility,
-            ...(usageType && usageType !== "BOTH"
-              ? { usageType: { in: [usageType, "BOTH"] } }
-              : {}),
-          },
-          orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
-          include: {
-            pricingRules: {
-              where: { isActive: true, deletedAt: null },
-              orderBy: [{ priority: "desc" }, { createdAt: "asc" }],
-              include: { serviceArea: true },
+    const [categories, assetSetting] = await Promise.all([
+      this.prisma.vehicleCategory.findMany({
+        where: {
+          isActive: true,
+          deletedAt: null,
+          status: "PUBLISHED",
+          ...(usageType && usageType !== "BOTH"
+            ? { usageType: { in: [usageType, "BOTH"] } }
+            : {}),
+        },
+        orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+        include: {
+          types: {
+            where: {
+              isActive: true,
+              deletedAt: null,
+              status: "PUBLISHED",
+              ...typeVisibility,
+              ...(usageType && usageType !== "BOTH"
+                ? { usageType: { in: [usageType, "BOTH"] } }
+                : {}),
             },
-            features: {
-              include: { feature: true },
-              where: { feature: { isActive: true, deletedAt: null } },
-            },
-            fields: {
-              where: { isActive: true },
-              orderBy: { sortOrder: "asc" },
+            orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+            include: {
+              pricingRules: {
+                where: { isActive: true, deletedAt: null },
+                orderBy: [{ priority: "desc" }, { createdAt: "asc" }],
+                include: { serviceArea: true },
+              },
+              features: {
+                include: { feature: true },
+                where: { feature: { isActive: true, deletedAt: null } },
+              },
+              fields: {
+                where: { isActive: true },
+                orderBy: { sortOrder: "asc" },
+              },
             },
           },
         },
-      },
-    });
+      }),
+      this.prisma.setting.findUnique({
+        where: { key: "passenger.vehicleAssetKeys" },
+        select: { value: true, publishedValue: true, isPublic: true },
+      }),
+    ]);
+    const assetKeys = ((assetSetting?.isPublic &&
+    assetSetting.publishedValue !== null
+      ? assetSetting.publishedValue
+      : assetSetting?.value) ?? {}) as Record<string, string>;
 
     const now = new Date();
     const data = categories
@@ -112,6 +122,7 @@ export class CatalogService {
               ...type,
               pricingRules: matchingPricingRules,
               resolvedPricing: matchingPricingRules[0] ?? null,
+              imageAssetKey: assetKeys[type.rideClass] ?? null,
             };
           })
           .filter(

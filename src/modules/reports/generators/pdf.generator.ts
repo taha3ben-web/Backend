@@ -44,7 +44,7 @@ export function buildPdf(title: string, tables: PdfTable[]): Promise<Buffer> {
       doc
         .fontSize(9)
         .fillColor("#6b7280")
-        .text(`NOVA Ride — ${new Date().toISOString()}`, { align: "center" });
+        .text(`flaminGO — ${new Date().toISOString()}`, { align: "center" });
       doc.moveDown(1).fillColor("#111827");
 
       for (const table of tables) {

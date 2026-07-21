@@ -152,14 +152,18 @@ export class AuthService {
 
   async login(dto: LoginDto, session?: SessionContext): Promise<Tokens> {
     const username = dto.username?.trim().toLowerCase();
-    const phone = username ? undefined : await this.normalizedPhone(dto.phone ?? "", dto.countryCode);
+    const phone = username
+      ? undefined
+      : await this.normalizedPhone(dto.phone ?? "", dto.countryCode);
     const loginKey = username ? `username:${username}` : (phone as string);
     // حماية من القوة الغاشمة: نرفض فورًا إن كان هذا الحساب مقفولًا مؤقتًا.
     await this.loginThrottle.assertNotLocked(loginKey);
 
     const user = username
       ? await this.prisma.user.findUnique({ where: { username } })
-      : await this.prisma.user.findUnique({ where: { phone: phone as string } });
+      : await this.prisma.user.findUnique({
+          where: { phone: phone as string },
+        });
     if (!user) {
       // نعدّ المحاولة حتى لرقم غير مسجّل لمنع التخمين المتسلسل.
       await this.loginThrottle.recordFailure(loginKey);
@@ -226,7 +230,10 @@ export class AuthService {
         });
       }
     } else {
-      const placeholderHash = await bcrypt.hash(`firebase:${firebaseUid}`, 10);
+      const unusablePasswordHash = await bcrypt.hash(
+        `firebase:${firebaseUid}`,
+        10,
+      );
       const safePhone = phone ?? `fb_${firebaseUid.slice(0, 18)}`;
       user = await this.prisma.user.create({
         data: {
@@ -234,7 +241,7 @@ export class AuthService {
           phone: safePhone,
           email,
           firebaseUid,
-          passwordHash: placeholderHash,
+          passwordHash: unusablePasswordHash,
           type: role,
           driver: role === "DRIVER" ? { create: {} } : undefined,
         },

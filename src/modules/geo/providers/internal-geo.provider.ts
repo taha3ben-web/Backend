@@ -7,11 +7,7 @@ import {
   GeoProvider,
   GeoProviderContext,
 } from "./geo-provider.interface";
-import {
-  encodePolyline,
-  interpolatePath,
-  pathLengthMeters,
-} from "../geo.util";
+import { encodePolyline, interpolatePath, pathLengthMeters } from "../geo.util";
 
 /**
  * مزوّد داخلي (Offline) يعمل دون شبكة ودون مفاتيح.
@@ -49,7 +45,9 @@ export class InternalGeoProvider implements GeoProvider {
         placeId: `internal:q:${encodeURIComponent(trimmed)}`,
         primaryText: trimmed,
         secondaryText: options.country,
-        description: options.country ? `${trimmed}, ${options.country}` : trimmed,
+        description: options.country
+          ? `${trimmed}, ${options.country}`
+          : trimmed,
         lat: options.lat,
         lng: options.lng,
       },

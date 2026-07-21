@@ -19,6 +19,7 @@ import { CreatePaymentCheckoutDto } from "./dto/payments.dto";
 import { TracerService } from "../../common/observability/tracer.service";
 import { AppException } from "../../common/api/app.exception";
 import { canPaymentTransition } from "./payment-transitions";
+import { SettingsService } from "../settings/settings.service";
 
 const PAYMENT_VELOCITY_WINDOW_MS = 24 * 60 * 60 * 1000;
 const PAYMENT_VELOCITY_MAX_COUNT = 10;
@@ -37,6 +38,7 @@ export class PaymentsService {
     private readonly financial: FinancialService,
     private readonly provider: PaymentProviderService,
     private readonly risk: RiskService,
+    private readonly settings: SettingsService,
     @Optional() private readonly tracer?: TracerService,
   ) {}
 
@@ -220,7 +222,11 @@ export class PaymentsService {
     };
   }
 
-  async createCheckoutForTrip(tripId: string, dto: CreatePaymentCheckoutDto) {
+  async createCheckoutForTrip(
+    tripId: string,
+    dto: CreatePaymentCheckoutDto,
+    passengerSelection?: { passengerId: string },
+  ) {
     return this.withTrace(
       "payments.create_checkout",
       {
@@ -237,6 +243,7 @@ export class PaymentsService {
             fare: true,
             currency: true,
             paymentMethod: true,
+            status: true,
           },
         });
         if (!trip)
@@ -246,6 +253,14 @@ export class PaymentsService {
             details: { tripId },
           });
         }
+        if (passengerSelection) {
+          if (trip.passengerId !== passengerSelection.passengerId) {
+            throw new AppException("TRIP_NOT_FOUND", { details: { tripId } });
+          }
+          if (!["SEARCHING", "ACCEPTED", "ARRIVING", "IN_PROGRESS"].includes(trip.status)) {
+            throw new ForbiddenException("Trip payment method can no longer be changed");
+          }
+        }
 
         const existing = await this.prisma.payment.findUnique({
           where: { tripId },
@@ -254,12 +269,7 @@ export class PaymentsService {
             trip: { select: { id: true, fare: true, status: true } },
           },
         });
-        if (
-          existing &&
-          existing.status !== "FAILED" &&
-          existing.status !== "REFUNDED" &&
-          existing.status !== "CANCELED"
-        ) {
+        if (existing && (existing.status === "PAID" || existing.status === "CAPTURED")) {
           return {
             payment: existing,
             checkout: {
@@ -311,7 +321,19 @@ export class PaymentsService {
         });
 
         const created = await this.prisma.$transaction(async (tx) => {
-          const now = new Date();
+          if (passengerSelection) {
+            const selected = await tx.trip.updateMany({
+              where: {
+                id: tripId,
+                passengerId: passengerSelection.passengerId,
+                status: { in: ["SEARCHING", "ACCEPTED", "ARRIVING", "IN_PROGRESS"] },
+              },
+              data: { paymentMethod: methodValue },
+            });
+            if (selected.count !== 1) {
+              throw new ForbiddenException("Trip payment method can no longer be changed");
+            }
+          }
           const payment = await tx.payment.upsert({
             where: { tripId },
             create: {
@@ -322,11 +344,11 @@ export class PaymentsService {
               provider: checkout.provider,
               providerPaymentId: checkout.providerPaymentId,
               providerStatus: checkout.providerStatus,
-              status: methodValue === "WALLET" ? "PAID" : "PENDING",
+              status: "PENDING",
               reference: dto.reference,
               metadata: this.toJsonValue(checkout.payload),
-              authorizedAt: methodValue === "WALLET" ? now : null,
-              capturedAt: methodValue === "WALLET" ? now : null,
+              authorizedAt: null,
+              capturedAt: null,
             },
             update: {
               amount,
@@ -336,13 +358,13 @@ export class PaymentsService {
               providerStatus: checkout.providerStatus,
               reference: dto.reference ?? undefined,
               metadata: this.toJsonValue(checkout.payload),
-              status: methodValue === "WALLET" ? "PAID" : "PENDING",
+              status: "PENDING",
               statusReason: null,
               failedAt: null,
               canceledAt: null,
               refundedAt: null,
-              authorizedAt: methodValue === "WALLET" ? now : null,
-              capturedAt: methodValue === "WALLET" ? now : null,
+              authorizedAt: null,
+              capturedAt: null,
             },
             include: {
               user: { select: { name: true, phone: true } },
@@ -364,6 +386,66 @@ export class PaymentsService {
         return { payment: created, checkout };
       },
     );
+  }
+
+  async passengerMethods() {
+    const policy = await this.settings.getValue<{
+      methods?: Array<{
+        method: PaymentMethod;
+        enabled: boolean;
+        provider?: string;
+        labelKey: string;
+      }>;
+    }>("passenger.paymentMethods");
+    return (policy?.methods ?? []).filter((item) => item.enabled);
+  }
+
+  async passengerPayment(userId: string, tripId: string) {
+    await this.assertPassengerTrip(userId, tripId);
+    return this.prisma.payment.findUnique({
+      where: { tripId },
+      select: {
+        id: true,
+        tripId: true,
+        amount: true,
+        method: true,
+        status: true,
+        provider: true,
+        providerStatus: true,
+        reference: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+  }
+
+  async passengerCheckout(userId: string, tripId: string, dto: CreatePaymentCheckoutDto) {
+    const trip = await this.prisma.trip.findFirst({
+      where: { id: tripId, passengerId: userId },
+      select: { id: true, status: true },
+    });
+    if (!trip) throw new NotFoundException("Trip not found");
+    if (!["SEARCHING", "ACCEPTED", "ARRIVING", "IN_PROGRESS"].includes(trip.status)) {
+      throw new ForbiddenException("Trip payment method can no longer be changed");
+    }
+    const methods = await this.passengerMethods();
+    const method = dto.method;
+    const allowed = method ? methods.find((item) => item.method === method) : null;
+    if (!method || !allowed) {
+      throw new ForbiddenException("Payment method is not enabled for passengers");
+    }
+    return this.createCheckoutForTrip(tripId, {
+      method,
+      provider: allowed.provider,
+    }, { passengerId: userId });
+  }
+
+  private async assertPassengerTrip(userId: string, tripId: string) {
+    const trip = await this.prisma.trip.findFirst({
+      where: { id: tripId, passengerId: userId },
+      select: { id: true },
+    });
+    if (!trip) throw new NotFoundException("Trip not found");
   }
 
   async recordForTrip(

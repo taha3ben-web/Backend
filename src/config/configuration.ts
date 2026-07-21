@@ -37,7 +37,7 @@ export default () => ({
     email: {
       apiUrl: process.env.EMAIL_API_URL ?? "",
       apiKey: process.env.EMAIL_API_KEY ?? "",
-      from: process.env.EMAIL_FROM ?? "NOVA Ride <no-reply@novaride.app>",
+      from: process.env.EMAIL_FROM ?? "flaminGO <no-reply@novaride.app>",
     },
   },
 });

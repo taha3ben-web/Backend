@@ -5,12 +5,14 @@ import { TripLifecycleDriverController } from "./trip-lifecycle-driver.controlle
 import { RealtimeModule } from "../realtime/realtime.module";
 import { FinancialModule } from "../financial/financial.module";
 import { NotificationsModule } from "../notifications/notifications.module";
+import { SettingsModule } from "../settings/settings.module";
 
 @Module({
   imports: [
     forwardRef(() => RealtimeModule),
     FinancialModule,
     NotificationsModule,
+    SettingsModule,
   ],
   providers: [TripsService],
   controllers: [TripsController, TripLifecycleDriverController],

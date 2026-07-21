@@ -25,6 +25,20 @@ enum UserStatus {
   PENDING
 }
 
+enum AccountDeletionStatus {
+  PENDING
+  CANCELED
+  COMPLETED
+  REJECTED
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+  PREFER_NOT_TO_SAY
+}
+
 enum DriverStatus {
   PENDING
   APPROVED
@@ -277,6 +291,8 @@ model User {
   status       UserStatus @default(ACTIVE)
   avatarUrl    String?
   locale       String     @default("ar")
+  gender       Gender?
+  onboardingCompletedAt DateTime?
   staffRoleId  String?
   staffRole    Role?      @relation(fields: [staffRoleId], references: [id])
   createdAt    DateTime   @default(now())
@@ -294,6 +310,7 @@ model User {
   sessions           Session[]
   deviceTokens       DeviceToken[]
   notifications      Notification[]
+  notificationStates UserNotificationState[]
   supportTickets     SupportTicket[]
   supportMessages    SupportMessage[]
   ratingsGiven       Rating[]           @relation("RatingAuthor")
@@ -318,9 +335,27 @@ model User {
   verifiedVehicles              Vehicle[]                  @relation("VehicleVerifier")
   requestedSettingChanges       SettingChangeRequest[]     @relation("SettingChangeRequester")
   reviewedSettingChanges        SettingChangeRequest[]     @relation("SettingChangeReviewer")
+  accountDeletionRequests       AccountDeletionRequest[]
+  tripMessagesSent              TripMessage[] @relation("TripMessageSender")
 
   @@index([type])
   @@index([status])
+}
+
+model AccountDeletionRequest {
+  id           String                @id @default(uuid())
+  userId       String
+  user         User                  @relation(fields: [userId], references: [id], onDelete: Restrict)
+  status       AccountDeletionStatus @default(PENDING)
+  reason       String?
+  requestedAt  DateTime              @default(now())
+  scheduledFor DateTime
+  canceledAt   DateTime?
+  completedAt  DateTime?
+  updatedAt    DateTime              @updatedAt
+
+  @@index([userId, status])
+  @@index([status, scheduledFor])
 }
 
 model Driver {
@@ -493,6 +528,7 @@ model Trip {
   payment        Payment?
   ratings        Rating[]
   complaints     Complaint[]
+  messages       TripMessage[]
   driverEarning  DriverEarning?
   companyEarning CompanyEarning?
 
@@ -504,6 +540,19 @@ model Trip {
   @@index([createdAt])
   @@index([status, settledAt, completedAt])
   @@index([settlementStatus])
+}
+
+model TripMessage {
+  id        String   @id @default(uuid())
+  tripId    String
+  trip      Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  senderId  String
+  sender    User     @relation("TripMessageSender", fields: [senderId], references: [id], onDelete: Restrict)
+  body      String
+  createdAt DateTime @default(now())
+
+  @@index([tripId, createdAt])
+  @@index([senderId, createdAt])
 }
 
 model TripTracking {
@@ -932,11 +981,28 @@ model Notification {
   nextAttemptAt  DateTime?
   lastError      String?
   createdAt   DateTime            @default(now())
+  userStates  UserNotificationState[]
 
   @@index([userId])
   @@index([target])
   @@index([campaignKey])
   @@index([deliveryStatus, nextAttemptAt])
+}
+
+model UserNotificationState {
+  id             String       @id @default(uuid())
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  notificationId String
+  notification   Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  readAt         DateTime?
+  deletedAt      DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([userId, notificationId])
+  @@index([userId, deletedAt])
+  @@index([userId, readAt])
 }
 
 model SupportTicket {
@@ -2301,4 +2367,42 @@ model BackupRecord {
   @@index([kind, status])
   @@index([status, startedAt])
   @@index([startedAt])
+}
+
+
+// Server-driven mobile translation bundles. One atomic, versioned JSON payload per locale.
+model TranslationBundle {
+  id          String   @id @default(uuid())
+  locale      String   @unique
+  version     Int      @default(1)
+  messages    Json
+  isActive    Boolean  @default(true)
+  createdById String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([isActive])
+}
+
+
+model ManagedAsset {
+ id String @id @default(uuid())
+ key String @unique
+ kind String
+ audience String @default("PASSENGER")
+ objectPath String
+ contentType String
+ etag String
+ version Int @default(1)
+ bytes Int
+ width Int?
+ height Int?
+ isActive Boolean @default(true)
+ createdById String?
+ updatedById String?
+ createdAt DateTime @default(now())
+ updatedAt DateTime @updatedAt
+ @@index([audience, isActive])
+ @@index([kind, isActive])
 }

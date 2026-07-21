@@ -42,8 +42,9 @@ interface BaseProviderSpec {
 }
 
 /**
- * المزوّدون الأساسيون المدمجون (يطابقون resolveProvider في الخدمة القائمة).
- * cash/wallet داخليّان بلا webhook؛ manual_gateway هو مزوّد البطاقات الافتراضي.
+ * المزوّدون الأساسيون المدمجون. cash/wallet داخليّان بلا webhook.
+ * مزوّدو البطاقات لا يظهرون إلا عند تعريفهم صراحة في البيئة، ولا يعني
+ * ظهورهم اكتمال محوّل checkout الخاص بهم.
  */
 export const BASE_PROVIDERS: readonly BaseProviderSpec[] = [
   {
@@ -59,13 +60,6 @@ export const BASE_PROVIDERS: readonly BaseProviderSpec[] = [
     methods: ["WALLET"],
     webhookDriven: false,
     capabilities: { checkout: false, capture: false, refund: true, cancel: true },
-  },
-  {
-    key: "manual_gateway",
-    label: "بوّابة البطاقات اليدوية",
-    methods: ["CARD"],
-    webhookDriven: true,
-    capabilities: { checkout: true, capture: true, refund: true, cancel: true },
   },
 ];
 

@@ -1,11 +1,4 @@
-import {
-  Body,
-  Controller,
-  Get,
-  Post,
-  Query,
-  UseGuards,
-} from "@nestjs/common";
+import { Body, Controller, Get, Post, Query, UseGuards } from "@nestjs/common";
 import { GeoService } from "./geo.service";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
 import {

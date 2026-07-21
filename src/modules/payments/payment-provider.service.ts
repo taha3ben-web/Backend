@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { BadRequestException, Injectable } from "@nestjs/common";
 import { PaymentMethod, PaymentStatus } from "@prisma/client";
 
 export interface PaymentCheckoutResult {
@@ -39,7 +39,7 @@ export class PaymentProviderService {
     if (normalized) return normalized;
     switch (method) {
       case "CARD":
-        return "manual_gateway";
+        throw new BadRequestException("No card payment provider is configured");
       case "WALLET":
         return "wallet";
       case "CASH":
@@ -63,7 +63,7 @@ export class PaymentProviderService {
       return {
         provider,
         providerPaymentId: `wallet:${input.paymentId}`,
-        providerStatus: "settled_internal",
+        providerStatus: "balance_verified",
         checkoutUrl: null,
         payload: {
           source: "wallet_balance",
@@ -85,20 +85,9 @@ export class PaymentProviderService {
         },
       };
     }
-    return {
-      provider,
-      providerPaymentId: `${provider}:${input.paymentId}`,
-      providerStatus: "requires_capture",
-      checkoutUrl: input.returnUrl ?? null,
-      payload: {
-        source: "gateway_stub",
-        tripId: input.tripId,
-        amount: input.amount,
-        currency: input.currency,
-        returnUrl: input.returnUrl ?? null,
-        cancelUrl: input.cancelUrl ?? null,
-      },
-    };
+    throw new BadRequestException(
+      `Payment provider ${provider} has no active checkout adapter`,
+    );
   }
 
   async capture(input: {

@@ -1,9 +1,10 @@
-import { Injectable, OnModuleDestroy } from "@nestjs/common";
+import { Injectable, Logger, OnModuleDestroy } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import Redis from "ioredis";
 
 @Injectable()
 export class RedisService implements OnModuleDestroy {
+  private readonly logger = new Logger(RedisService.name);
   readonly client: Redis;
 
   constructor(config: ConfigService) {
@@ -12,7 +13,7 @@ export class RedisService implements OnModuleDestroy {
     // غير ملتقَط يُسقِط العملية (unhandled 'error' event).
     this.client.on("error", (err) => {
       // تسجيل فقط؛ ioredis يعيد الاتصال تلقائيًا.
-      console.error("[redis] connection error:", err?.message ?? err);
+      this.logger.error(`Redis connection error: ${err?.message ?? "unknown"}`);
     });
   }
 

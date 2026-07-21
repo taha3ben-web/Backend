@@ -16,6 +16,7 @@ import { PaginationDto } from "../../common/dto/pagination.dto";
 import { FinancialService } from "../financial/financial.service";
 import { canTransition } from "./trip-transitions";
 import { NotificationsService } from "../notifications/notifications.service";
+import { SettingsService } from "../settings/settings.service";
 
 @Injectable()
 export class TripsService {
@@ -29,6 +30,7 @@ export class TripsService {
     private readonly redis: RedisService,
     private readonly config: ConfigService,
     private readonly notifications: NotificationsService,
+    private readonly settings: SettingsService,
   ) {}
 
   async findAll(
@@ -262,39 +264,24 @@ export class TripsService {
     tripId: string,
     to: TripStatus,
   ): void {
-    const messages: Partial<
-      Record<TripStatus, { title: string; body: string }>
-    > = {
-      ARRIVING: {
-        title: "سائقك في الطريق",
-        body: "السائق في طريقه إلى نقطة انطلاقك.",
-      },
-      IN_PROGRESS: {
-        title: "بدأت رحلتك",
-        body: "انطلقت رحلتك الآن، رحلة سعيدة.",
-      },
-      COMPLETED: {
-        title: "اكتملت رحلتك",
-        body: "وصلت إلى وجهتك. شكرًا لاستخدامك NOVA Ride.",
-      },
-      CANCELLED: {
-        title: "أُلغيت رحلتك",
-        body: "تم إلغاء الرحلة من طرف السائق.",
-      },
-    };
-    const msg = messages[to];
-    if (!msg) return;
-    void this.notifications
-      .notifyUser(passengerId, msg.title, msg.body, "PUSH", {
+    void this.sendTripPush(passengerId, tripId, to).catch((err: unknown) =>
+      this.logger.warn(
+        `فشل إرسال إشعار Push للرحلة ${tripId}: ${(err as Error).message}`,
+      ),
+    );
+  }
+
+  private async sendTripPush(passengerId: string, tripId: string, to: TripStatus) {
+    const user = await this.prisma.user.findUnique({ where: { id: passengerId }, select: { locale: true } });
+    const templates = await this.settings.getValue<Record<string, Partial<Record<TripStatus, { title: string; body: string }>>>>("passenger.tripStatusNotifications");
+    const locale = user?.locale ?? "ar";
+    const msg = templates?.[locale]?.[to] ?? templates?.ar?.[to];
+    if (!msg?.title || !msg?.body) return;
+    await this.notifications.notifyUser(passengerId, msg.title, msg.body, "PUSH", {
         kind: "trip",
         tripId,
         status: to,
-      })
-      .catch((err: unknown) =>
-        this.logger.warn(
-          `فشل إرسال إشعار Push للرحلة ${tripId}: ${(err as Error).message}`,
-        ),
-      );
+      });
   }
 
   /**

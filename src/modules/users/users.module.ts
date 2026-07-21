@@ -3,9 +3,10 @@ import { UsersService } from "./users.service";
 import { UsersController } from "./users.controller";
 import { PassengerSelfController } from "./passenger-self.controller";
 import { FinancialModule } from "../financial/financial.module";
+import { SettingsModule } from "../settings/settings.module";
 
 @Module({
-  imports: [FinancialModule],
+  imports: [FinancialModule, SettingsModule],
   providers: [UsersService],
   controllers: [UsersController, PassengerSelfController],
   exports: [UsersService],

@@ -1,4 +1,5 @@
 import {
+  IsBoolean,
   ArrayUnique,
   IsArray,
   IsEnum,
@@ -9,6 +10,11 @@ import {
   MaxLength,
   ValidateIf,
 } from "class-validator";
+
+export class MarkNotificationReadDto {
+  @IsBoolean()
+  read!: boolean;
+}
 import { NotificationChannel, NotificationTarget } from "@prisma/client";
 
 export class SendNotificationDto {

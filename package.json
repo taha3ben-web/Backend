@@ -21,7 +21,14 @@
     "test:cov": "jest --coverage",
     "smoke": "node scripts/smoke.mjs",
     "load": "node scripts/load-test.mjs",
-    "docs:api": "node scripts/gen-openapi.mjs"
+    "docs:api": "node scripts/gen-openapi.mjs",
+    "assets:publish-official": "node scripts/publish-official-assets.mjs",
+    "seed:passenger-stage2": "ts-node scripts/seed-passenger-stage2.ts",
+    "assets:publish-vehicles": "node scripts/publish-vehicle-assets.mjs",
+    "seed:passenger-stage3": "tsx scripts/seed-passenger-stage3.ts",
+    "lint:check": "eslint \"src/**/*.ts\"",
+    "test:ci": "jest --runInBand --detectOpenHandles",
+    "prisma:validate": "prisma validate"
   },
   "dependencies": {
     "@google-cloud/secret-manager": "^5.6.0",
@@ -67,5 +74,10 @@
     "ts-jest": "^29.1.5",
     "ts-node": "^10.9.2",
     "typescript": "^5.5.3"
+  },
+  "packageManager": "npm@10.8.2",
+  "engines": {
+    "node": ">=20.15 <21",
+    "npm": ">=10 <11"
   }
 }
