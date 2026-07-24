@@ -1,4 +1,4 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Injectable, Logger, Inject, forwardRef } from "@nestjs/common";
 import { NotificationChannel } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import { RealtimeGateway } from "../realtime/realtime.gateway";
@@ -26,6 +26,9 @@ export class NotificationDispatcher {
 
   constructor(
     private readonly prisma: PrismaService,
+    // تبعية دائرية: RealtimeGateway ↔ TripsService/NotificationsService.
+    // نؤجّل الحقن بـ forwardRef حتى لا يُقرأ النوع undefined وقت التحميل.
+    @Inject(forwardRef(() => RealtimeGateway))
     private readonly realtime: RealtimeGateway,
     private readonly deviceTokens: DeviceTokensService,
     private readonly push: PushProvider,

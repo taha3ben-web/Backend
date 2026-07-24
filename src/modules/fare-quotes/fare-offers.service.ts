@@ -1,4 +1,4 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Injectable, Logger, Inject, forwardRef } from "@nestjs/common";
 import { Cron, CronExpression } from "@nestjs/schedule";
 import { FareOffer, FareQuote, Prisma } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
@@ -39,6 +39,8 @@ export class FareOffersService {
 
   constructor(
     private readonly prisma: PrismaService,
+    // تبعية دائرية عبر RealtimeGateway — نؤجّل الحقن بـ forwardRef.
+    @Inject(forwardRef(() => RealtimeGateway))
     private readonly realtime: RealtimeGateway,
     private readonly notifications: NotificationsService,
   ) {}
