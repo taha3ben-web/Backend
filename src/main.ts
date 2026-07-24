@@ -117,4 +117,10 @@ async function bootstrap(): Promise<void> {
   Logger.log(`NOVA backend running on port ${port} (prefix /api)`, "Bootstrap");
 }
 
-void bootstrap();
+bootstrap().catch((err) => {
+  // اطبع سبب الانهيار الحقيقي دائمًا (حتى لو وقع أثناء تهيئة الوحدات قبل
+  // ضبط Logger)، ثم اخرج بكود فشل حتى يظهر الخطأ في سجلّ Render بوضوح.
+  // eslint-disable-next-line no-console
+  console.error("FATAL bootstrap error:", err);
+  process.exit(1);
+});

@@ -11,7 +11,9 @@ import { SettingsModule } from "../settings/settings.module";
   imports: [
     forwardRef(() => RealtimeModule),
     FinancialModule,
-    NotificationsModule,
+    // تبعية دائرية: TripsModule → NotificationsModule → RealtimeModule → TripsModule.
+    // نؤجّل تقييم NotificationsModule بـ forwardRef حتى لا يُقرأ undefined وقت التحميل.
+    forwardRef(() => NotificationsModule),
     SettingsModule,
   ],
   providers: [TripsService],
