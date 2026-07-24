@@ -1133,7 +1133,7 @@ model City {
   centerLat Float?
   centerLng Float?
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  updatedAt DateTime @updatedAt @default(now())
 
   zones        Zone[]
   pricingRules PricingRule[]
@@ -1149,7 +1149,7 @@ model Zone {
   name      String
   polygon   Json?
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  updatedAt DateTime @updatedAt @default(now())
 
   @@index([cityId])
 }
