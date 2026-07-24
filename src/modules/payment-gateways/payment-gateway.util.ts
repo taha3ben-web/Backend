@@ -108,7 +108,7 @@ export function resolveGatewayProviders(env: EnvMap): GatewayProvider[] {
     methods: [...spec.methods],
     webhookDriven: spec.webhookDriven,
     signatureScheme: spec.webhookDriven ? scheme : "none",
-    protectionConfigured: spec.webhookDriven ? protection : false,
+    protectionConfigured: protection,
     capabilities: { ...spec.capabilities },
   }));
 
@@ -136,9 +136,9 @@ export function countWebhookProviders(providers: GatewayProvider[]): number {
   return providers.filter((p) => p.enabled && p.webhookDriven).length;
 }
 
-/** هل توجد حماية webhook مضبوطة لأي مزوّد يقوده webhook. */
+/** هل ضُبطت حماية webhook (سرّ/توكن) عامّة — بصرف النظر عن وجود مزوّد يقوده webhook. */
 export function isProtectionConfigured(providers: GatewayProvider[]): boolean {
-  return providers.some((p) => p.webhookDriven && p.protectionConfigured);
+  return providers.some((p) => p.protectionConfigured);
 }
 
 export type HealthSeverity = "healthy" | "warning" | "critical";
