@@ -306,7 +306,8 @@ export class UsersService {
         },
         select: { name: true, avatarUrl: true, locale: true, gender: true, onboardingCompletedAt: true },
       });
-      if (!updated.onboardingCompletedAt && updated.name.trim().length >= 2 && updated.avatarUrl && updated.locale && updated.gender) {
+      // الصورة (avatarUrl) اختيارية لاكتمال الملف: يكفي الاسم + اللغة + الجنس.
+      if (!updated.onboardingCompletedAt && updated.name.trim().length >= 2 && updated.locale && updated.gender) {
         await this.prisma.user.update({ where: { id: userId }, data: { onboardingCompletedAt: new Date() } });
       }
     } catch (error) {
