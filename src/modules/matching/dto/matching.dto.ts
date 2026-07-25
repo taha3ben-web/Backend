@@ -1,13 +1,31 @@
 import { Type } from "class-transformer";
 import {
+  ArrayMaxSize,
+  IsArray,
   IsEnum,
   IsLatitude,
   IsLongitude,
   IsNumber,
   IsOptional,
   IsString,
+  ValidateNested,
 } from "class-validator";
 import { PaymentMethod, RideClass } from "@prisma/client";
+
+/** محطة توقّف وسيطة يمرّ بها السائق قبل الوجهة النهائية */
+export class TripStopDto {
+  @Type(() => Number)
+  @IsLatitude()
+  declare lat: number;
+
+  @Type(() => Number)
+  @IsLongitude()
+  declare lng: number;
+
+  @IsString()
+  @IsOptional()
+  address?: string;
+}
 
 /** طلب رحلة جديدة من الراكب */
 export class RequestRideDto {
@@ -57,6 +75,14 @@ export class RequestRideDto {
   @IsEnum(PaymentMethod)
   @IsOptional()
   paymentMethod?: PaymentMethod;
+
+  // محطات توقّف وسيطة اختيارية بترتيب مرورها (بحد أقصى ثلاث محطات).
+  @IsArray()
+  @ArrayMaxSize(3)
+  @ValidateNested({ each: true })
+  @Type(() => TripStopDto)
+  @IsOptional()
+  stops?: TripStopDto[];
 }
 
 /** تقدير الأجرة قبل الطلب */

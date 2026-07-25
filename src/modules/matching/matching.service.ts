@@ -237,6 +237,19 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
             destLat: dto.destLat,
             destLng: dto.destLng,
             destAddress: dto.destAddress,
+            // محطات التوقّف الوسيطة تُحفظ بترتيبها كي يراها السائق في مساره.
+            ...(dto.stops?.length
+              ? {
+                  stops: {
+                    create: dto.stops.map((stop, index) => ({
+                      seq: index + 1,
+                      lat: stop.lat,
+                      lng: stop.lng,
+                      address: stop.address,
+                    })),
+                  },
+                }
+              : {}),
             distanceKm: quote.distanceKm,
             durationSec: quote.durationSec,
             fare,
