@@ -344,6 +344,26 @@ export class RealtimeGateway
     this.server.to(`user:${userId}`).emit(event, payload);
   }
 
+  /** بثّ رسالة دردشة لطرفي الرحلة (غرفة trip:{id} فقط — لا تصل المدراء). */
+  emitTripMessage(
+    tripId: string,
+    message: {
+      id: string;
+      tripId: string;
+      senderId: string;
+      body: string;
+      createdAt: Date | string;
+    },
+  ): void {
+    this.server.to(`trip:${tripId}`).emit("trip:message", {
+      ...message,
+      createdAt:
+        message.createdAt instanceof Date
+          ? message.createdAt.toISOString()
+          : message.createdAt,
+    });
+  }
+
   /** يستدعى من الخدمات لبث تغيير حالة الرحلة لحظيًا */
   emitTripStatus(tripId: string, status: string): void {
     this.server.to(`trip:${tripId}`).emit("trip:status", { tripId, status });

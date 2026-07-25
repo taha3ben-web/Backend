@@ -52,7 +52,7 @@ export class FareQuotesController {
     @Param("id") id: string,
     @Body() dto: ProposeFareDto,
   ) {
-    return this.service.proposeFare(user.userId, id, dto.fare);
+    return this.service.proposeFare(user.userId, id, dto.fare, dto.note);
   }
 
   @Post(":id/cancel")

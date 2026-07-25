@@ -2161,6 +2161,7 @@ model FareQuote {
   minFare       Decimal         @db.Decimal(12, 2)
   maxFare       Decimal         @db.Decimal(12, 2)
   proposedFare  Decimal?        @db.Decimal(12, 2)
+  passengerNote String?         @db.VarChar(300)
   commissionPct Float           @default(15)
   pricingSource String?
   pricingRuleId String?

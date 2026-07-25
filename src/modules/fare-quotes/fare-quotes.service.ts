@@ -128,7 +128,12 @@ export class FareQuotesService {
   }
 
   /** اقتراح الراكب لسعر ضمن النطاق. */
-  async proposeFare(userId: string, id: string, fare: number) {
+  async proposeFare(
+    userId: string,
+    id: string,
+    fare: number,
+    note?: string,
+  ) {
     const quote = await this.owned(userId, id);
     if (this.isExpired(quote)) {
       await this.markExpired(quote.id);
@@ -151,6 +156,7 @@ export class FareQuotesService {
         proposedFare: new Prisma.Decimal(proposed),
         status: "PROPOSED",
         proposedAt: new Date(),
+        passengerNote: note?.trim() ? note.trim() : null,
       },
     });
     return this.serialize(updated);
@@ -273,6 +279,7 @@ export class FareQuotesService {
       maxFare: Number(quote.maxFare),
       proposedFare:
         quote.proposedFare != null ? Number(quote.proposedFare) : null,
+      passengerNote: quote.passengerNote,
       commissionPct: quote.commissionPct,
       pricingSource: quote.pricingSource,
       pricingRuleId: quote.pricingRuleId,

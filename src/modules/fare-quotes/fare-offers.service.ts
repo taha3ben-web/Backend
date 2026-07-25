@@ -183,6 +183,7 @@ export class FareOffersService {
       currency: quote.currency,
       suggestedFare: Number(quote.suggestedFare),
       proposedFare: quote.proposedFare ? Number(quote.proposedFare) : null,
+      passengerNote: quote.passengerNote,
       minFare: Number(quote.minFare),
       maxFare: Number(quote.maxFare),
       commissionPct: quote.commissionPct,

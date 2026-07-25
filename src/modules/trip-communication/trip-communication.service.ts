@@ -1,5 +1,13 @@
-import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import {
+  ForbiddenException,
+  Inject,
+  Injectable,
+  Logger,
+  NotFoundException,
+  forwardRef,
+} from "@nestjs/common";
 import { PrismaService } from "../../prisma/prisma.service";
+import { RealtimeGateway } from "../realtime/realtime.gateway";
 import { SettingsService } from "../settings/settings.service";
 import { PaginationDto } from "../../common/dto/pagination.dto";
 
@@ -14,7 +22,14 @@ type CommunicationPolicy = {
 
 @Injectable()
 export class TripCommunicationService {
-  constructor(private readonly prisma: PrismaService, private readonly settings: SettingsService) {}
+  private readonly logger = new Logger(TripCommunicationService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly settings: SettingsService,
+    @Inject(forwardRef(() => RealtimeGateway))
+    private readonly realtime: RealtimeGateway,
+  ) {}
 
   async context(userId: string, tripId: string) {
     const { trip, other } = await this.tripParty(userId, tripId);
@@ -52,10 +67,19 @@ export class TripCommunicationService {
   async send(userId: string, tripId: string, body: string) {
     const context = await this.context(userId, tripId);
     if (!context.canChat) throw new ForbiddenException("Trip chat is not active");
-    return this.prisma.tripMessage.create({
+    const message = await this.prisma.tripMessage.create({
       data: { tripId, senderId: userId, body: body.trim() },
       select: { id: true, tripId: true, senderId: true, body: true, createdAt: true },
     });
+    // بثّ لحظي للطرف الآخر; فشل البثّ لا يُفشِل حفظ الرسالة.
+    try {
+      this.realtime.emitTripMessage(tripId, message);
+    } catch (err) {
+      this.logger.warn(
+        `realtime emitTripMessage failed: ${(err as Error).message}`,
+      );
+    }
+    return message;
   }
 
   private async tripParty(userId: string, tripId: string) {

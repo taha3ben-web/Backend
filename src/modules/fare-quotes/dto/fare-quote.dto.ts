@@ -104,6 +104,12 @@ export class ProposeFareDto {
   @IsNumber()
   @IsPositive()
   fare!: number;
+
+  /** رسالة اختيارية من الراكب تظهر للسائقين مع السعر المقترح. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  note?: string;
 }
 
 /** محاكاة عرض سعر من اللوحة (دون حفظ). نفس حقول الإنشاء. */
