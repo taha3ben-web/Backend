@@ -22,6 +22,12 @@ export default () => ({
     projectId:
       process.env.GCP_PROJECT_ID ?? process.env.GOOGLE_CLOUD_PROJECT ?? "",
     storageBucket: process.env.GCS_BUCKET ?? "",
+    // JSON كامل لحساب الخدمة — ضروري على Render (خارج Google Cloud)
+    // لتوقيع روابط الرفع/القراءة (v4 signed URLs).
+    serviceAccountJson:
+      process.env.GCP_SERVICE_ACCOUNT_JSON ??
+      process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON ??
+      "",
     useSecretManager: process.env.USE_SECRET_MANAGER === "true",
   },
   notifications: {

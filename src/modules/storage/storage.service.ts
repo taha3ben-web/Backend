@@ -1,6 +1,6 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { Storage } from "@google-cloud/storage";
+import { Storage, type StorageOptions } from "@google-cloud/storage";
 
 /**
  * خدمة تخزين الملفات على Google Cloud Storage.
@@ -20,9 +20,40 @@ export class StorageService {
   constructor(private readonly config: ConfigService) {
     const bucket = this.config.get<string>("gcp.storageBucket");
     const projectId = this.config.get<string>("gcp.projectId");
+    const serviceAccountJson = this.config.get<string>(
+      "gcp.serviceAccountJson",
+    );
     if (bucket) {
       this.bucketName = bucket;
-      this.storage = new Storage(projectId ? { projectId } : {});
+      const options: StorageOptions = {};
+      if (projectId) options.projectId = projectId;
+      // على Render (خارج Google Cloud) نمرّر بيانات اعتماد حساب الخدمة
+      // صراحةً حتى تعمل المصادقة وتوقيع الروابط (v4 signed URLs).
+      if (serviceAccountJson) {
+        try {
+          const creds = JSON.parse(serviceAccountJson) as {
+            client_email?: string;
+            private_key?: string;
+            project_id?: string;
+          };
+          if (creds.client_email && creds.private_key) {
+            options.credentials = {
+              client_email: creds.client_email,
+              private_key: creds.private_key.replace(/\\n/g, "\n"),
+            };
+            if (!options.projectId && creds.project_id) {
+              options.projectId = creds.project_id;
+            }
+          } else {
+            this.logger.warn(
+              "GCP_SERVICE_ACCOUNT_JSON ناقص (client_email/private_key).",
+            );
+          }
+        } catch {
+          this.logger.error("GCP_SERVICE_ACCOUNT_JSON ليس JSON صالحًا.");
+        }
+      }
+      this.storage = new Storage(options);
       this.logger.log(`Cloud Storage enabled (bucket: ${bucket})`);
     } else {
       this.logger.warn("GCS_BUCKET غير مضبوط — خدمة التخزين معطّلة.");
