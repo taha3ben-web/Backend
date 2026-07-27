@@ -80,7 +80,7 @@ export class TransactionalEmailService {
         locale,
         vars,
       });
-      if (result.sent < 1) {
+      if (result < 1) {
         return { sent: false, reason: "PROVIDER_REJECTED" };
       }
       // لا نسجّل العنوان — المعرّف والقالب يكفيان للتشخيص.

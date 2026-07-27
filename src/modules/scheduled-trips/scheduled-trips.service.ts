@@ -134,7 +134,7 @@ export class ScheduledTripsService {
   }
 
   /** المنطق الفعلي للمهمة بعد الحصول على القفل. */
-  async activateDueTripsTask(): Promise<void> {
+  async activateDueTripsTask(): Promise<{ activated: number }> {
     const now = new Date();
     const due = await this.prisma.trip.findMany({
       where: {

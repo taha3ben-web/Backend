@@ -75,7 +75,8 @@ export class OsrmGeoProvider implements GeoProvider {
     options: { lat?: number; lng?: number; country?: string; limit: number },
     ctx: GeoProviderContext,
   ): Promise<GeoPlaceSuggestion[]> {
-    return this.internal.autocomplete(query, options, ctx);
+    void ctx;
+    return this.internal.autocomplete(query, options);
   }
 
   async geocode(
@@ -83,14 +84,16 @@ export class OsrmGeoProvider implements GeoProvider {
     options: { country?: string },
     ctx: GeoProviderContext,
   ): Promise<GeoGeocodeResult[]> {
-    return this.internal.geocode(query, options, ctx);
+    void ctx;
+    return this.internal.geocode(query, options);
   }
 
   async reverseGeocode(
     point: GeoLatLng,
     ctx: GeoProviderContext,
   ): Promise<GeoGeocodeResult> {
-    return this.internal.reverseGeocode(point, ctx);
+    void ctx;
+    return this.internal.reverseGeocode(point);
   }
 
   async directions(

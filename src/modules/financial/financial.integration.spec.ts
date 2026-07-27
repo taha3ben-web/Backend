@@ -44,6 +44,7 @@ describeDb("financial integration (real DB)", () => {
     await prisma.$connect();
     // مجرّب يمرّر صندوق صادر حقيقي ليُكتب حدث trip.settled داخل المعاملة.
     const outbox = new OutboxService(
+      { runExclusive: (_n: string, fn: () => any) => fn() } as any,
       prisma as PrismaService,
       {
         emit: () => undefined,

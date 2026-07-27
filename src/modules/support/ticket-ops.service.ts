@@ -105,7 +105,7 @@ export class TicketOpsService {
   }
 
   /** المنطق الفعلي للمهمة بعد الحصول على القفل. */
-  async scanEscalationsTask(): Promise<void> {
+  async scanEscalationsTask(): Promise<{ scanned: number; updated: number }> {
     const now = Date.now();
     const open = await this.prisma.supportTicket.findMany({
       where: { status: { in: ["OPEN", "PENDING"] } },
