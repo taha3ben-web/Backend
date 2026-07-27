@@ -1,147 +1,209 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { Storage, type StorageOptions } from "@google-cloud/storage";
+import type { Readable } from "node:stream";
+import {
+  type StorageDriver,
+  type StorageObjectMetadata,
+  type StorageProviderName,
+} from "./storage.driver";
+import { R2StorageDriver, type R2Config } from "./drivers/r2.driver";
+import { GcsStorageDriver, type GcsConfig } from "./drivers/gcs.driver";
 
 /**
- * خدمة تخزين الملفات على Google Cloud Storage.
- * تُستخدم لوثائق السائقين، صور المركبات، الفواتير، والتقارير.
+ * خدمة تخزين الملفات الموحّدة (واجهة ثابتة فوق مزوّد قابل للتبديل).
+ * تُستخدم لورقة الراكب، ووثائق السائقين، وصور المركبات، والأصول المدارة، والفواتير.
  *
- * المصادقة: على Cloud Run / GCE تُستخدم هوية الخدمة تلقائيًا
- * (Application Default Credentials)؛ محليًا عبر GOOGLE_APPLICATION_CREDENTIALS.
+ * اختيار المزوّد من متغيرات البيئة وحدها:
+ *  1. إن كانت متغيرات R2 الأربعة الإلزامية مكتملة ← Cloudflare R2 (AWS SDK v3).
+ *  2. وإلا وكان GCS_BUCKET مضبوطًا ← Google Cloud Storage (توافق خلفي للملفات القديمة).
+ *  3. وإلا تبقى الخدمة معطّلة بأمان (isEnabled=false) دون إسقاط الخادم.
  *
- * إذا لم يُضبط GCS_BUCKET تبقى الخدمة معطّلة بأمان (isEnabled=false).
+ * لا توجد أي قيمة ثابتة (مفتاح، نطاق، أو bucket) داخل الكود.
  */
 @Injectable()
 export class StorageService {
   private readonly logger = new Logger(StorageService.name);
-  private storage: Storage | null = null;
-  private bucketName: string | null = null;
+  private readonly driver: StorageDriver | null;
 
   constructor(private readonly config: ConfigService) {
-    const bucket = this.config.get<string>("gcp.storageBucket");
-    const projectId = this.config.get<string>("gcp.projectId");
-    const serviceAccountJson = this.config.get<string>(
-      "gcp.serviceAccountJson",
-    );
-    if (bucket) {
-      this.bucketName = bucket;
-      const options: StorageOptions = {};
-      if (projectId) options.projectId = projectId;
-      // على Render (خارج Google Cloud) نمرّر بيانات اعتماد حساب الخدمة
-      // صراحةً حتى تعمل المصادقة وتوقيع الروابط (v4 signed URLs).
-      if (serviceAccountJson) {
-        try {
-          const creds = JSON.parse(serviceAccountJson) as {
-            client_email?: string;
-            private_key?: string;
-            project_id?: string;
-          };
-          if (creds.client_email && creds.private_key) {
-            options.credentials = {
-              client_email: creds.client_email,
-              private_key: creds.private_key.replace(/\\n/g, "\n"),
-            };
-            if (!options.projectId && creds.project_id) {
-              options.projectId = creds.project_id;
-            }
-          } else {
-            this.logger.warn(
-              "GCP_SERVICE_ACCOUNT_JSON ناقص (client_email/private_key).",
-            );
-          }
-        } catch {
-          this.logger.error("GCP_SERVICE_ACCOUNT_JSON ليس JSON صالحًا.");
-        }
-      }
-      this.storage = new Storage(options);
-      this.logger.log(`Cloud Storage enabled (bucket: ${bucket})`);
-    } else {
-      this.logger.warn("GCS_BUCKET غير مضبوط — خدمة التخزين معطّلة.");
-    }
+    this.driver = this.resolveDriver();
   }
 
+  /** هل التخزين مضبوط وجاهز للاستخدام؟ */
   isEnabled(): boolean {
-    return this.storage !== null && this.bucketName !== null;
+    return this.driver !== null;
   }
 
-  /**
-   * يرفع ملفًا إلى الـ bucket ويُرجِع مساره الداخلي (object path).
-   */
+  /** اسم المزوّد المفعّل (للمراقبة وفحوص السلامة). */
+  provider(): StorageProviderName | null {
+    return this.driver?.provider ?? null;
+  }
+
+  /** وصف موجز لحالة التخزين دون أي سر (لـ health check). */
+  status(): {
+    enabled: boolean;
+    provider: StorageProviderName | null;
+    bucket: string | null;
+  } {
+    return {
+      enabled: this.isEnabled(),
+      provider: this.driver?.provider ?? null,
+      bucket: this.driver?.bucket ?? null,
+    };
+  }
+
+  /** يرفع ملفًا من الخادم ويُرجِع مساره الداخلي (object path). */
   async upload(
     objectPath: string,
     data: Buffer,
     contentType: string,
   ): Promise<string> {
-    this.ensureEnabled();
-    const file = this.getBucket().file(objectPath);
-    await file.save(data, {
-      contentType,
-      resumable: false,
-      metadata: { cacheControl: "private, max-age=0" },
-    });
-    return objectPath;
+    return this.ensureDriver().upload(objectPath, data, contentType);
   }
 
-  /**
-   * يُنشئ رابطًا موقّعًا مؤقتًا للقراءة (افتراضيًا 15 دقيقة).
-   * مناسب للوثائق الحساسة دون جعل الـ bucket عامًا.
-   */
+  /** رابط قراءة موقّع مؤقّت (افتراضيًا 15 دقيقة) للملفات الحساسة. */
   async signedReadUrl(
     objectPath: string,
     expiresInMinutes = 15,
   ): Promise<string> {
-    this.ensureEnabled();
-    const [url] = await this.getBucket()
-      .file(objectPath)
-      .getSignedUrl({
-        version: "v4",
-        action: "read",
-        expires: Date.now() + expiresInMinutes * 60 * 1000,
-      });
-    return url;
+    return this.ensureDriver().signedReadUrl(objectPath, expiresInMinutes);
   }
 
-  /**
-   * يُنشئ رابطًا موقّعًا للرفع المباشر من التطبيق (PUT) دون مرور الملف بالخادم.
-   */
+  /** رابط رفع موقّع (PUT) يرفع منه التطبيق مباشرةً دون مرور الملف بالخادم. */
   async signedUploadUrl(
     objectPath: string,
     contentType: string,
     expiresInMinutes = 15,
   ): Promise<string> {
-    this.ensureEnabled();
-    const [url] = await this.getBucket()
-      .file(objectPath)
-      .getSignedUrl({
-        version: "v4",
-        action: "write",
-        contentType,
-        expires: Date.now() + expiresInMinutes * 60 * 1000,
-      });
-    return url;
+    return this.ensureDriver().signedUploadUrl(
+      objectPath,
+      contentType,
+      expiresInMinutes,
+    );
   }
 
-  async objectMetadata(objectPath: string): Promise<{ contentType: string; bytes: number; etag: string }> { this.ensureEnabled(); const [m] = await this.getBucket().file(objectPath).getMetadata(); return { contentType: m.contentType ?? "application/octet-stream", bytes: Number(m.size ?? 0), etag: String(m.md5Hash ?? m.etag ?? m.generation ?? "") }; }
-  readStream(objectPath: string) { this.ensureEnabled(); return this.getBucket().file(objectPath).createReadStream(); }
+  /** وصف الكائن بعد الرفع المباشر (للتحقّق من النوع والحجم). */
+  async objectMetadata(objectPath: string): Promise<StorageObjectMetadata> {
+    return this.ensureDriver().objectMetadata(objectPath);
+  }
 
-  /** يحذف ملفًا من الـ bucket (يتجاهل إن لم يوجد). */
+  /** تدفّق قراءة لتمريره مباشرةً إلى الرد (نفس التوقيع المتزامن القديم). */
+  readStream(objectPath: string): Readable {
+    return this.ensureDriver().readStream(objectPath);
+  }
+
+  /** يحذف ملفًا (يتجاهل إن لم يوجد). */
   async delete(objectPath: string): Promise<void> {
-    this.ensureEnabled();
-    await this.getBucket()
-      .file(objectPath)
-      .delete({ ignoreNotFound: true });
+    return this.ensureDriver().delete(objectPath);
   }
 
-  private getBucket() {
-    if (!this.storage || !this.bucketName) throw new Error("خدمة Cloud Storage معطّلة — اضبط GCS_BUCKET وبيانات الاعتماد.");
-    return this.storage.bucket(this.bucketName);
+  /**
+   * الرابط العام للكائن من R2_PUBLIC_URL إن كان مضبوطًا، وإلا null.
+   * مفيد للأصول العامة (أيقونات، بانرات) لتجنّب توقيع رابط في كل طلب.
+   */
+  publicUrl(objectPath: string): string | null {
+    if (!this.driver) return null;
+    return this.driver.publicUrl(objectPath);
   }
 
-  private ensureEnabled(): void {
-    if (!this.isEnabled()) {
-      throw new Error(
-        "خدمة Cloud Storage معطّلة — اضبط GCS_BUCKET وبيانات الاعتماد.",
+  /**
+   * الرابط الأفضل للقراءة: العام إن توفر، وإلا رابط موقّع مؤقّت.
+   */
+  async readUrl(objectPath: string, expiresInMinutes = 15): Promise<string> {
+    const direct = this.publicUrl(objectPath);
+    if (direct) return direct;
+    return this.signedReadUrl(objectPath, expiresInMinutes);
+  }
+
+  /** يختار المزوّد مرةً واحدة عند الإقلاع حسب متغيرات البيئة. */
+  private resolveDriver(): StorageDriver | null {
+    const r2 = this.readR2Config();
+    if (r2) {
+      try {
+        return new R2StorageDriver(r2);
+      } catch (error) {
+        this.logger.error(
+          `تعذّر تهيئة Cloudflare R2: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+    const gcs = this.readGcsConfig();
+    if (gcs) {
+      if (r2) {
+        this.logger.warn(
+          "إعداد R2 موجود لكن تهيئته فشلت — الرجوع إلى Google Cloud Storage.",
+        );
+      }
+      try {
+        return new GcsStorageDriver(gcs);
+      } catch (error) {
+        this.logger.error(
+          `تعذّر تهيئة Google Cloud Storage: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+    this.logger.warn(
+      "خدمة التخزين معطّلة — اضبط متغيرات R2 (R2_BUCKET، R2_ENDPOINT، المفاتيح) أو GCS_BUCKET.",
+    );
+    return null;
+  }
+
+  /**
+   * يقرأ إعداد R2. المتغيرات الأربعة الأولى إلزامية، وR2_PUBLIC_URL اختياري.
+   * أي نقص جزئي يُسجّل بوضوح حتى لا يُقضي المطوّر وقتًا في التخمين.
+   */
+  private readR2Config(): R2Config | null {
+    const bucket = this.str("storage.r2.bucket");
+    const endpoint = this.str("storage.r2.endpoint");
+    const accessKeyId = this.str("storage.r2.accessKeyId");
+    const secretAccessKey = this.str("storage.r2.secretAccessKey");
+    const publicUrl = this.str("storage.r2.publicUrl");
+    const provided = [bucket, endpoint, accessKeyId, secretAccessKey];
+    if (provided.every((value) => value === "")) return null;
+    const missing: string[] = [];
+    if (!bucket) missing.push("R2_BUCKET");
+    if (!endpoint) missing.push("R2_ENDPOINT");
+    if (!accessKeyId) missing.push("R2_ACCESS_KEY_ID");
+    if (!secretAccessKey) missing.push("R2_SECRET_ACCESS_KEY");
+    if (missing.length > 0) {
+      this.logger.error(
+        `إعداد Cloudflare R2 ناقص — المتغيرات المفقودة: ${missing.join(", ")}`,
+      );
+      return null;
+    }
+    if (!publicUrl) {
+      this.logger.warn(
+        "R2_PUBLIC_URL غير مضبوط — ستُستخدم روابط موقّعة مؤقّتة للقراءة.",
       );
     }
+    return { bucket, endpoint, accessKeyId, secretAccessKey, publicUrl };
+  }
+
+  /** يقرأ إعداد GCS القديم كما هو (لا تُحذف أي ميزة قائمة). */
+  private readGcsConfig(): GcsConfig | null {
+    const bucket = this.str("gcp.storageBucket");
+    if (!bucket) return null;
+    return {
+      bucket,
+      projectId: this.str("gcp.projectId"),
+      serviceAccountJson: this.str("gcp.serviceAccountJson"),
+    };
+  }
+
+  private str(key: string): string {
+    return (this.config.get<string>(key) ?? "").trim();
+  }
+
+  private ensureDriver(): StorageDriver {
+    if (!this.driver) {
+      throw new Error(
+        "خدمة التخزين معطّلة — اضبط متغيرات Cloudflare R2 (أو GCS_BUCKET).",
+      );
+    }
+    return this.driver;
   }
 }

@@ -30,6 +30,17 @@ export default () => ({
       "",
     useSecretManager: process.env.USE_SECRET_MANAGER === "true",
   },
+  // التخزين — Cloudflare R2 أولاً (متوافق مع S3 عبر AWS SDK v3).
+  // إن بقيت فارغة يرجع الخادم إلى GCS إن كان مضبوطاً، وإلا تبقى خدمة التخزين معطّلة بأمان.
+  storage: {
+    r2: {
+      bucket: process.env.R2_BUCKET ?? "",
+      endpoint: process.env.R2_ENDPOINT ?? "",
+      accessKeyId: process.env.R2_ACCESS_KEY_ID ?? "",
+      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY ?? "",
+      publicUrl: process.env.R2_PUBLIC_URL ?? "",
+    },
+  },
   notifications: {
     // Push — Firebase Cloud Messaging (HTTP v1) عبر Firebase Admin SDK.
     // يستخدم بيانات اعتماد firebase.* (لا حاجة لـ FCM_SERVER_KEY القديم).

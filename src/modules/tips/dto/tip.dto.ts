@@ -1,10 +1,4 @@
-import {
-  IsNumber,
-  IsOptional,
-  IsString,
-  MaxLength,
-  Min,
-} from "class-validator";
+import { IsNumber, IsOptional, IsString, MaxLength, Min } from "class-validator";
 import { Type } from "class-transformer";
 import { TIP_NOTE_MAX_LENGTH } from "../tips.util";
 
