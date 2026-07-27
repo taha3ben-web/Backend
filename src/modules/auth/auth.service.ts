@@ -204,7 +204,15 @@ export class AuthService {
     const email = decoded.email ?? undefined;
     const emailVerified = decoded.email_verified === true;
     const verifiedPhone = decoded.phone_number ?? undefined;
-    const phone = verifiedPhone ?? dto.phone ?? undefined;
+    // لا نثق أبدًا برقم الهاتف القادم من العميل: لو خُزن رقم غير مُتحقّق منه
+    // لأمكن لاحقًا لمالك الرقم الحقيقي أن يرتبط بحساب أنشأه شخص آخر.
+    const phone = verifiedPhone;
+    // Firebase Phone Auth هي قناة التحقق الوحيدة، فلا نقبل رمزًا بلا هوية مُتحقّقة.
+    if (!verifiedPhone && !(email && emailVerified)) {
+      throw new UnauthorizedException(
+        "رمز Firebase لا يحمل رقم هاتف أو بريدًا مُتحقّقًا",
+      );
+    }
     const name =
       decoded.name ?? dto.name ?? (email ? email.split("@")[0] : "مستخدم NOVA");
     const role = dto.role ?? "PASSENGER";

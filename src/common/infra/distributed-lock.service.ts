@@ -35,7 +35,10 @@ export class DistributedLockService {
   constructor(@Optional() private readonly redis?: RedisService) {}
 
   /** يحاول الحصول على القفل؛ يُرجع الرمز عند النجاح أو null عند انتهاء المهلة. */
-  async acquire(name: string, options: LockOptions = {}): Promise<string | null> {
+  async acquire(
+    name: string,
+    options: LockOptions = {},
+  ): Promise<string | null> {
     const token = randomBytes(16).toString("hex");
     if (!this.redis) {
       // لا يوجد Redis — قفل صوري (نسخة واحدة/اختبار).
@@ -43,7 +46,8 @@ export class DistributedLockService {
     }
     const key = lockKey(name);
     const ttlMs = options.ttlMs ?? LOCK_DEFAULT_TTL_MS;
-    const deadline = Date.now() + (options.timeoutMs ?? LOCK_DEFAULT_TIMEOUT_MS);
+    const deadline =
+      Date.now() + (options.timeoutMs ?? LOCK_DEFAULT_TIMEOUT_MS);
     let attempt = 0;
 
     for (;;) {
@@ -78,6 +82,30 @@ export class DistributedLockService {
       this.logger.warn(
         `lock release failed for ${name}: ${error instanceof Error ? error.message : String(error)}`,
       );
+    }
+  }
+
+  /**
+   * تنفيذ حصري للمهام المجدولة (cron): محاولة واحدة دون انتطار،
+   * وتخطّي صامت إن كانت نسخة أخرى تنفِّذ المهمة الآن.
+   *
+   * لماذا لا نستخدم `withLock`: المهمة المجدولة لا يجوز أن تنتظر أو ترمي خطأً
+   * لمجرد أن نسخة أخرى سبقتها — التخطي هو السلوك الصحيح.
+   */
+  async runExclusive<T>(
+    name: string,
+    fn: () => Promise<T>,
+    ttlMs: number = LOCK_DEFAULT_TTL_MS,
+  ): Promise<T | null> {
+    const token = await this.acquire(name, { ttlMs, timeoutMs: 0 });
+    if (!token) {
+      this.logger.debug(`تخطي ${name} — نسخة أخرى تملك القفل`);
+      return null;
+    }
+    try {
+      return await fn();
+    } finally {
+      await this.release(name, token);
     }
   }
 

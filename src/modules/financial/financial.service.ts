@@ -13,7 +13,11 @@ import {
   deriveTripEarnings,
   splitCouponFunding,
 } from "../trips/settlement.util";
-import { DEFAULT_CURRENCY, round2, toMinorUnits } from "../../common/money.util";
+import {
+  DEFAULT_CURRENCY,
+  round2,
+  toMinorUnits,
+} from "../../common/money.util";
 import { accountBalanceDifference, isReconciled } from "./reconciliation.util";
 import {
   canSettlementTransition,
@@ -237,7 +241,11 @@ export class FinancialService {
       referenceId: input.referenceId,
       reason: input.reason,
       lines: [
-        { accountId: promoExpense.id, direction: "DEBIT", amount: input.amount },
+        {
+          accountId: promoExpense.id,
+          direction: "DEBIT",
+          amount: input.amount,
+        },
         { accountId: userAcc.id, direction: "CREDIT", amount: input.amount },
       ],
     });
@@ -294,6 +302,56 @@ export class FinancialService {
       lines: [
         { accountId: userAcc.id, direction: "DEBIT", amount: input.amount },
         { accountId: revenue.id, direction: "CREDIT", amount: input.amount },
+      ],
+    });
+  }
+
+  /**
+   * تحويل إكرامية من محفظة الراكب إلى محفظة السائق داخل معاملة قائمة.
+   *
+   *   DEBIT  محفظة الراكب (USER:...:AVAILABLE)
+   *   CREDIT محفظة السائق (USER:...:AVAILABLE)
+   *
+   * بلا أي عمولة للمنصّة: الإكرامية تصل السائق كاملة كما في Uber وBolt.
+   * يرفض الرصيد غير الكافي (لا يسمح برصيد سالب) وهو خامل التكرار عبر idempotencyKey.
+   */
+  async transferTip(
+    tx: Prisma.TransactionClient,
+    input: {
+      fromUserId: string;
+      toUserId: string;
+      amount: number;
+      currency: string;
+      tripId: string;
+      idempotencyKey: string;
+    },
+  ): Promise<void> {
+    this.assertCurrency(input.currency);
+    if (!Number.isFinite(input.amount) || toMinorUnits(input.amount) <= 0) {
+      throw new BadRequestException("Tip must be positive");
+    }
+    if (input.fromUserId === input.toUserId) {
+      throw new BadRequestException("Cannot tip yourself");
+    }
+    const already = await tx.ledgerTransaction.findUnique({
+      where: { idempotencyKey: input.idempotencyKey },
+    });
+    if (already) return;
+    const payer = await this.userAccount(tx, input.fromUserId, input.currency);
+    if (Number(payer.balanceCache) + 1e-9 < input.amount) {
+      throw new BadRequestException("رصيد المحفظة غير كافٍ للإكرامية");
+    }
+    const driver = await this.userAccount(tx, input.toUserId, input.currency);
+    await this.post(tx, {
+      command: "transferTip",
+      idempotencyKey: input.idempotencyKey,
+      currency: input.currency,
+      referenceType: "TRIP_TIP",
+      referenceId: input.tripId,
+      reason: "driver_tip",
+      lines: [
+        { accountId: payer.id, direction: "DEBIT", amount: input.amount },
+        { accountId: driver.id, direction: "CREDIT", amount: input.amount },
       ],
     });
   }
@@ -550,6 +608,16 @@ export class FinancialService {
 
   @Cron(CronExpression.EVERY_MINUTE)
   async retryUnsettledTrips(): Promise<void> {
+    // قفل موزّع: مع أكثر من نسخة تعمل يجب أن تنفّذ واحدة فقط كل دورة.
+    await this.lock.runExclusive(
+      "cron:financial-retry-trips",
+      () => this.retryUnsettledTripsTask(),
+      55000,
+    );
+  }
+
+  /** المنطق الفعلي للمهمة بعد الحصول على القفل. */
+  async retryUnsettledTripsTask(): Promise<void> {
     const trips = await this.prisma.trip.findMany({
       where: {
         status: "COMPLETED",
@@ -717,6 +785,16 @@ export class FinancialService {
 
   @Cron(CronExpression.EVERY_MINUTE)
   async retryUnsettledDriverCancellationPenalties(): Promise<void> {
+    // قفل موزّع: مع أكثر من نسخة تعمل يجب أن تنفّذ واحدة فقط كل دورة.
+    await this.lock.runExclusive(
+      "cron:financial-retry-penalties",
+      () => this.retryUnsettledDriverCancellationPenaltiesTask(),
+      55000,
+    );
+  }
+
+  /** المنطق الفعلي للمهمة بعد الحصول على القفل. */
+  async retryUnsettledDriverCancellationPenaltiesTask(): Promise<void> {
     const trips = await this.prisma.trip.findMany({
       where: {
         status: "CANCELLED",
@@ -1869,6 +1947,16 @@ export class FinancialService {
 
   @Cron("0 */30 * * * *")
   async scheduledLedgerReconciliation(): Promise<void> {
+    // قفل موزّع: مع أكثر من نسخة تعمل يجب أن تنفّذ واحدة فقط كل دورة.
+    await this.lock.runExclusive(
+      "cron:ledger-reconciliation",
+      () => this.scheduledLedgerReconciliationTask(),
+      300000,
+    );
+  }
+
+  /** المنطق الفعلي للمهمة بعد الحصول على القفل. */
+  async scheduledLedgerReconciliationTask(): Promise<void> {
     try {
       const result = await this.reconcileLedgerBalances();
       if (result.mismatches > 0) {

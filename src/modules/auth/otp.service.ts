@@ -1,4 +1,9 @@
-import { Injectable, Logger } from "@nestjs/common";
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  ServiceUnavailableException,
+} from "@nestjs/common";
 import { RedisService } from "../redis/redis.service";
 import { SmsProvider } from "../notifications/providers/sms.provider";
 import { AppException } from "../../common/api/app.exception";
@@ -23,11 +28,29 @@ import {
  * ملاحظة معمارية: نستخدم SmsProvider مباشرةً (يعتمد على ConfigService فقط)
  * ولا نستورد NotificationsModule لتجنّب التبعية الدائرية (Notifications يستورد Auth).
  */
+/**
+ * قناة التحقق من الهاتف المُفعّلة.
+ *
+ * `firebase` (الافتراضي): التطبيق يتحقق عبر Firebase Phone Auth ثم يُرسل
+ * رمز ID إلى `POST /auth/firebase`، فلا داعي لبوابة SMS ولا لرموز محلية.
+ * `sms`: مسار OTP المحلي (يتطلب بوابة SMS مضبوطة فعلًا).
+ */
+export type OtpChannel = "firebase" | "sms";
+
 @Injectable()
 export class OtpService {
   private readonly logger = new Logger(OtpService.name);
   private readonly cfg: OtpConfig = parseOtpConfig(process.env);
   private readonly pepper: string;
+  /** القناة المُفعّلة — الافتراضي Firebase Phone Auth. */
+  private readonly channel: OtpChannel =
+    (process.env.AUTH_OTP_CHANNEL ?? "").trim().toLowerCase() === "sms"
+      ? "sms"
+      : "firebase";
+  /** في التطوير فقط: يُسجّل الرمز في اللوغ بدل إرساله. ممنوع في الإنتاج. */
+  private readonly devMode =
+    process.env.NODE_ENV !== "production" &&
+    (process.env.OTP_DEV_MODE ?? "").trim().toLowerCase() === "true";
 
   constructor(
     private readonly redis: RedisService,
@@ -50,6 +73,17 @@ export class OtpService {
     identifier: string,
     purpose: OtpPurpose,
   ): Promise<{ sent: boolean; expiresInSeconds: number }> {
+    // مع Firebase Phone Auth لا يجوز أن يولّد الخادم رمزًا لن يُرسل أبدًا،
+    // لأن ذلك يترك المستخدم أمام شاشة إدخال رمز لا وجود له (فشل صامت).
+    if (this.channel !== "sms") {
+      throw new BadRequestException(
+        "التحقق عبر OTP المحلي معطّل. استخدم Firebase Phone Auth ثم POST /auth/firebase",
+      );
+    }
+    if (!this.sms.isConfigured && !this.devMode) {
+      throw new ServiceUnavailableException("بوابة SMS غير مضبوطة على الخادم");
+    }
+
     const countKey = otpRequestCountKey(purpose, identifier);
     const count = await this.redis.client.incr(countKey);
     if (count === 1) {
@@ -78,11 +112,30 @@ export class OtpService {
     );
 
     // إرسال عبر SMS. مزوّد SMS لا يُطلق عادةً؛ نحيط احتياطًا ونسجّل دون إفشاء الرمز.
+    if (!this.sms.isConfigured && this.devMode) {
+      // وضع التطوير فقط: لا بوابة، فيُسجّل الرمز محليًا للاختبار.
+      this.logger.warn(`OTP_DEV_MODE — رمز ${identifier}: ${code}`);
+      return { sent: true, expiresInSeconds: this.cfg.ttlSec };
+    }
+
+    // إرسال حقيقي: لا يُرجع `sent: true` إلا إن قبلت البوابة الرسالة فعلًا.
+    // الإبلاغ عن نجاح وهمي يترك المستخدم عالقًا ينتظر رمزًا لن يأتي.
+    let delivered = 0;
     try {
-      await this.sms.send({ phones: [identifier], body: this.buildMessage(code) });
+      delivered = await this.sms.send({
+        phones: [identifier],
+        body: this.buildMessage(code),
+      });
     } catch (e) {
       this.logger.error(
         `فشل إرسال OTP عبر SMS: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+    if (delivered === 0) {
+      // لا نترك رمزًا مخزّنًا لا يملكه أحد.
+      await this.redis.client.del(otpKey(purpose, identifier));
+      throw new ServiceUnavailableException(
+        "تعذر إرسال رمز التحقق — حاول لاحقًا",
       );
     }
 

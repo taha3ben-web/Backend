@@ -19,6 +19,21 @@ services:
     ports:
       - "6379:6379"
 
+  # محرك التوجيه الحقيقي (OSRM). قبل أول تشغيل جهّز البيانات:
+  #   mkdir -p osrm && cd osrm
+  #   wget https://download.geofabrik.de/africa/algeria-latest.osm.pbf
+  #   docker run -t -v "$PWD:/data" osrm/osrm-backend osrm-extract -p /opt/car.lua /data/algeria-latest.osm.pbf
+  #   docker run -t -v "$PWD:/data" osrm/osrm-backend osrm-partition /data/algeria-latest.osrm
+  #   docker run -t -v "$PWD:/data" osrm/osrm-backend osrm-customize /data/algeria-latest.osrm
+  osrm:
+    image: osrm/osrm-backend
+    restart: unless-stopped
+    command: osrm-routed --algorithm mld /data/algeria-latest.osrm
+    volumes:
+      - ./osrm:/data
+    ports:
+      - "5000:5000"
+
   api:
     build: .
     restart: unless-stopped
@@ -34,9 +49,30 @@ services:
       JWT_ACCESS_TTL: 15m
       JWT_REFRESH_TTL: 30d
       COMPANY_COMMISSION: "0.15"
+      OSRM_BASE_URL: http://osrm:5000
+      # نسخة الـ api لا تشغّل المهام المجدولة — يمكن توسيعها أفقيًا بحرية.
+      APP_ROLE: api
     ports:
       - "4000:4000"
     command: sh -c "npx prisma migrate deploy && node dist/main.js"
+
+  # عملية الـ worker: نسخة **واحدة** تشغّل الـ cron (والقفل الموزّع يحمي حتى لو تعددت).
+  worker:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      - db
+      - redis
+    environment:
+      PORT: 4001
+      APP_ROLE: worker
+      DATABASE_URL: postgresql://nova:nova@db:5432/nova?schema=public
+      REDIS_URL: redis://redis:6379
+      JWT_ACCESS_SECRET: change-me-access-secret
+      JWT_REFRESH_SECRET: change-me-refresh-secret
+      COMPANY_COMMISSION: "0.15"
+      OSRM_BASE_URL: http://osrm:5000
+    command: sh -c "node dist/main.js"
 
 volumes:
   dbdata:

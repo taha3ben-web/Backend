@@ -1,10 +1,13 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from "@nestjs/common";
 import { SafetyIncidentStatus } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
+import { AlertService } from "../../common/observability/alert.service";
+import { SmsProvider } from "../notifications/providers/sms.provider";
 import { PaginationDto } from "../../common/dto/pagination.dto";
 import {
   CreateSafetyIncidentDto,
@@ -13,7 +16,13 @@ import {
 
 @Injectable()
 export class SafetyService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger("Safety");
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly sms: SmsProvider,
+    private readonly alerts: AlertService,
+  ) {}
 
   async create(userId: string, dto: CreateSafetyIncidentDto) {
     if (dto.tripId) {
@@ -32,7 +41,7 @@ export class SafetyService {
     });
     if (existing) return existing;
 
-    return this.prisma.$transaction(async (tx) => {
+    const created = await this.prisma.$transaction(async (tx) => {
       const incident = await tx.safetyIncident.create({
         data: {
           userId,
@@ -58,6 +67,73 @@ export class SafetyService {
       }
       return incident;
     });
+
+    // الإبلاغ الفعلي بعد تثبيت المعاملة: قبل اليوم كان الـ SOS يُخزّن في الجدول
+    // ولا يصل أحدًا — وهذا أخطر من عدم وجود الميزة أصلًا لأنّه يمنح طمأنينة كاذبة.
+    // الإبلاغ بأفضل جهد ولا يُفشل الطلب (البلاغ محفوظ على كل حال).
+    void this.dispatchSos(created).catch(() => undefined);
+    return created;
+  }
+
+  /**
+   * يُطلق تنبيهًا حرجًا لفريق الدعم، ويرسل SMS لجهات طوارئ المبلّغ.
+   * إن لم تكن بوابة SMS مضبوطة يُسجّل ذلك صراحةً بدل الصمت.
+   */
+  private async dispatchSos(incident: {
+    id: string;
+    userId: string;
+    tripId: string | null;
+    type: string;
+    lat: number | null;
+    lng: number | null;
+  }): Promise<void> {
+    const [reporter, contacts] = await Promise.all([
+      this.prisma.user.findUnique({
+        where: { id: incident.userId },
+        select: { name: true, phone: true },
+      }),
+      this.prisma.emergencyContact.findMany({
+        where: { userId: incident.userId },
+        select: { phone: true },
+        take: 5,
+      }),
+    ]);
+
+    const position =
+      incident.lat != null && incident.lng != null
+        ? `https://maps.google.com/?q=${incident.lat},${incident.lng}`
+        : null;
+
+    await this.alerts.emit({
+      kind: "safety.sos",
+      severity: "CRITICAL",
+      title: `بلاغ سلامة (${incident.type})`,
+      message: `مبلّغ: ${reporter?.name ?? incident.userId} — ${reporter?.phone ?? ""}${
+        position ? ` — ${position}` : ""
+      }`,
+      context: {
+        id: incident.id,
+        tripId: incident.tripId,
+        userId: incident.userId,
+      },
+    });
+
+    const phones = contacts.map((c) => c.phone).filter(Boolean);
+    if (phones.length === 0) return;
+    if (!this.sms.isConfigured) {
+      this.logger.error(
+        `SOS ${incident.id}: بوابة SMS غير مضبوطة — لم يُبلّغ ${phones.length} جهة طوارئ`,
+      );
+      return;
+    }
+
+    const body = `flaminGO: ${reporter?.name ?? "مستخدم"} أطلق نداء استغاثة أثناء رحلة.${
+      position ? ` الموقع: ${position}` : ""
+    }`;
+    const sent = await this.sms.send({ phones, body });
+    if (sent === 0) {
+      this.logger.error(`SOS ${incident.id}: فشل إبلاغ جميع جهات الطوارئ`);
+    }
   }
 
   mine(userId: string) {
@@ -76,7 +152,11 @@ export class SafetyService {
         ? {
             OR: [
               { message: { contains: q.search, mode: "insensitive" as const } },
-              { user: { name: { contains: q.search, mode: "insensitive" as const } } },
+              {
+                user: {
+                  name: { contains: q.search, mode: "insensitive" as const },
+                },
+              },
               { user: { phone: { contains: q.search } } },
             ],
           }
@@ -100,7 +180,9 @@ export class SafetyService {
     staffId: string,
     dto: ResolveSafetyIncidentDto,
   ) {
-    const current = await this.prisma.safetyIncident.findUnique({ where: { id } });
+    const current = await this.prisma.safetyIncident.findUnique({
+      where: { id },
+    });
     if (!current) throw new NotFoundException("بلاغ السلامة غير موجود");
 
     const now = new Date();
@@ -113,11 +195,10 @@ export class SafetyService {
           current.acknowledgedById ??
           (dto.status !== "OPEN" ? staffId : undefined),
         acknowledgedAt:
-          current.acknowledgedAt ??
-          (dto.status !== "OPEN" ? now : undefined),
+          current.acknowledgedAt ?? (dto.status !== "OPEN" ? now : undefined),
         resolvedById: resolving ? staffId : undefined,
         resolvedAt: resolving ? now : undefined,
-        resolutionNote: resolving ? dto.note ?? null : undefined,
+        resolutionNote: resolving ? (dto.note ?? null) : undefined,
       },
       include: this.incidentInclude(),
     });

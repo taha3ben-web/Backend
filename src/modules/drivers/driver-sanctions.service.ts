@@ -4,6 +4,7 @@ import { PrismaService } from "../../prisma/prisma.service";
 import { AuditService } from "../rbac/audit.service";
 import { NotificationsService } from "../notifications/notifications.service";
 import { PaginationDto } from "../../common/dto/pagination.dto";
+import { DistributedLockService } from "../../common/infra/distributed-lock.service";
 
 /**
  * Stage 65 — نظام عقوبات إلغاء السائق (كما في الشركات الكبرى).
@@ -54,6 +55,7 @@ export class DriverSanctionsService {
   private readonly logger = new Logger(DriverSanctionsService.name);
 
   constructor(
+    private readonly cronLock: DistributedLockService,
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly notifications: NotificationsService,
@@ -71,9 +73,8 @@ export class DriverSanctionsService {
       const setting = await this.prisma.setting.findUnique({
         where: { key: SANCTIONS_KEY },
       });
-      const raw = (setting?.publishedValue ?? setting?.value) as unknown as
-        | Partial<SanctionsConfig>
-        | null;
+      const raw = (setting?.publishedValue ??
+        setting?.value) as unknown as Partial<SanctionsConfig> | null;
       if (!raw || typeof raw !== "object") return DEFAULT_SANCTIONS_CONFIG;
       return {
         enabled: Boolean(raw.enabled),
@@ -110,6 +111,16 @@ export class DriverSanctionsService {
    */
   @Cron(CronExpression.EVERY_30_MINUTES)
   async evaluateDriverCancellationSanctions(): Promise<void> {
+    // قفل موزّع: مع أكثر من نسخة تعمل يجب أن تنفّذ واحدة فقط كل دورة.
+    await this.cronLock.runExclusive(
+      "cron:driver-sanctions",
+      () => this.evaluateDriverCancellationSanctionsTask(),
+      300000,
+    );
+  }
+
+  /** المنطق الفعلي للمهمة بعد الحصول على القفل. */
+  async evaluateDriverCancellationSanctionsTask(): Promise<void> {
     try {
       await this.restoreExpiredSuspensions();
     } catch (err) {
@@ -141,8 +152,7 @@ export class DriverSanctionsService {
         .filter((g) => Boolean(g.driverId))
         .map((g) => ({
           driverId: g.driverId as string,
-          count:
-            typeof g._count === "object" ? (g._count._all ?? 0) : 0,
+          count: typeof g._count === "object" ? (g._count._all ?? 0) : 0,
         }));
     } catch (err) {
       this.logger.warn(`تعذّر تجميع إلغاءات السائقين: ${String(err)}`);

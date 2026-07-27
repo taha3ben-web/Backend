@@ -77,16 +77,27 @@ export class NotificationDispatcher {
       case "EMAIL": {
         const users = await this.prisma.user.findMany({
           where: { id: { in: userIds }, email: { not: null } },
-          select: { email: true },
+          select: { email: true, locale: true },
         });
-        const emails = users
-          .map((u) => u.email)
-          .filter((e): e is string => !!e);
-        return this.email.send({
-          emails,
-          subject: input.title,
-          body: input.body,
-        });
+        // نجمّع المستلمين بحسب اللغة حتى يُولّد القالب باتجاه صحيح لكل مجموعة.
+        const byLocale = new Map<string, string[]>();
+        for (const user of users) {
+          if (!user.email) continue;
+          const locale = user.locale || "ar";
+          const bucket = byLocale.get(locale) ?? [];
+          bucket.push(user.email);
+          byLocale.set(locale, bucket);
+        }
+        let sent = 0;
+        for (const [locale, emails] of byLocale) {
+          sent += await this.email.sendTemplate({
+            emails,
+            template: "generic_notice",
+            locale,
+            vars: { title: input.title, body: input.body },
+          });
+        }
+        return sent;
       }
 
       default:

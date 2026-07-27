@@ -27,6 +27,8 @@ import { CityScalingService } from "../city-scaling/city-scaling.service";
 import { TracerService } from "../../common/observability/tracer.service";
 import { AppException } from "../../common/api/app.exception";
 import { loadPassengerSummary } from "../../common/passenger-summary";
+import { maskPhone } from "../calls/call-masking.adapter";
+import { DistributedLockService } from "../../common/infra/distributed-lock.service";
 
 interface PendingOffer {
   resolve: (accepted: boolean) => void;
@@ -74,6 +76,7 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
   private sub: Redis | null = null;
 
   constructor(
+    private readonly cronLock: DistributedLockService,
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
     private readonly pricing: PricingService,
@@ -252,6 +255,9 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
               : {}),
             distanceKm: quote.distanceKm,
             durationSec: quote.durationSec,
+            // مسار الطرق الحقيقي يُحفظ مرة واحدة ليرسمه التطبيق دون إعادة حساب.
+            routePolyline: quote.route?.polyline ?? null,
+            routeProvider: quote.route?.provider ?? null,
             fare,
             commissionPct: quote.commissionPct,
             currency: quote.currency,
@@ -739,7 +745,22 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
       }),
       this.prisma.trip.count({ where }),
     ]);
-    return { items, total, page: q.page, limit: q.limit };
+    // إخفاء أرقام السائقين في سجلّ الرحلات.
+    const masked = items.map((trip) =>
+      trip.driver
+        ? {
+            ...trip,
+            driver: {
+              ...trip.driver,
+              user: {
+                ...trip.driver.user,
+                phone: maskPhone(trip.driver.user?.phone),
+              },
+            },
+          }
+        : trip,
+    );
+    return { items: masked, total, page: q.page, limit: q.limit };
   }
 
   /** تفاصيل رحلة يملكها الراكب (أو المكلّف بها السائق) */
@@ -764,7 +785,22 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
     if (!isOwner) {
       throw new ForbiddenException("ل��ست لديك صلاحية على هذه الرحلة");
     }
-    return trip;
+    // إخفاء الأرقام: الطرفان يريان رقمًا محجوبًا فقط؛ الاتصال يمرّ عبر /api/calls/connect.
+    return {
+      ...trip,
+      passenger: trip.passenger
+        ? { ...trip.passenger, phone: maskPhone(trip.passenger.phone) }
+        : trip.passenger,
+      driver: trip.driver
+        ? {
+            ...trip.driver,
+            user: {
+              ...trip.driver.user,
+              phone: maskPhone(trip.driver.user?.phone),
+            },
+          }
+        : trip.driver,
+    };
   }
 
   /** إرجاع استخدام الكوبون إن كانت الرحلة تحمل واحدًا (عند الإلغاء) */
@@ -785,6 +821,16 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
    */
   @Cron(CronExpression.EVERY_5_MINUTES)
   async reapStuckSearches(): Promise<void> {
+    // قفل موزّع: مع أكثر من نسخة تعمل يجب أن تنفّذ واحدة فقط كل دورة.
+    await this.cronLock.runExclusive(
+      "cron:reap-stuck-searches",
+      () => this.reapStuckSearchesTask(),
+      240000,
+    );
+  }
+
+  /** المنطق الفعلي للمهمة بعد الحصول على القفل. */
+  async reapStuckSearchesTask(): Promise<void> {
     const cutoff = new Date(Date.now() - STUCK_SEARCH_MS);
     const stuck = await this.prisma.trip.findMany({
       where: { status: "SEARCHING", createdAt: { lt: cutoff } },

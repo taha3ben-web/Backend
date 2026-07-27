@@ -58,6 +58,83 @@ export function encodePolyline(points: GeoLatLng[]): string {
   return result;
 }
 
+/**
+ * فكّ ترميز Google Encoded Polyline (precision 5) — عكس `encodePolyline`.
+ * دالة نقية تمامًا: تُرجع مصفوفة فارغة عند أي مدخل غير صالح.
+ */
+export function decodePolyline(encoded: string): GeoLatLng[] {
+  if (typeof encoded !== "string" || encoded.length === 0) return [];
+  const points: GeoLatLng[] = [];
+  let index = 0;
+  let lat = 0;
+  let lng = 0;
+
+  const nextValue = (): number | null => {
+    let result = 0;
+    let shift = 0;
+    let byte = 0;
+    do {
+      if (index >= encoded.length) return null;
+      byte = encoded.charCodeAt(index) - 63;
+      index += 1;
+      result |= (byte & 0x1f) << shift;
+      shift += 5;
+    } while (byte >= 0x20);
+    return result & 1 ? ~(result >> 1) : result >> 1;
+  };
+
+  while (index < encoded.length) {
+    const dLat = nextValue();
+    if (dLat === null) break;
+    const dLng = nextValue();
+    if (dLng === null) break;
+    lat += dLat;
+    lng += dLng;
+    points.push({ lat: lat / 1e5, lng: lng / 1e5 });
+  }
+  return points;
+}
+
+/**
+ * أقصر مسافة (أمتار) بين نقطة وقطعة مستقيمة بين نقطتين.
+ * إسقاط مستوٍ موضعي (دقيق بما يكفي لمسافات قصيرة).
+ */
+export function distanceToSegmentMeters(
+  point: GeoLatLng,
+  a: GeoLatLng,
+  b: GeoLatLng,
+): number {
+  const latRad = (point.lat * Math.PI) / 180;
+  const mPerDegLat = 111_132;
+  const mPerDegLng = 111_320 * Math.max(0.01, Math.cos(latRad));
+  const px = (point.lng - a.lng) * mPerDegLng;
+  const py = (point.lat - a.lat) * mPerDegLat;
+  const bx = (b.lng - a.lng) * mPerDegLng;
+  const by = (b.lat - a.lat) * mPerDegLat;
+  const lenSq = bx * bx + by * by;
+  if (lenSq === 0) return Math.hypot(px, py);
+  const t = Math.max(0, Math.min(1, (px * bx + py * by) / lenSq));
+  return Math.hypot(px - t * bx, py - t * by);
+}
+
+/**
+ * أقصر مسافة (أمتار) بين نقطة ومسار كامل.
+ * يُرجع `Infinity` إن كان المسار فارغًا (لا يمكن الحكم).
+ */
+export function distanceToPathMeters(
+  point: GeoLatLng,
+  path: GeoLatLng[],
+): number {
+  if (!Array.isArray(path) || path.length === 0) return Infinity;
+  if (path.length === 1) return haversineMeters(point, path[0]);
+  let min = Infinity;
+  for (let i = 1; i < path.length; i += 1) {
+    const d = distanceToSegmentMeters(point, path[i - 1], path[i]);
+    if (d < min) min = d;
+  }
+  return min;
+}
+
 /** يولّد مسارًا تقريبيًا (خط مستقيم مجزّأ) بين نقاط. */
 export function interpolatePath(
   points: GeoLatLng[],

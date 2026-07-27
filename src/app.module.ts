@@ -3,6 +3,8 @@ import { ConfigModule } from "@nestjs/config";
 import { ThrottlerModule, ThrottlerGuard } from "@nestjs/throttler";
 import { ScheduleModule } from "@nestjs/schedule";
 import { APP_GUARD } from "@nestjs/core";
+import { JwtAuthGuard } from "./common/guards/jwt-auth.guard";
+import { RolesGuard } from "./common/guards/roles.guard";
 import configuration from "./config/configuration";
 import { PrismaModule } from "./prisma/prisma.module";
 import { InfraModule } from "./common/infra/infra.module";
@@ -35,6 +37,10 @@ import { RbacModule } from "./modules/rbac/rbac.module";
 import { SettingsModule } from "./modules/settings/settings.module";
 import { RealtimeModule } from "./modules/realtime/realtime.module";
 import { EmergencyModule } from "./modules/emergency/emergency.module";
+import { CallsModule } from "./modules/calls/calls.module";
+import { LostItemsModule } from "./modules/lost-items/lost-items.module";
+import { InvoicesModule } from "./modules/invoices/invoices.module";
+import { TipsModule } from "./modules/tips/tips.module";
 import { AppVersionsModule } from "./modules/app-versions/app-versions.module";
 import { SessionsModule } from "./modules/sessions/sessions.module";
 import { VehicleTypesModule } from "./modules/vehicle-types/vehicle-types.module";
@@ -61,11 +67,29 @@ import { TranslationsModule } from "./modules/translations/translations.module";
 import { ManagedAssetsModule } from "./modules/managed-assets/managed-assets.module";
 import { TripCommunicationModule } from "./modules/trip-communication/trip-communication.module";
 
+/**
+ * دور العملية: `api` يخدم الطلبات فقط، `worker` يشغّل المهام المجدولة فقط،
+ * والافتراضي `all` (الاثنان معًا — مناسب للتطوير ولنسخة واحدة).
+ *
+ * لماذا يهم: مع توسيع أفقي (عدة نسخ) يُشغّل كل نسخة كل الـ cron في نفس اللحظة،
+ * فيتكرر العمل المالي والإشعارات. القفل الموزّع يحمي، وفصل الدور يوفّر الموارد.
+ */
+export type AppRole = "api" | "worker" | "all";
+
+export const APP_ROLE: AppRole = ((): AppRole => {
+  const raw = (process.env.APP_ROLE ?? "").trim().toLowerCase();
+  return raw === "api" || raw === "worker" ? raw : "all";
+})();
+
+/** هل تعمل المهام المجدولة في هذه العملية؟ */
+export const SCHEDULER_ENABLED = APP_ROLE !== "api";
+
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true, load: [configuration] }),
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }]),
-    ScheduleModule.forRoot(),
+    // بدون ScheduleModule تكون مزيّنات @Cron خاملة تمامًا في نسخ الـ api.
+    ...(SCHEDULER_ENABLED ? [ScheduleModule.forRoot()] : []),
     ObservabilityModule,
     InfraModule,
     PrismaModule,
@@ -106,6 +130,10 @@ import { TripCommunicationModule } from "./modules/trip-communication/trip-commu
     SettingsModule,
     RealtimeModule,
     EmergencyModule,
+    CallsModule,
+    LostItemsModule,
+    InvoicesModule,
+    TipsModule,
     AppVersionsModule,
     LegalModule,
     GeoModule,
@@ -123,6 +151,13 @@ import { TripCommunicationModule } from "./modules/trip-communication/trip-commu
     MetricsModule,
   ],
   controllers: [HealthController],
-  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
+  // حراس عالميون بالترتيب: تقنين المعدل ← المصادقة ← الأدوار.
+  // الوضع الافتراضي لكل مسار أصبح "محمي"؛ ولا يُفتح مسار إلا بـ @Public()
+  // صراحةً. هذا يمنع تسريب أي مسار جديد يُنسى مزيّنه مستقبلًا.
+  providers: [
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: APP_GUARD, useClass: JwtAuthGuard },
+    { provide: APP_GUARD, useClass: RolesGuard },
+  ],
 })
 export class AppModule {}

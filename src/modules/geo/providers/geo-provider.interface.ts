@@ -42,6 +42,8 @@ export interface GeoProviderContext {
   serverApiKey?: string;
   defaultCountry?: string;
   averageSpeedKmh: number;
+  /** عنوان قاعدة الخدمة للمزوّدين المستضافين ذاتيًا (OSRM). */
+  baseUrl?: string;
 }
 
 export interface GeoProvider {

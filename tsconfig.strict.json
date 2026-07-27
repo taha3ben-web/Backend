@@ -1,0 +1,17 @@
+{
+  // ملف تحقّق منفصل: يُشغّل يدويًا عبر `npm run typecheck:strict` ولا يؤثر على `npm run build`.
+  // الهدف: إغلاق ثغرات `any` الضمنية تدريجيًا ثم نقل الخيارات إلى tsconfig.json.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "incremental": false,
+    "noImplicitAny": true,
+    "strictBindCallApply": true,
+    "strictFunctionTypes": true,
+    "noImplicitThis": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "**/*.spec.ts"]
+}

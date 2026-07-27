@@ -8,6 +8,7 @@ import { RefreshDto } from "./dto/refresh.dto";
 import { FirebaseLoginDto } from "./dto/firebase-login.dto";
 import { RequestOtpDto, VerifyOtpDto } from "./dto/otp.dto";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
+import { Public } from "../../common/decorators/public.decorator";
 import {
   CurrentUser,
   AuthUser,
@@ -18,36 +19,42 @@ import { AUTH_RATE_LIMITS } from "./auth-rate-limits";
 export class AuthController {
   constructor(private readonly auth: AuthService) {}
 
+  @Public()
   @Throttle(AUTH_RATE_LIMITS.register)
   @Post("register")
   register(@Body() dto: RegisterDto, @Req() req: Request) {
     return this.auth.register(dto, this.extractSessionContext(req));
   }
 
+  @Public()
   @Throttle(AUTH_RATE_LIMITS.login)
   @Post("login")
   login(@Body() dto: LoginDto, @Req() req: Request) {
     return this.auth.login(dto, this.extractSessionContext(req));
   }
 
+  @Public()
   @Throttle(AUTH_RATE_LIMITS.firebase)
   @Post("firebase")
   firebase(@Body() dto: FirebaseLoginDto, @Req() req: Request) {
     return this.auth.loginWithFirebase(dto, this.extractSessionContext(req));
   }
 
+  @Public()
   @Throttle(AUTH_RATE_LIMITS.refresh)
   @Post("refresh")
   refresh(@Body() dto: RefreshDto) {
     return this.auth.refresh(dto.refreshToken);
   }
 
+  @Public()
   @Throttle(AUTH_RATE_LIMITS.otpRequest)
   @Post("otp/request")
   requestOtp(@Body() dto: RequestOtpDto) {
     return this.auth.requestPhoneOtp(dto);
   }
 
+  @Public()
   @Throttle(AUTH_RATE_LIMITS.otpVerify)
   @Post("otp/verify")
   verifyOtp(@Body() dto: VerifyOtpDto) {

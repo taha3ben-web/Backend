@@ -8,6 +8,7 @@ import {
 } from "@nestjs/common";
 import type { Request, Response } from "express";
 import { getRequestContext } from "../observability/request-context";
+import { ErrorReporterService } from "../observability/error-reporter.service";
 import { AppException } from "../api/app.exception";
 import {
   ApiErrorCode,
@@ -26,6 +27,12 @@ import {
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
   private readonly logger = new Logger("Exceptions");
+
+  /**
+   * مراسل الأخطاء اختياري: المرشّح يُنشأ يدويًا في `main.ts`، فلا نفرضه
+   * حتى تبقى الاختبارات الحالية (`new AllExceptionsFilter()`) عاملة دون تعديل.
+   */
+  constructor(private readonly reporter?: ErrorReporterService) {}
 
   catch(exception: unknown, host: ArgumentsHost): void {
     if (host.getType() !== "http") return;
@@ -72,6 +79,14 @@ export class AllExceptionsFilter implements ExceptionFilter {
         `${request.method} ${request.originalUrl} -> ${status}`,
         exception instanceof Error ? exception.stack : String(exception),
       );
+      // أخطاء الخادم فقط تُرفع للمراقبة (4xx أخطاء عميل وتغرق اللوحة).
+      this.reporter?.capture(exception, {
+        where: `${request.method} ${request.originalUrl}`,
+        method: request.method,
+        statusCode: status,
+        userId: (request as unknown as { user?: { userId?: string } }).user
+          ?.userId,
+      });
     } else {
       this.logger.warn(`${request.method} ${request.originalUrl} -> ${status}`);
     }

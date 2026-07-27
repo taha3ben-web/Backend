@@ -1,8 +1,4 @@
-import {
-  Controller,
-  Get,
-  ServiceUnavailableException,
-} from "@nestjs/common";
+import { Controller, Get, ServiceUnavailableException } from "@nestjs/common";
 import { PrismaService } from "../../prisma/prisma.service";
 import { RedisService } from "../redis/redis.service";
 
@@ -14,6 +10,10 @@ type CheckResult = { ok: boolean; latencyMs?: number; error?: string };
  *  - GET /api/health/live  → liveness صريح
  *  - GET /api/health/ready → readiness يفحص PostgreSQL و Redis فعليًا (503 عند الفشل)
  */
+import { Public } from "../../common/decorators/public.decorator";
+
+// مسارات عامة مقصودة (الحارس العالمي يحمي كل ما عداها).
+@Public()
 @Controller("health")
 export class HealthController {
   constructor(
@@ -39,10 +39,7 @@ export class HealthController {
 
   @Get("ready")
   async ready() {
-    const [db, redis] = await Promise.all([
-      this.checkDb(),
-      this.checkRedis(),
-    ]);
+    const [db, redis] = await Promise.all([this.checkDb(), this.checkRedis()]);
     const ok = db.ok && redis.ok;
     const body = {
       ok,

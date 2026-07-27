@@ -10,6 +10,7 @@ import {
   AdminFareOfferQueryDto,
 } from "./dto/fare-offer.dto";
 import { loadPassengerSummaries } from "../../common/passenger-summary";
+import { DistributedLockService } from "../../common/infra/distributed-lock.service";
 
 type DriverBidProfile = Prisma.DriverGetPayload<{
   include: {
@@ -38,6 +39,7 @@ export class FareOffersService {
   }
 
   constructor(
+    private readonly cronLock: DistributedLockService,
     private readonly prisma: PrismaService,
     // تبعية دائرية عبر RealtimeGateway — نؤجّل الحقن بـ forwardRef.
     @Inject(forwardRef(() => RealtimeGateway))
@@ -642,6 +644,16 @@ export class FareOffersService {
    */
   @Cron(CronExpression.EVERY_30_SECONDS)
   async expirePendingOffers(): Promise<void> {
+    // قفل موزّع: مع أكثر من نسخة تعمل يجب أن تنفّذ واحدة فقط كل دورة.
+    await this.cronLock.runExclusive(
+      "cron:fare-offers-expire",
+      () => this.expirePendingOffersTask(),
+      25000,
+    );
+  }
+
+  /** المنطق الفعلي للمهمة بعد الحصول على القفل. */
+  async expirePendingOffersTask(): Promise<void> {
     const now = new Date();
     const expired = await this.prisma.fareOffer.findMany({
       where: { status: "PENDING", expiresAt: { lt: now } },

@@ -68,6 +68,39 @@ export class RedisService implements OnModuleDestroy {
     return res;
   }
 
+  /**
+   * السائقون قرب نقطة **مع إحداثياتهم** (WITHCOORD) مرتّبين من الأقرب.
+   *
+   * ضروري لحساب ETA الحقيقي في المطابقة: محرك التوجيه يحتاج موقع كل سائق،
+   * وجلبه باستدعاء منفرد لكل سائق يعيد مشكلة N+1 داخل المسار الحرج.
+   */
+  async nearbyDriversWithCoords(
+    lat: number,
+    lng: number,
+    radiusKm: number,
+  ): Promise<Array<{ driverId: string; lat: number; lng: number }>> {
+    const res = (await this.client.georadius(
+      "drivers:geo",
+      lng,
+      lat,
+      radiusKm,
+      "km",
+      "WITHCOORD",
+      "ASC",
+    )) as unknown as Array<[string, [string, string]]>;
+    const out: Array<{ driverId: string; lat: number; lng: number }> = [];
+    for (const entry of res ?? []) {
+      const driverId = entry?.[0];
+      const coord = entry?.[1];
+      if (!driverId || !coord) continue;
+      const entryLng = Number(coord[0]);
+      const entryLat = Number(coord[1]);
+      if (!Number.isFinite(entryLat) || !Number.isFinite(entryLng)) continue;
+      out.push({ driverId, lat: entryLat, lng: entryLng });
+    }
+    return out;
+  }
+
   // سكربت Lua ذرّي: لا يحذف القفل إلا إن طابق الـ token (مالكه).
   private static readonly RELEASE_LOCK_LUA =
     'if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) else return 0 end';

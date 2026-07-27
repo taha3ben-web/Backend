@@ -227,4 +227,9 @@ export class UpdateGeoProviderConfigDto {
   @Min(5)
   @Max(200)
   averageSpeedKmh?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  osrmBaseUrl?: string;
 }

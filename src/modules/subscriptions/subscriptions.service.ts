@@ -7,6 +7,7 @@ import { AppException } from "../../common/api/app.exception";
 import { FinancialService } from "../financial/financial.service";
 import { CreatePlanDto, UpdatePlanDto } from "./dto/subscriptions.dto";
 import { nextPeriodEnd } from "./subscriptions.util";
+import { DistributedLockService } from "../../common/infra/distributed-lock.service";
 
 /** محاولات التجديد قبل اعتبار الاشتراك منتهيًا (فشل الخصم متكررًا). */
 const MAX_RENEWAL_ATTEMPTS = 3;
@@ -33,6 +34,7 @@ export class SubscriptionsService {
   private readonly logger = new Logger(SubscriptionsService.name);
 
   constructor(
+    private readonly cronLock: DistributedLockService,
     private readonly prisma: PrismaService,
     private readonly financial: FinancialService,
   ) {}
@@ -234,10 +236,20 @@ export class SubscriptionsService {
    * يجدّد الاشتراكات المستحقة (currentPeriodEnd <= now):
    * - autoRenew=false -> يُعلّم EXPIRED.
    * - autoRenew=true  -> يخصم الرسم ويمدّد الفترة؛ وعند فشل الخصم يزيد المحاولات
- *      وينتهي بعد MAX_RENEWAL_ATTEMPTS. الخصم والتمديد ذريّان (معاملة واحدة) وidempotent.
+   *      وينتهي بعد MAX_RENEWAL_ATTEMPTS. الخصم والتمديد ذريّان (معاملة واحدة) وidempotent.
    */
   @Cron(CronExpression.EVERY_HOUR)
   async renewDueSubscriptions(): Promise<void> {
+    // قفل موزّع: مع أكثر من نسخة تعمل يجب أن تنفّذ واحدة فقط كل دورة.
+    await this.cronLock.runExclusive(
+      "cron:subscriptions-renew",
+      () => this.renewDueSubscriptionsTask(),
+      600000,
+    );
+  }
+
+  /** المنطق الفعلي للمهمة بعد الحصول على القفل. */
+  async renewDueSubscriptionsTask(): Promise<void> {
     const now = new Date();
     const due = await this.prisma.userSubscription.findMany({
       where: { status: "ACTIVE", currentPeriodEnd: { lte: now } },
@@ -254,7 +266,10 @@ export class SubscriptionsService {
           continue;
         }
         const price = Number(sub.plan.price);
-        const periodEnd = nextPeriodEnd(sub.currentPeriodEnd, sub.plan.interval);
+        const periodEnd = nextPeriodEnd(
+          sub.currentPeriodEnd,
+          sub.plan.interval,
+        );
         await this.prisma.$transaction(async (tx) => {
           if (price > 0) {
             await this.financial.chargeWalletFee(tx, {

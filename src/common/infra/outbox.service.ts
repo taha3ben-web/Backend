@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import { EventBusService } from "./event-bus.service";
 import { nextOutboxState, OUTBOX_MAX_ATTEMPTS } from "./outbox.util";
+import { DistributedLockService } from "./distributed-lock.service";
 
 export interface EnqueueOptions {
   /** مفتاح إزالة التكرار (فريد) — يمنع إدخال نفس الحدث مرتين. */
@@ -26,6 +27,7 @@ export class OutboxService {
   private relaying = false;
 
   constructor(
+    private readonly cronLock: DistributedLockService,
     private readonly prisma: PrismaService,
     private readonly events: EventBusService,
   ) {}
@@ -85,6 +87,16 @@ export class OutboxService {
   /** يُشغّل دوريًا: يلتقط الأحداث المستحقة ويحاول تسليمها. */
   @Cron("*/15 * * * * *")
   async relayDueEvents(): Promise<void> {
+    // قفل موزّع: مع أكثر من نسخة تعمل يجب أن تنفّذ واحدة فقط كل دورة.
+    await this.cronLock.runExclusive(
+      "cron:outbox-relay",
+      () => this.relayDueEventsTask(),
+      15000,
+    );
+  }
+
+  /** المنطق الفعلي للمهمة بعد الحصول على القفل. */
+  async relayDueEventsTask(): Promise<void> {
     if (this.relaying) return; // منع تداخل دورتين.
     this.relaying = true;
     try {

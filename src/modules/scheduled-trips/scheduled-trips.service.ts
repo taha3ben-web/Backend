@@ -10,6 +10,7 @@ import {
   totalRouteDistanceKm,
   TripStopInput,
 } from "./scheduling.util";
+import { DistributedLockService } from "../../common/infra/distributed-lock.service";
 
 export interface CreateScheduledTripInput {
   passengerId: string;
@@ -28,6 +29,7 @@ export class ScheduledTripsService {
   private readonly logger = new Logger(ScheduledTripsService.name);
 
   constructor(
+    private readonly cronLock: DistributedLockService,
     private readonly prisma: PrismaService,
     private readonly countryConfig: CountryConfigService,
   ) {}
@@ -122,7 +124,17 @@ export class ScheduledTripsService {
 
   /** تفعيل الرحلات المجدولة التي حان وقت إرسالها. */
   @Cron("30 * * * * *")
-  async activateDueTrips() {
+  async activateDueTrips(): Promise<void> {
+    // قفل موزّع: مع أكثر من نسخة تعمل يجب أن تنفّذ واحدة فقط كل دورة.
+    await this.cronLock.runExclusive(
+      "cron:scheduled-trips-activate",
+      () => this.activateDueTripsTask(),
+      55000,
+    );
+  }
+
+  /** المنطق الفعلي للمهمة بعد الحصول على القفل. */
+  async activateDueTripsTask(): Promise<void> {
     const now = new Date();
     const due = await this.prisma.trip.findMany({
       where: {

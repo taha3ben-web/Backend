@@ -3,6 +3,7 @@ import { EventBusService } from "./event-bus.service";
 import { CatalogCacheService } from "./catalog-cache.service";
 import { OutboxService } from "./outbox.service";
 import { DistributedLockService } from "./distributed-lock.service";
+import { ConfigCacheService } from "./config-cache.service";
 
 /**
  * بنية تحتية مشتركة (عامة): ناقل الأحداث + صندوق الصادر الدائم +
@@ -15,12 +16,14 @@ import { DistributedLockService } from "./distributed-lock.service";
     CatalogCacheService,
     OutboxService,
     DistributedLockService,
+    ConfigCacheService,
   ],
   exports: [
     EventBusService,
     CatalogCacheService,
     OutboxService,
     DistributedLockService,
+    ConfigCacheService,
   ],
 })
 export class InfraModule {}

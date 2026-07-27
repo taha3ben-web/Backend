@@ -68,10 +68,37 @@ steps:
       - "--cpu=1"
       - "--memory=512Mi"
       - "--timeout=3600"
-      - "--set-env-vars=NODE_ENV=production,USE_SECRET_MANAGER=true,GCP_PROJECT_ID=$PROJECT_ID"
+      - "--set-env-vars=NODE_ENV=production,USE_SECRET_MANAGER=true,GCP_PROJECT_ID=$PROJECT_ID,APP_ROLE=api"
       # Cloud SQL (أزل التعليق بعد ضبط _CLOUD_SQL_INSTANCE):
       # - "--add-cloudsql-instances=${_CLOUD_SQL_INSTANCE}"
       # Memorystore Redis (أزل التعليق بعد ضبط _VPC_CONNECTOR):
+      # - "--vpc-connector=${_VPC_CONNECTOR}"
+
+  # 5) نشر عملية الـ worker (المهام المجدولة فقط).
+  #
+  # ملاحظة مهمة: خدمات Cloud Run تُجمّد المعالج بين الطلبات، لذلك نشّط CPU دائمًا
+  # (`--no-cpu-throttling`) ونثبّت نسخة واحدة حتى تعمل الـ cron فعليًا دون تكرار.
+  # القفل الموزّع يبقى شبكة أمان لو زادت النسخ لحظة نشر.
+  - id: deploy-worker
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - "${_SERVICE}-worker"
+      - "--image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:$SHORT_SHA"
+      - "--region=${_REGION}"
+      - "--platform=managed"
+      - "--no-allow-unauthenticated"
+      - "--port=4000"
+      - "--min-instances=1"
+      - "--max-instances=1"
+      - "--cpu=1"
+      - "--memory=512Mi"
+      - "--no-cpu-throttling"
+      - "--set-env-vars=NODE_ENV=production,USE_SECRET_MANAGER=true,GCP_PROJECT_ID=$PROJECT_ID,APP_ROLE=worker"
+      # Cloud SQL / Memorystore: أزل التعليق مثل خدمة الـ api.
+      # - "--add-cloudsql-instances=${_CLOUD_SQL_INSTANCE}"
       # - "--vpc-connector=${_VPC_CONNECTOR}"
 
 availableSecrets:

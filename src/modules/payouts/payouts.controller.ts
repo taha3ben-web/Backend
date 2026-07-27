@@ -3,8 +3,10 @@ import {
   Controller,
   Get,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
+  Put,
   Query,
   UseGuards,
 } from "@nestjs/common";
@@ -16,13 +18,17 @@ import {
   AuthUser,
 } from "../../common/decorators/current-user.decorator";
 import { PayoutBatchService, PayoutItemDraft } from "./payout-batch.service";
+import { PayoutBridgeService } from "./payout-bridge.service";
 import { PayoutBatchStatus } from "./payout.util";
 
 @Controller("payments/payouts")
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles("STAFF")
 export class PayoutsController {
-  constructor(private readonly service: PayoutBatchService) {}
+  constructor(
+    private readonly service: PayoutBatchService,
+    private readonly bridge: PayoutBridgeService,
+  ) {}
 
   @Post()
   create(
@@ -31,6 +37,26 @@ export class PayoutsController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.service.createBatch(provider ?? "manual", items, user.userId);
+  }
+
+  /** طلبات السحب المعتمدة التي تنتظر دفعة صرف. */
+  @Get("queue")
+  queue(@Query("limit") limit?: string) {
+    return this.bridge.queue(limit ? Number(limit) : 100);
+  }
+
+  /** ينشئ دفعة من طلبات سحب معتمدة مباشرة. */
+  @Post("from-withdrawals")
+  fromWithdrawals(
+    @Body("provider") provider: string,
+    @Body("withdrawRequestIds") withdrawRequestIds: string[],
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.bridge.draftFromWithdrawals(
+      provider ?? "manual",
+      withdrawRequestIds ?? [],
+      user.userId,
+    );
   }
 
   @Get()
@@ -43,6 +69,12 @@ export class PayoutsController {
     return this.service.get(id);
   }
 
+  /** إتمام الدفعة: يصرف كل طلب سحب مرتبط ويُفرِج عن المبلغ المحجوز. */
+  @Post(":id/settle")
+  settle(@Param("id") id: string, @CurrentUser() user: AuthUser) {
+    return this.bridge.settleBatch(id, user.userId);
+  }
+
   @Patch(":id/status")
   transition(
     @Param("id") id: string,
@@ -50,5 +82,48 @@ export class PayoutsController {
     @Body("reason") reason?: string,
   ) {
     return this.service.transition(id, status, reason);
+  }
+
+  /** تحديث بيانات التحويل البنكي لسائق من لوحة التحكم. */
+  @Put("drivers/:driverId/bank")
+  setDriverBank(
+    @Param("driverId", ParseUUIDPipe) driverId: string,
+    @Body("iban") iban?: string,
+    @Body("bankName") bankName?: string,
+    @Body("accountHolder") accountHolder?: string,
+  ) {
+    return this.bridge.setBankDetails(driverId, {
+      iban,
+      bankName,
+      accountHolder,
+    });
+  }
+}
+
+/** بيانات البنك الخاصة بالسائق نفسه. */
+@Controller("drivers/payout-bank")
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles("DRIVER")
+export class DriverPayoutBankController {
+  constructor(private readonly bridge: PayoutBridgeService) {}
+
+  @Get("me")
+  mine(@CurrentUser() user: AuthUser) {
+    return this.bridge.bankDetailsForUser(user.userId);
+  }
+
+  @Put("me")
+  async update(
+    @CurrentUser() user: AuthUser,
+    @Body("iban") iban?: string,
+    @Body("bankName") bankName?: string,
+    @Body("accountHolder") accountHolder?: string,
+  ) {
+    const driver = await this.bridge.bankDetailsForUser(user.userId);
+    return this.bridge.setBankDetails(driver.id, {
+      iban,
+      bankName,
+      accountHolder,
+    });
   }
 }

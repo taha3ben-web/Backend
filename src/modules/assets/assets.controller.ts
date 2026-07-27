@@ -10,6 +10,10 @@ import { AssetsService } from "./assets.service";
  * التطبيق ينزّل هذه الملفات أول مرة، يخزّنها محليًّا، ويعيد التنزيل تلقائيًّا
  * فقط عند تغيّر الـ hash — دون تحديث التطبيق من المتجر.
  */
+import { Public } from "../../common/decorators/public.decorator";
+
+// مسارات عامة مقصودة (الحارس العالمي يحمي كل ما عداها).
+@Public()
 @Controller("assets")
 export class AssetsController {
   constructor(private readonly assets: AssetsService) {}

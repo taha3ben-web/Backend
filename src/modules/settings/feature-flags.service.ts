@@ -6,6 +6,7 @@ import {
 import { createHash } from "crypto";
 import { FeatureFlagPlatform, Prisma } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
+import { ConfigCacheService } from "../../common/infra/config-cache.service";
 import { ConfigVersionService } from "./config-version.service";
 import {
   CreateFeatureFlagDto,
@@ -15,6 +16,9 @@ import {
 } from "./dto/feature-flags.dto";
 
 const GLOBAL_CONTROL_KEY = "global";
+/** مجال ذاكرة تقييم مفاتيح الميزات (مفتاح منفصل لكل سياق). */
+const FLAGS_NAMESPACE = "feature-flags";
+const FLAGS_TTL_SEC = 30;
 
 type RolloutStage = { startsAt: string; percentage: number; label?: string };
 
@@ -34,6 +38,7 @@ export class FeatureFlagsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly versions: ConfigVersionService,
+    private readonly cache: ConfigCacheService,
   ) {}
 
   findAll(search?: string) {
@@ -76,6 +81,7 @@ export class FeatureFlagsService {
         globalKillReason: dto.globalKillReason?.trim() || null,
       },
     });
+    await this.cache.invalidate(FLAGS_NAMESPACE);
     await this.versions.bump();
     return updated;
   }
@@ -105,6 +111,7 @@ export class FeatureFlagsService {
         endsAt: normalized.endsAt,
       },
     });
+    await this.cache.invalidate(FLAGS_NAMESPACE);
     await this.versions.bump();
     return created;
   }
@@ -155,6 +162,7 @@ export class FeatureFlagsService {
         version: { increment: 1 },
       },
     });
+    await this.cache.invalidate(FLAGS_NAMESPACE);
     await this.versions.bump();
     return updated;
   }
@@ -162,11 +170,24 @@ export class FeatureFlagsService {
   async remove(id: string) {
     await this.findOne(id);
     await this.prisma.featureFlag.delete({ where: { id } });
+    await this.cache.invalidate(FLAGS_NAMESPACE);
     await this.versions.bump();
     return { success: true };
   }
 
+  /**
+   * يُستدعى في كل إقلاع تطبيق عبر bootstrap — مخزّن حسب بصمة السياق.
+   * السياقات المتشابهة (نفس المنصة/المدينة/الإصدار) تتشارك نفس المدخلة.
+   */
   async evaluate(context: FeatureFlagContext) {
+    return this.cache.remember(
+      this.cache.key(FLAGS_NAMESPACE, context),
+      () => this.evaluateFresh(context),
+      FLAGS_TTL_SEC,
+    );
+  }
+
+  private async evaluateFresh(context: FeatureFlagContext) {
     const [control, flags] = await Promise.all([
       this.getControl(),
       this.prisma.featureFlag.findMany({
@@ -227,11 +248,10 @@ export class FeatureFlagsService {
       const isExpired = Boolean(flag.endsAt && flag.endsAt <= now);
       const isEndingSoon = Boolean(
         flag.endsAt &&
-          flag.endsAt > now &&
-          flag.endsAt.getTime() - now.getTime() <= ENDING_SOON_MS,
+        flag.endsAt > now &&
+        flag.endsAt.getTime() - now.getTime() <= ENDING_SOON_MS,
       );
-      const isPartial =
-        !isScheduled && !isExpired && effectivePercentage < 100;
+      const isPartial = !isScheduled && !isExpired && effectivePercentage < 100;
       const isScoped =
         flag.platform !== FeatureFlagPlatform.ALL ||
         flag.cityIds.length > 0 ||

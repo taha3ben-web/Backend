@@ -14,6 +14,13 @@ export interface FareQuote {
   currency: string;
   commissionPct: number;
   experimentVariant: string | null;
+  /** مسار الرحلة الفعلي من محرك التوجيه (إن توفّر). */
+  route?: {
+    polyline: string;
+    provider: string;
+    source: string;
+    approximate: boolean;
+  };
   breakdown: {
     baseFare: number;
     distanceCost: number;
@@ -80,6 +87,7 @@ export class PricingService {
       currency: r.currency,
       commissionPct: r.commissionPct,
       experimentVariant: r.experimentVariant,
+      route: r.route,
       breakdown: {
         baseFare: r.breakdown.baseFare,
         distanceCost: r.breakdown.distanceCost,

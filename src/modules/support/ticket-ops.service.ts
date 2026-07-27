@@ -9,12 +9,16 @@ import {
   isValidResolutionCode,
   TicketPriority,
 } from "./support-sla.util";
+import { DistributedLockService } from "../../common/infra/distributed-lock.service";
 
 @Injectable()
 export class TicketOpsService {
   private readonly logger = new Logger(TicketOpsService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly cronLock: DistributedLockService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   /** تعيين أولوية التذكرة وحساب موعد الـ SLA. */
   async setPriority(ticketId: string, priority: string) {
@@ -91,7 +95,17 @@ export class TicketOpsService {
 
   /** مسح دوري: تحديث مستوى التصعيد ووسم التجاوز. */
   @Cron("0 */5 * * * *")
-  async scanEscalations() {
+  async scanEscalations(): Promise<void> {
+    // قفل موزّع: مع أكثر من نسخة تعمل يجب أن تنفّذ واحدة فقط كل دورة.
+    await this.cronLock.runExclusive(
+      "cron:support-escalations",
+      () => this.scanEscalationsTask(),
+      250000,
+    );
+  }
+
+  /** المنطق الفعلي للمهمة بعد الحصول على القفل. */
+  async scanEscalationsTask(): Promise<void> {
     const now = Date.now();
     const open = await this.prisma.supportTicket.findMany({
       where: { status: { in: ["OPEN", "PENDING"] } },

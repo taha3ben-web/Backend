@@ -8,7 +8,7 @@ import {
 } from "./geo-provider.service";
 import { UpdateGeoProviderConfigDto } from "./dto/geo.dto";
 
-const SUPPORTED_PROVIDERS = ["internal", "google"] as const;
+const SUPPORTED_PROVIDERS = ["internal", "osrm", "google"] as const;
 
 /**
  * إدارة إعدادات مزوّد الخرائط (STAFF).
@@ -30,6 +30,7 @@ export class GeoAdminService {
       supportedProviders: [...SUPPORTED_PROVIDERS],
       defaultCountry: config.defaultCountry ?? "",
       averageSpeedKmh: config.averageSpeedKmh,
+      osrmBaseUrl: config.osrmBaseUrl ?? "",
       hasServerApiKey: Boolean(config.serverApiKey),
       hasClientApiKey: Boolean(config.clientApiKey),
       // تلميح مقنّع للمفاتيح (آخر 4 خانات فقط).
@@ -86,6 +87,17 @@ export class GeoAdminService {
         isSensitive: false,
       });
       changed.push("averageSpeedKmh");
+    }
+
+    if (dto.osrmBaseUrl !== undefined) {
+      await this.settings.upsert({
+        key: MAPS_SETTING_KEYS.osrmBaseUrl,
+        value: dto.osrmBaseUrl.trim().replace(/\/+$/, ""),
+        group: "maps",
+        isPublic: false,
+        isSensitive: false,
+      });
+      changed.push("osrmBaseUrl");
     }
 
     // المفاتيح السرية: تُحدّث فقط عند إرسال قيمة غير فارغة.

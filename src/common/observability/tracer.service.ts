@@ -7,6 +7,7 @@ import {
   type SpanStatus,
 } from "./tracing.util";
 import { getRequestContext } from "./request-context";
+import { OtlpSpanExporter } from "./otlp-exporter";
 
 /** مقبض span نشط يُنهى بـ end(). */
 export interface ActiveSpan {
@@ -25,6 +26,11 @@ export interface ActiveSpan {
 @Injectable()
 export class TracerService {
   private readonly enabled = process.env.TRACING_ENABLED !== "false";
+  /**
+   * مُصدّر OTLP اختياري: يعمل فقط عند ضبط `OTEL_EXPORTER_OTLP_ENDPOINT`،
+   * وإلا يبقى السلوك كما كان (JSON إلى stdout فقط).
+   */
+  private readonly otlp = new OtlpSpanExporter();
 
   /** يبدأ span جديدًا يرث traceId من سياق الطلب (أو يولّده إن غاب). */
   startSpan(name: string, attributes?: Record<string, unknown>): ActiveSpan {
@@ -91,6 +97,8 @@ export class TracerService {
     // المُصدّر الحالي: stdout بصيغة JSON مُهيكلة (يلتقطها جامع السجلات).
     // يمكن إبداله بـ OTLP HTTP exporter دون تغيير المستدعين.
     process.stdout.write(`${JSON.stringify({ type: "span", ...record })}\n`);
+    // وإلى مجمّع OTLP إن كان مضبوطًا (Tempo / Jaeger / Collector).
+    this.otlp.add(record);
   }
 }
 

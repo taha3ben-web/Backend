@@ -17,6 +17,12 @@ import { FinancialService } from "../financial/financial.service";
 import { canTransition } from "./trip-transitions";
 import { NotificationsService } from "../notifications/notifications.service";
 import { SettingsService } from "../settings/settings.service";
+import { RouteDeviationService } from "./route-deviation.service";
+import { InvoicesService } from "../invoices/invoices.service";
+import { LoyaltyService } from "../loyalty/loyalty.service";
+import { ReferralService } from "../referral/referral.service";
+import { TransactionalEmailService } from "../notifications/transactional-email.service";
+import { formatEmailAmount } from "../notifications/transactional-email.util";
 
 @Injectable()
 export class TripsService {
@@ -31,6 +37,11 @@ export class TripsService {
     private readonly config: ConfigService,
     private readonly notifications: NotificationsService,
     private readonly settings: SettingsService,
+    private readonly deviation: RouteDeviationService,
+    private readonly invoices: InvoicesService,
+    private readonly loyalty: LoyaltyService,
+    private readonly referral: ReferralService,
+    private readonly mailer: TransactionalEmailService,
   ) {}
 
   async findAll(
@@ -203,6 +214,7 @@ export class TripsService {
 
     if (to === "COMPLETED" || to === "CANCELLED") {
       await this.releaseDriver(trip.driverId);
+      this.deviation.forget(id);
     }
 
     this.realtime.emitTripStatus(id, to);
@@ -307,6 +319,10 @@ export class TripsService {
           `فشل حفظ نقطة تتبّع للرحلة ${tripId}: ${(err as Error).message}`,
         ),
       );
+    // فحص انحراف المسار (أفضل-جهد): لا يحجب البثّ الحيّ ولا يرمي.
+    void this.deviation
+      .check(tripId, { lat: point.lat, lng: point.lng })
+      .catch(() => undefined);
   }
 
   /**
@@ -362,5 +378,107 @@ export class TripsService {
 
   private async settleCompletedTrip(tripId: string): Promise<void> {
     await this.financial.settleTrip(tripId);
+    await this.issueInvoiceQuietly(tripId);
+    await this.grantTripRewardsQuietly(tripId);
+    await this.emailTripReceiptQuietly(tripId);
+  }
+
+  /**
+   * إيصال الرحلة بالبريد — أفضل جهد ولا يرمي أبدًا.
+   *
+   * منفصل عن بريد الفاتورة: الإيصال يُرسل دائمًا بعد التسوية، أمّا
+   * الفاتورة فمستند رسمي قد يفشل إصداره لأسباب تخزين.
+   */
+  private async emailTripReceiptQuietly(tripId: string): Promise<void> {
+    const trip = await this.prisma.trip
+      .findUnique({
+        where: { id: tripId },
+        select: {
+          passengerId: true,
+          fare: true,
+          currency: true,
+          completedAt: true,
+        },
+      })
+      .catch(() => null);
+    if (!trip) return;
+    this.mailer.fireAndForget({
+      userId: trip.passengerId,
+      template: "trip_receipt",
+      vars: {
+        tripId,
+        amount: formatEmailAmount(trip.fare),
+        currency: trip.currency,
+        date: (trip.completedAt ?? new Date()).toISOString().slice(0, 10),
+      },
+    });
+  }
+
+  /**
+   * إصدار الفاتورة تلقائيًا بعد التسوية — أفضل جهد لا غير.
+   *
+   * الفاتورة مستند ثانوي؛ فشل إصدارها (انقطاع التخزين مثلًا) يجب ألا يُرجع
+   * تسوية مالية نجحت فعلًا. ولأنّ `issueForTrip` خامل التكرار، يمكن للراكب
+   * طلبها لاحقًا من التطبيق فتُنشأ حينها دون ازدواج.
+   */
+  private async issueInvoiceQuietly(tripId: string): Promise<void> {
+    try {
+      const invoice = await this.invoices.issueForTrip(tripId);
+      this.logger.log(`فاتورة ${invoice.number} للرحلة ${tripId}`);
+    } catch (error) {
+      this.logger.warn(
+        `تعذر إصدار فاتورة الرحلة ${tripId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+
+  /**
+   * مكافآت ما بعد الرحلة: نقاط الولاء وتأهّل الإحالة — أفضل جهد.
+   *
+   * كلتا الدالتين خاملتا التكرار (مفتاح لكل رحلة / لكل إحالة)، لذلك لا ضرر من
+   * إعادة المحاولة. ولا يجوز لفشلهما أن يُرجِع تسوية مالية نجحت فعلًا.
+   */
+  private async grantTripRewardsQuietly(tripId: string): Promise<void> {
+    const trip = await this.prisma.trip
+      .findUnique({
+        where: { id: tripId },
+        select: { passengerId: true, fare: true },
+      })
+      .catch(() => null);
+    if (!trip) return;
+
+    try {
+      const points = await this.loyalty.earnFromTrip(
+        trip.passengerId,
+        trip.fare ? Number(trip.fare) : 0,
+        tripId,
+      );
+      if (points > 0) {
+        this.logger.log(`نقاط ولاء ${points} للرحلة ${tripId}`);
+      }
+    } catch (error) {
+      this.logger.warn(
+        `تعذر منح نقاط الولاء للرحلة ${tripId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+
+    try {
+      const result = await this.referral.qualifyReferral(trip.passengerId);
+      if (result.rewarded) {
+        this.logger.log(
+          `تأهّلت إحالة الراكب ${trip.passengerId} بعد الرحلة ${tripId}`,
+        );
+      }
+    } catch (error) {
+      this.logger.warn(
+        `تعذر تأهيل الإحالة للرحلة ${tripId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   }
 }

@@ -6,6 +6,7 @@ import {
 } from "@nestjs/common";
 import { DriverAvailability, Prisma } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
+import { maskPhone } from "../calls/call-masking.adapter";
 import { StorageService } from "../storage/storage.service";
 import { DriverSanctionsService } from "./driver-sanctions.service";
 import { PaginationDto } from "../../common/dto/pagination.dto";
@@ -270,7 +271,13 @@ export class DriverSelfService {
     const trip = await this.prisma.trip.findUnique({ where: { id: tripId }, include: { passenger: { select: { name: true, phone: true } } } });
     const driver = await this.requireDriver(userId);
     if (!trip || trip.driverId !== driver.id) throw new NotFoundException("الرحلة غير موجودة");
-    return trip;
+    // السائق لا يرى رقم الراكب الحقيقي أبدًا.
+    return {
+      ...trip,
+      passenger: trip.passenger
+        ? { ...trip.passenger, phone: maskPhone(trip.passenger.phone) }
+        : trip.passenger,
+    };
   }
 
   async updateTripStatus(userId: string, tripId: string, status: "ARRIVING" | "IN_PROGRESS" | "COMPLETED", reason?: string) {

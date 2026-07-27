@@ -15,6 +15,8 @@
     "prisma:studio": "prisma studio",
     "seed": "ts-node prisma/seed.ts",
     "lint": "eslint \"src/**/*.ts\" --fix",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck:strict": "tsc -p tsconfig.strict.json",
     "test": "jest",
     "test:logic": "ts-node --transpile-only scripts/logic-test.ts",
     "test:watch": "jest --watch",

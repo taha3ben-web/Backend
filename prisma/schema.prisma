@@ -321,6 +321,14 @@ model User {
   auditLogs          AuditLog[]
   activityLogs       ActivityLog[]
   emergencyContacts  EmergencyContact[]
+  safetyIncidents    SafetyIncident[]   @relation("SafetyReporter")
+  safetyAcknowledged SafetyIncident[]   @relation("SafetyAcknowledger")
+  safetyResolved     SafetyIncident[]   @relation("SafetyResolver")
+  lostItemsReported  LostItem[]         @relation("LostItemReporter")
+  lostItemsResolved  LostItem[]         @relation("LostItemResolver")
+  invoices           Invoice[]
+  tipsGiven          TripTip[]          @relation("TripTipPayer")
+  tipsReceived       TripTip[]          @relation("TripTipRecipient")
   reviewedDocuments  DriverDocument[]   @relation("DocumentReviewer")
   createdAgents      AgentProfile[]     @relation("AgentCreator")
   issuedDriverQrCodes DriverQrCode[]     @relation("DriverQrIssuer")
@@ -375,6 +383,10 @@ model Driver {
   suspendedUntil      DateTime?
   cancellationStrikes Int        @default(0)
   lastSanctionAt      DateTime?
+  // بيانات التحويل البنكي للسائق (تُستخدم عند بناء دفعات الصرف).
+  payoutIban          String?
+  payoutBankName      String?
+  payoutAccountHolder String?
   createdAt    DateTime           @default(now())
   updatedAt    DateTime           @updatedAt
 
@@ -492,6 +504,10 @@ model Trip {
   destAddress   String?
   distanceKm    Float?
   durationSec   Int?
+  // مسار الرحلة المحسوب من محرك التوجيه (Encoded Polyline) لرسمه في التطبيقات.
+  routePolyline String?
+  // اسم المزوّد الذي أنتج المسار (internal | osrm | google) للتدقيق والمراقبة.
+  routeProvider String?
   fare          Decimal?      @db.Decimal(12, 2)
   commissionPct Float         @default(15)
   currency      String
@@ -517,12 +533,21 @@ model Trip {
   settlementError String?
   settlementStatus SettlementStatus @default(NOT_REQUIRED)
   settledAt      DateTime?
+  // متى أُرشفت الرحلة (نسخة باردة في TripArchive وحذف الأبناء الثقيلين).
+  archivedAt    DateTime?
   isScheduled   Boolean       @default(false)
   scheduledAt   DateTime?
   dispatchAt    DateTime?
   updatedAt     DateTime      @updatedAt
 
   stops          TripStop[]
+  safetyIncidents SafetyIncident[]
+  shareTokens    TripShareToken[]
+  lostItems      LostItem[]
+  invoice        Invoice?
+  tip            TripTip?
+  callSessions   CallSession[]
+  archive        TripArchive?
   tracking       TripTracking[]
   events         TripEvent[]
   payment        Payment?
@@ -540,6 +565,7 @@ model Trip {
   @@index([createdAt])
   @@index([status, settledAt, completedAt])
   @@index([settlementStatus])
+  @@index([archivedAt])
 }
 
 model TripMessage {
@@ -555,8 +581,11 @@ model TripMessage {
   @@index([senderId, createdAt])
 }
 
+// جدول مُقسّم شهريًا (PARTITION BY RANGE recordedAt) — راجع مايغريشن
+// 20260727065000_trip_tracking_partitions. مفتاح التقسيم يجب أن يكون جزءًا من المفتاح
+// الأساسي، لذلك المفتاح مركّب: (id, recordedAt).
 model TripTracking {
-  id         String   @id @default(uuid())
+  id         String   @default(uuid())
   tripId     String
   trip       Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
   lat        Float
@@ -565,7 +594,9 @@ model TripTracking {
   speed      Float?
   recordedAt DateTime @default(now())
 
+  @@id([id, recordedAt])
   @@index([tripId, recordedAt])
+  @@index([recordedAt])
 }
 
 model TripEvent {
@@ -1198,6 +1229,162 @@ model EmergencyContact {
   createdAt DateTime @default(now())
 
   @@index([userId])
+}
+
+// بلاغات السلامة (SOS). كان الجدول موجودًا في الهجرة
+// 20260712150000_p1_safety_incidents لكنّه سقط من المخطّط، فكان `prisma.safetyIncident`
+// غير مولّد في العميل ووحدة الطوارئ تكسر البناء. الحقول مطابقة حرفيًا للـ SQL.
+enum SafetyIncidentType {
+  SOS
+  ACCIDENT
+  THREAT
+  MEDICAL
+  OTHER
+}
+
+enum SafetyIncidentStatus {
+  OPEN
+  ACKNOWLEDGED
+  RESOLVED
+  FALSE_ALARM
+}
+
+model SafetyIncident {
+  id               String               @id @default(uuid())
+  userId           String
+  user             User                 @relation("SafetyReporter", fields: [userId], references: [id])
+  tripId           String?
+  trip             Trip?                @relation(fields: [tripId], references: [id], onDelete: SetNull)
+  type             SafetyIncidentType   @default(SOS)
+  status           SafetyIncidentStatus @default(OPEN)
+  lat              Float?
+  lng              Float?
+  accuracy         Float?
+  message          String?
+  idempotencyKey   String               @unique
+  acknowledgedById String?
+  acknowledgedBy   User?                @relation("SafetyAcknowledger", fields: [acknowledgedById], references: [id], onDelete: SetNull)
+  acknowledgedAt   DateTime?
+  resolvedById     String?
+  resolvedBy       User?                @relation("SafetyResolver", fields: [resolvedById], references: [id], onDelete: SetNull)
+  resolvedAt       DateTime?
+  resolutionNote   String?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+
+  @@index([status, createdAt])
+  @@index([tripId])
+  @@index([userId, createdAt])
+}
+
+enum LostItemStatus {
+  OPEN
+  DRIVER_NOTIFIED
+  FOUND
+  RETURNED
+  NOT_FOUND
+  CLOSED
+}
+
+model LostItem {
+  id             String         @id @default(uuid())
+  tripId         String
+  trip           Trip           @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  reporterId     String
+  reporter       User           @relation("LostItemReporter", fields: [reporterId], references: [id])
+  status         LostItemStatus @default(OPEN)
+  title          String
+  description    String?
+  contactPhone   String?
+  photoUrl       String?
+  resolvedById   String?
+  resolvedBy     User?          @relation("LostItemResolver", fields: [resolvedById], references: [id], onDelete: SetNull)
+  resolvedAt     DateTime?
+  resolutionNote String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@index([status, createdAt])
+  @@index([tripId])
+  @@index([reporterId, createdAt])
+}
+
+enum InvoiceStatus {
+  ISSUED
+  VOID
+}
+
+model Invoice {
+  id           String        @id @default(uuid())
+  number       String        @unique
+  tripId       String        @unique
+  trip         Trip          @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User          @relation(fields: [userId], references: [id])
+  status       InvoiceStatus @default(ISSUED)
+  currency     String
+  subtotal     Decimal       @db.Decimal(12, 2)
+  discount     Decimal       @default(0) @db.Decimal(12, 2)
+  total        Decimal       @db.Decimal(12, 2)
+  paymentMethod String
+  snapshot     Json
+  pdfPath      String?
+  issuedAt     DateTime      @default(now())
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@index([userId, issuedAt])
+  @@index([issuedAt])
+}
+
+model InvoiceSequence {
+  period    String   @id
+  lastValue Int      @default(0)
+  updatedAt DateTime @updatedAt
+}
+
+// إكرامية الراكب للسائق بعد اكتمال الرحلة. تُحوّل من محفظة الراكب إلى
+// محفظة السائق بقيد مزدوج متوازن دون أي عمولة للمنصّة (الإكرامية للسائق كاملة).
+// إكرامية واحدة لكل رحلة (tripId فريد) لمنع الازدواج عند إعادة الإرسال.
+model TripTip {
+  id         String        @id @default(uuid())
+  tripId     String        @unique
+  trip       Trip          @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  fromUserId String
+  fromUser   User          @relation("TripTipPayer", fields: [fromUserId], references: [id])
+  toUserId   String
+  toUser     User          @relation("TripTipRecipient", fields: [toUserId], references: [id])
+  amount     Decimal       @db.Decimal(12, 2)
+  currency   String
+  status     TripTipStatus @default(PAID)
+  note       String?
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  @@index([toUserId, createdAt])
+  @@index([fromUserId, createdAt])
+}
+
+enum TripTipStatus {
+  PAID
+  REVERSED
+}
+
+// رابط مشاركة الرحلة: رمز عشوائي مؤقّت يسمح لمن يحمله بمتابعة الرحلة
+// دون تسجيل دخول. يُخزّن الرمز مجزّأً (hash) فلا يُسرّب من قاعدة البيانات.
+model TripShareToken {
+  id         String    @id @default(uuid())
+  tripId     String
+  trip       Trip      @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  createdById String
+  tokenHash  String    @unique
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  viewCount  Int       @default(0)
+  lastViewedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([tripId, expiresAt])
 }
 
 // ---------- Platform / system ----------
@@ -2406,4 +2593,52 @@ model ManagedAsset {
  updatedAt DateTime @updatedAt
  @@index([audience, isActive])
  @@index([kind, isActive])
+}
+
+/// ربط مكالمة مخفية: يربط (رقم وسيط + رقم المتصل) بطرف الوجهة دون كشف الأرقام.
+model CallSession {
+  id           String   @id @default(uuid())
+  tripId       String
+  trip         Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  provider     String   @default("twilio")
+  proxyNumber  String
+  callerRole   ActorKind
+  callerPhone  String
+  calleePhone  String
+  pin          String?
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  lastCallAt   DateTime?
+  callCount    Int      @default(0)
+  createdAt    DateTime @default(now())
+
+  @@index([proxyNumber, callerPhone, expiresAt])
+  @@index([tripId, callerRole])
+  @@index([expiresAt])
+}
+
+// ---------- Trip archive ----------
+// نسخة باردة من الرحلات المنتهية القديمة: صف واحد لكل رحلة يحمل كل ما يلزم
+// للدعم والتدقيق بعد حذف TripEvent و TripMessage من الجداول الساخنة.
+model TripArchive {
+  id         String   @id @default(uuid())
+  tripId     String   @unique
+  trip       Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  passengerId String
+  driverId   String?
+  status     TripStatus
+  currency   String
+  fare       Decimal? @db.Decimal(12, 2)
+  completedAt DateTime?
+  tripCreatedAt DateTime
+  eventCount Int      @default(0)
+  messageCount Int    @default(0)
+  trackingCount Int   @default(0)
+  snapshotVersion Int @default(1)
+  snapshot   Json
+  archivedAt DateTime @default(now())
+
+  @@index([passengerId, completedAt])
+  @@index([driverId, completedAt])
+  @@index([archivedAt])
 }

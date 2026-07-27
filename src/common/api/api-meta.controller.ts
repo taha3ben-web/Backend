@@ -13,6 +13,10 @@ export const CURRENT_API_VERSION = process.env.API_VERSION?.trim() || "1";
  * وفهرس أكواد الأخطاء برسائلها المترجمة، ليبني التطبيق خريطة أخطاء أوفلاين.
  * متاحة بلا مصادقة (معلومات ثابتة غير حسّاسة).
  */
+import { Public } from "../decorators/public.decorator";
+
+// مسارات عامة مقصودة (الحارس العالمي يحمي كل ما عداها).
+@Public()
 @Controller({ path: "meta", version: VERSION_NEUTRAL })
 export class ApiMetaController {
   @Get()
@@ -26,13 +30,13 @@ export class ApiMetaController {
       messages: Record<string, string>;
     }>;
   } {
-    const errorCodes = (
-      Object.keys(API_ERROR_CODES) as ApiErrorCode[]
-    ).map((code) => ({
-      code,
-      httpStatus: API_ERROR_CODES[code].httpStatus,
-      messages: API_ERROR_CODES[code].messages,
-    }));
+    const errorCodes = (Object.keys(API_ERROR_CODES) as ApiErrorCode[]).map(
+      (code) => ({
+        code,
+        httpStatus: API_ERROR_CODES[code].httpStatus,
+        messages: API_ERROR_CODES[code].messages,
+      }),
+    );
 
     return {
       apiVersion: CURRENT_API_VERSION,

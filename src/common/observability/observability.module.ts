@@ -5,6 +5,7 @@ import { LoggingInterceptor } from "./logging.interceptor";
 import { StructuredLogger } from "./structured-logger.service";
 import { TracerService } from "./tracer.service";
 import { AlertService } from "./alert.service";
+import { ErrorReporterService } from "./error-reporter.service";
 
 /**
  * طبقة المراقبة (Observability) — معرّفة كـ @Global لأن مكوّناتها
@@ -20,9 +21,15 @@ import { AlertService } from "./alert.service";
     StructuredLogger,
     TracerService,
     AlertService,
+    ErrorReporterService,
     { provide: APP_INTERCEPTOR, useClass: LoggingInterceptor },
   ],
-  exports: [StructuredLogger, TracerService, AlertService],
+  exports: [
+    StructuredLogger,
+    TracerService,
+    AlertService,
+    ErrorReporterService,
+  ],
 })
 export class ObservabilityModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {

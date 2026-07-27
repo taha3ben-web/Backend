@@ -13,6 +13,7 @@ import { RedisIoAdapter } from "./realtime-redis.adapter";
 import { AllExceptionsFilter } from "./common/filters/all-exceptions.filter";
 import { StructuredLogger } from "./common/observability/structured-logger.service";
 import { resolveCorsOptions } from "./common/security/cors-origins";
+import { ErrorReporterService } from "./common/observability/error-reporter.service";
 
 async function bootstrap(): Promise<void> {
   // تحميل الأسرار من Google Secret Manager قبل إقلاع التطبيق (إن كان مُفعّلًا).
@@ -71,8 +72,18 @@ async function bootstrap(): Promise<void> {
   // ترويسات أمنية
   app.use(helmet());
 
-  // حدود حجم الطلب (تحمي من الحمولات الضخمة)
-  app.use(json({ limit: "1mb" }));
+  // حدود حجم الطلب (تحمي من الحمولات الضخمة).
+  // `verify` تحفظ الجسم الخام (rawBody) لتوقيع الـ webhooks: توقيع HMAC يجب أن
+  // يُحسب على البايتات كما وصلت حرفيًا، لا على JSON مُعاد التسلسل، وإلا يمكن
+  // تمرير حمولة مختلفة بنفس التوقيع (اختلاف ترتيب المفاتيح أو المسافات).
+  app.use(
+    json({
+      limit: "1mb",
+      verify: (req, _res, buf) => {
+        (req as unknown as { rawBody?: Buffer }).rawBody = Buffer.from(buf);
+      },
+    }),
+  );
   app.use(urlencoded({ extended: true, limit: "1mb" }));
 
   // CORS — مصدر موحّد مع WebSocket (resolveCorsOptions). قائمة سماح من
@@ -102,7 +113,19 @@ async function bootstrap(): Promise<void> {
   );
 
   // مُرشّح استثناءات موحّد (تسجيل داخلي + استجابة نظيفة).
-  app.useGlobalFilters(new AllExceptionsFilter());
+  const errorReporter = app.get(ErrorReporterService);
+  app.useGlobalFilters(new AllExceptionsFilter(errorReporter));
+
+  // أخطاء خارج دورة الطلب (مهام cron، أحداث socket، وعود منسية) لا يراها
+  // المُرشّح أبدًا، وكانت تضيع في السجل دون تنبيه. الآن تُرفع للمراقبة.
+  process.on("unhandledRejection", (reason) => {
+    Logger.error(`unhandledRejection: ${String(reason)}`, "Process");
+    errorReporter.capture(reason, { where: "unhandledRejection" });
+  });
+  process.on("uncaughtException", (error) => {
+    Logger.error(`uncaughtException: ${error.message}`, error.stack, "Process");
+    errorReporter.capture(error, { where: "uncaughtException" });
+  });
 
   // إيقاف سلس: يُغلق Prisma/Redis واتصالات Socket عند SIGTERM (Cloud Run).
   app.enableShutdownHooks();

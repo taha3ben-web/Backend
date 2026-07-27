@@ -9,6 +9,7 @@ import {
   SettingPublicationStatus,
 } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
+import { ConfigCacheService } from "../../common/infra/config-cache.service";
 import { ConfigVersionService } from "./config-version.service";
 import {
   BulkUpsertSettingsDto,
@@ -16,18 +17,16 @@ import {
   UpsertSettingDto,
 } from "./dto/settings.dto";
 
-interface PublicConfigCache {
-  expiresAt: number;
-  value: unknown;
-}
+/** مجال ذاكرة الإعدادات العامة المشتركة بين كل نسخ الخادم. */
+const PUBLIC_CONFIG_NAMESPACE = "public-config";
+const PUBLIC_CONFIG_TTL_SEC = 60;
 
 @Injectable()
 export class SettingsService {
-  private publicCache: PublicConfigCache | null = null;
-
   constructor(
     private readonly prisma: PrismaService,
     private readonly versions: ConfigVersionService,
+    private readonly cache: ConfigCacheService,
   ) {}
 
   async findAll(group?: string) {
@@ -89,11 +88,19 @@ export class SettingsService {
     return value as T;
   }
 
+  /**
+   * إعدادات التطبيق العامة — أكثر مسار طلبًا في النظام (كل إقلاع تطبيق).
+   * مخزّنة في Redis وتُلغى صلاحيتها فور أي تعديل يمسّ الإعدادات المنشورة.
+   */
   async publicConfig() {
-    if (this.publicCache && this.publicCache.expiresAt > Date.now()) {
-      return this.publicCache.value;
-    }
+    return this.cache.remember(
+      this.cache.key(PUBLIC_CONFIG_NAMESPACE),
+      () => this.loadPublicConfig(),
+      PUBLIC_CONFIG_TTL_SEC,
+    );
+  }
 
+  private async loadPublicConfig() {
     const [settings, cities, version] = await Promise.all([
       this.prisma.setting.findMany({
         where: {
@@ -149,7 +156,6 @@ export class SettingsService {
       settingVersions,
       cities,
     };
-    this.publicCache = { value, expiresAt: Date.now() + 15_000 };
     return value;
   }
 
@@ -807,7 +813,7 @@ export class SettingsService {
 
   private async afterMutation(publicConfigChanged: boolean) {
     if (!publicConfigChanged) return;
-    this.publicCache = null;
+    await this.cache.invalidate(PUBLIC_CONFIG_NAMESPACE);
     await this.versions.bump();
   }
 }

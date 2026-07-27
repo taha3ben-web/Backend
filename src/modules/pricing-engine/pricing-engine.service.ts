@@ -4,6 +4,7 @@ import { RideClass } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import { round2 } from "../../common/money.util";
 import { haversineKm, estimateDurationSec } from "../matching/geo.util";
+import { RoutingService, type RouteResult } from "../geo/routing.service";
 import { computeFare } from "../matching/pricing.util";
 import {
   buildFareBreakdown,
@@ -14,6 +15,7 @@ import {
 import { CountryConfigService } from "../country-config/country-config.service";
 import { CityScalingService } from "../city-scaling/city-scaling.service";
 import { GrowthService } from "../growth/growth.service";
+import { SurgeService } from "./surge.service";
 
 /**
  * سياق طلب التسعير. كل الحقول اختيارية ليمكن استخدام المحرك
@@ -57,11 +59,23 @@ export interface PricingResult {
   durationSec: number;
   ruleUsed: PricingRuleUsed;
   experimentVariant: string | null;
+  /**
+   * معلومات المسار الفعلي عند حساب المسافة من محرك التوجيه.
+   * `approximate: true` تعني أن المسافة تقديرية (خط مستقيم) وليست طرقًا حقيقية.
+   */
+  route?: {
+    polyline: string;
+    provider: string;
+    source: string;
+    approximate: boolean;
+  };
   breakdown: {
     baseFare: number;
     distanceCost: number;
     timeCost: number;
     peakMultiplier: number;
+    /** جزء الطلب الحيّ داخل peakMultiplier (1 = بلا تصاعد). */
+    surgeMultiplier: number;
     minFare: number;
     maxFare: number | null;
     negotiationMin: number | null;
@@ -112,6 +126,8 @@ export class PricingEngineService {
     @Optional() private readonly countryConfig?: CountryConfigService,
     @Optional() private readonly cityScaling?: CityScalingService,
     @Optional() private readonly growth?: GrowthService,
+    @Optional() private readonly routing?: RoutingService,
+    @Optional() private readonly surge?: SurgeService,
   ) {}
 
   /**
@@ -140,10 +156,41 @@ export class PricingEngineService {
     });
   }
 
+  /**
+   * يطلب مسارًا حقيقيًا من محرك التوجيه عند توفر الإحداثيات.
+   *
+   * - لا يُستدعى إطلاقًا إذا أرسل المتصل المسافة والمدة معًا (مصدر حقيقة أقوى).
+   * - أي فشل يُرجع null فيسقط الحساب للتقدير القديم — التسعير لا يتوقف أبدًا.
+   */
+  private async resolveRoute(ctx: PricingContext): Promise<RouteResult | null> {
+    if (!this.routing) return null;
+    if (ctx.distanceKm != null && ctx.durationSec != null) return null;
+    if (
+      ctx.pickupLat == null ||
+      ctx.pickupLng == null ||
+      ctx.destLat == null ||
+      ctx.destLng == null
+    ) {
+      return null;
+    }
+    try {
+      return await this.routing.route(
+        { lat: ctx.pickupLat, lng: ctx.pickupLng },
+        { lat: ctx.destLat, lng: ctx.destLng },
+      );
+    } catch {
+      return null;
+    }
+  }
+
   /** حساب أجرة كاملة (السعر + العمولة + القاعدة المستخدمة). */
   async quote(ctx: PricingContext): Promise<PricingResult> {
+    // المسافة والمدة من محرك التوجيه (طرق حقيقية) وليس خطًا مستقيمًا،
+    // لأن فرق 20–40% في المسافة يعني أجرة غير عادلة للراكب أو للسائق.
+    const routed = await this.resolveRoute(ctx);
     const distanceKm =
       ctx.distanceKm ??
+      routed?.distanceKm ??
       (ctx.pickupLat != null &&
       ctx.pickupLng != null &&
       ctx.destLat != null &&
@@ -157,14 +204,24 @@ export class PricingEngineService {
             ) * 100,
           ) / 100
         : 0);
-    const durationSec = ctx.durationSec ?? estimateDurationSec(distanceKm);
+    const durationSec =
+      ctx.durationSec ??
+      routed?.durationSeconds ??
+      estimateDurationSec(distanceKm);
 
     const rule = await this.resolve(ctx);
     const countryCode = await this.resolveCountryCode(ctx);
+    // مضاعف الطلب الحيّ (surge) من نسبة الطلب/العرض لحظة الطلب،
+    // يُضرب في مضاعف الذروة الثابت ثمّ يُحصر بسقف المدينة (cappedSurge).
+    const liveSurge =
+      this.surge && ctx.pickupLat != null && ctx.pickupLng != null
+        ? await this.surge.multiplierAt(ctx.pickupLat, ctx.pickupLng)
+        : 1;
+    const requestedMultiplier = rule.peakMultiplier * liveSurge;
     const peakMultiplier =
       ctx.cityId && this.cityScaling
-        ? await this.cityScaling.cappedSurge(ctx.cityId, rule.peakMultiplier)
-        : rule.peakMultiplier;
+        ? await this.cityScaling.cappedSurge(ctx.cityId, requestedMultiplier)
+        : requestedMultiplier;
     const baseFare = Number(rule.baseFare);
     const minFare = Number(rule.minFare);
     const maxFare = rule.maxFare != null ? Number(rule.maxFare) : null;
@@ -196,6 +253,14 @@ export class PricingEngineService {
 
     return {
       currency,
+      route: routed
+        ? {
+            polyline: routed.polyline,
+            provider: routed.provider,
+            source: routed.source,
+            approximate: routed.approximate,
+          }
+        : undefined,
       fare: finalFare,
       commission,
       commissionPct: rule.commissionPct,
@@ -208,6 +273,7 @@ export class PricingEngineService {
         distanceCost,
         timeCost,
         peakMultiplier,
+        surgeMultiplier: liveSurge,
         minFare,
         maxFare,
         negotiationMin: rule.negotiationMin,
@@ -220,7 +286,9 @@ export class PricingEngineService {
     };
   }
 
-  private async resolveCountryCode(ctx: PricingContext): Promise<string | null> {
+  private async resolveCountryCode(
+    ctx: PricingContext,
+  ): Promise<string | null> {
     if (ctx.country?.trim()) return ctx.country.trim().toUpperCase();
     if (!ctx.cityId) return null;
     const city = await this.prisma.city.findUnique({

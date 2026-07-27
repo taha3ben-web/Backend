@@ -24,6 +24,10 @@ function round2(n: number): number {
  * الحماية: إن ضُبِط METRICS_TOKEN يُطلب تمريره عبر Authorization: Bearer <token>.
  * إن لم يُضبط (تطوير) تبقى النقطة مفتوحة.
  */
+import { Public } from "../../common/decorators/public.decorator";
+
+// مسارات عامة مقصودة (الحارس العالمي يحمي كل ما عداها).
+@Public()
 @Controller("metrics")
 export class MetricsController {
   constructor(
