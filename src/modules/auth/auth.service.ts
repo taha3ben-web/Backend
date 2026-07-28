@@ -1,5 +1,4 @@
 import {
-  BadRequestException,
   ForbiddenException,
   Injectable,
   UnauthorizedException,
@@ -83,7 +82,7 @@ export class AuthService {
   ) {}
 
   /**
-   * يطلب رمز OTP لرقم هاتف (يُطبّق أولًا). إضافي ومستقل — لا يغيّر
+   * يطلب رمز OTP لرقم هاتف (يُطبّق أولاً). إضافي ومستقل — لا يغير
    * سلوك register/login القائم.
    */
   async requestPhoneOtp(
@@ -93,7 +92,7 @@ export class AuthService {
     return this.otp.requestOtp(phone, normalizePurpose(dto.purpose));
   }
 
-  /** يتحقق من رمز OTP لرقم هاتف (يُطبّق أولًا). */
+  /** يتحقق من رمز OTP لرقم هاتف (يُطبّق أولاً). */
   async verifyPhoneOtp(dto: VerifyOtpDto): Promise<{ verified: true }> {
     const phone = await this.normalizedPhone(dto.phone, dto.countryCode);
     return this.otp.verifyOtp(phone, normalizePurpose(dto.purpose), dto.code);

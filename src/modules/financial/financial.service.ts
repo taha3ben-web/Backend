@@ -26,7 +26,6 @@ import {
 import { OutboxService } from "../../common/infra/outbox.service";
 import { DistributedLockService } from "../../common/infra/distributed-lock.service";
 import { AlertService } from "../../common/observability/alert.service";
-import { PricingEngineService } from "../pricing-engine/pricing-engine.service";
 import { CountryConfigService } from "../country-config/country-config.service";
 import { TracerService } from "../../common/observability/tracer.service";
 import { AppException } from "../../common/api/app.exception";
@@ -42,7 +41,6 @@ export class FinancialService {
     private readonly prisma: PrismaService,
     private readonly outbox: OutboxService,
     private readonly lock: DistributedLockService,
-    private readonly pricingEngine: PricingEngineService,
     @Optional() private readonly countryConfig?: CountryConfigService,
     @Optional() private readonly alerts?: AlertService,
     @Optional() private readonly tracer?: TracerService,
@@ -205,7 +203,7 @@ export class FinancialService {
 
   /**
    * يمنح رصيدًا ترويجيًا لمحفظة مستخدم عبر إدخال مزدوج متوازن ضمن معاملة قائمة:
-   *   DEBIT  حساب مصروف الترويج (PLATFORM:PROMOTIONS �� EXPENSE)
+   *   DEBIT  حساب مصروف الترويج (PLATFORM:PROMOTIONS — EXPENSE)
    *   CREDIT محفظة المستخدم (USER:...:AVAILABLE — LIABILITY)
    * يعيد استخدام post/userAccount/platformAccount (بلا تكرار) وهو idempotent عبر idempotencyKey.
    * إضافي بالكامل: لا يغيّر أي سلوك مالي قائم. يُستدعى من داخل معاملة المُستدعي ليبقى ذريًا مع عمله.
@@ -534,8 +532,8 @@ export class FinancialService {
               },
               update: {},
             });
-            // إسقاط الأرباح يُشتقّ من قيود دفتر الأستاذ المرحّل�� (مصدر
-            // الحقيقة الوحيد) لا من قي��ة محسوبة مستقلة، ثم يُكتب عبر نفس
+            // إسقاط الأرباح يُشتقّ من قيود دفتر الأستاذ المرحّلة (مصدر
+            // الحقيقة الوحيد) لا من قيمة محسوبة مستقلة، ثم يُكتب عبر نفس
             // مسار إعادة البناء (projectTripEarnings) لإزالة التخزين المزدوج.
             const net = round2(base.net + driverLocked);
             const commission = round2(base.commission - driverLocked);

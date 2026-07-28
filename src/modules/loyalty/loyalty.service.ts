@@ -1,4 +1,4 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Injectable } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { Prisma, LoyaltyAccount } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
@@ -35,8 +35,6 @@ export interface RedeemResult {
  */
 @Injectable()
 export class LoyaltyService {
-  private readonly logger = new Logger(LoyaltyService.name);
-
   constructor(
     private readonly prisma: PrismaService,
     private readonly financial: FinancialService,

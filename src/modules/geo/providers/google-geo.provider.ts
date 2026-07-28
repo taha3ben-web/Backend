@@ -1,4 +1,4 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Injectable } from "@nestjs/common";
 import {
   GeoDirectionsResult,
   GeoGeocodeResult,
@@ -43,7 +43,6 @@ interface GoogleDirectionsRoute {
 @Injectable()
 export class GoogleGeoProvider implements GeoProvider {
   readonly name = "google";
-  private readonly logger = new Logger(GoogleGeoProvider.name);
   private readonly base = "https://maps.googleapis.com/maps/api";
 
   private requireKey(ctx: GeoProviderContext): string {

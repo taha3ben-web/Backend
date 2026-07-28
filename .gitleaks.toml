@@ -1,0 +1,14 @@
+# إعدادات فحص الأسرار.
+# الفحص يعمل بوضع --no-git أي على ملفات العمل الحالية فقط،
+# لأن التاريخ يحتوي على .env.bak قديم ويحتاج تنظيفًا منفصلًا بـ git filter-repo.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "قيم نموذجية وملفات مولّدة"
+paths = [
+  '''\.env\.example$''',
+  '''package-lock\.json$''',
+  '''docs/api/openapi\.json$''',
+]

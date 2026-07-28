@@ -1,4 +1,3 @@
-import { BadRequestException } from "@nestjs/common";
 import { PaymentMethod, PaymentStatus } from "@prisma/client";
 
 export interface PaymentCheckoutResult {
