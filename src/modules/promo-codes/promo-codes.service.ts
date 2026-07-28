@@ -1,4 +1,4 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Injectable } from "@nestjs/common";
 import { Prisma, PromoCode } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import { PaginationDto } from "../../common/dto/pagination.dto";
@@ -30,8 +30,6 @@ export interface PromoRedeemResult {
  */
 @Injectable()
 export class PromoCodesService {
-  private readonly logger = new Logger(PromoCodesService.name);
-
   constructor(
     private readonly prisma: PrismaService,
     private readonly financial: FinancialService,
