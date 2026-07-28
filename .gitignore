@@ -1,6 +1,16 @@
 node_modules/
 dist/
+coverage/
 .env
+.env.*
+!.env.example
 *.log
 .DS_Store
 prisma/*.db
+
+# Secrets and certificates
+*.pem
+*.key
+*.p12
+service-account*.json
+firebase-adminsdk*.json

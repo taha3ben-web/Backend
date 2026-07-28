@@ -7,7 +7,6 @@ import {
   Inject,
   forwardRef,
 } from "@nestjs/common";
-import { ConfigService } from "@nestjs/config";
 import { Prisma, TripStatus, ActorKind } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import { RealtimeGateway } from "../realtime/realtime.gateway";
@@ -34,7 +33,6 @@ export class TripsService {
     private readonly realtime: RealtimeGateway,
     private readonly financial: FinancialService,
     private readonly redis: RedisService,
-    private readonly config: ConfigService,
     private readonly notifications: NotificationsService,
     private readonly settings: SettingsService,
     private readonly deviation: RouteDeviationService,

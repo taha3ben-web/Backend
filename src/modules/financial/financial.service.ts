@@ -6,9 +6,9 @@ import {
   Optional,
 } from "@nestjs/common";
 import { Cron, CronExpression } from "@nestjs/schedule";
-import { FinancialAccountType, Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
-import type { FinancialCommand, PostingLine } from "./financial.types";
+import type { PostingLine } from "./financial.types";
 import {
   deriveTripEarnings,
   splitCouponFunding,
@@ -26,12 +26,11 @@ import {
 import { OutboxService } from "../../common/infra/outbox.service";
 import { DistributedLockService } from "../../common/infra/distributed-lock.service";
 import { AlertService } from "../../common/observability/alert.service";
-import { PricingEngineService } from "../pricing-engine/pricing-engine.service";
 import { CountryConfigService } from "../country-config/country-config.service";
 import { TracerService } from "../../common/observability/tracer.service";
 import { AppException } from "../../common/api/app.exception";
+import { LedgerCoreService } from "./ledger-core.service";
 
-const PLATFORM_PARTY_ID = "00000000-0000-0000-0000-000000000001";
 const DRIVER_CANCELLATION_PENALTY_KEY = "trips.driverCancellationPenaltyPct";
 const DEFAULT_DRIVER_CANCELLATION_PENALTY_PCT = 0;
 
@@ -42,7 +41,7 @@ export class FinancialService {
     private readonly prisma: PrismaService,
     private readonly outbox: OutboxService,
     private readonly lock: DistributedLockService,
-    private readonly pricingEngine: PricingEngineService,
+    private readonly ledger: LedgerCoreService,
     @Optional() private readonly countryConfig?: CountryConfigService,
     @Optional() private readonly alerts?: AlertService,
     @Optional() private readonly tracer?: TracerService,
@@ -58,157 +57,12 @@ export class FinancialService {
       : fn();
   }
 
-  private assertCurrency(currency: string): void {
-    if (!/^[A-Z]{3}$/.test(currency))
-      throw new BadRequestException("Invalid ISO currency");
-  }
-  private assertBalanced(lines: PostingLine[]): void {
-    if (lines.length < 2)
-      throw new BadRequestException(
-        "Ledger transaction needs at least two entries",
-      );
-    const debit = lines
-      .filter((line) => line.direction === "DEBIT")
-      .reduce((sum, line) => sum + toMinorUnits(line.amount), 0);
-    const credit = lines
-      .filter((line) => line.direction === "CREDIT")
-      .reduce((sum, line) => sum + toMinorUnits(line.amount), 0);
-    if (debit <= 0 || debit !== credit)
-      throw new BadRequestException("Unbalanced ledger transaction");
-  }
-
-  private async userAccount(
-    tx: Prisma.TransactionClient,
-    userId: string,
-    currency: string,
-  ) {
-    const user = await tx.user.findUnique({
-      where: { id: userId },
-      select: { id: true, name: true },
-    });
-    if (!user) throw new NotFoundException("Financial party user not found");
-    const party = await tx.financialParty.upsert({
-      where: { userId },
-      create: { type: "USER", userId, displayName: user.name },
-      update: { displayName: user.name },
-    });
-    const code = `USER:${userId}:${currency}:AVAILABLE`;
-    return tx.financialAccount.upsert({
-      where: { code },
-      create: { partyId: party.id, code, type: "LIABILITY", currency },
-      update: { isActive: true },
-    });
-  }
-
-  /**
-   * حساب المحفظة المقفلة للمستخدم (USER:...:LOCKED — LIABILITY): رصيد غير قابل
-   * للسحب (تعويض خصم الكوبون الممنوح للسائق وتموّله الشركة). منفصل تمامًا
-   * عن AVAILABLE فلا يدخل في فحص السحب/التحويل.
-   */
-  private async lockedUserAccount(
-    tx: Prisma.TransactionClient,
-    userId: string,
-    currency: string,
-  ) {
-    const user = await tx.user.findUnique({
-      where: { id: userId },
-      select: { id: true, name: true },
-    });
-    if (!user) throw new NotFoundException("Financial party user not found");
-    const party = await tx.financialParty.upsert({
-      where: { userId },
-      create: { type: "USER", userId, displayName: user.name },
-      update: { displayName: user.name },
-    });
-    const code = `USER:${userId}:${currency}:LOCKED`;
-    return tx.financialAccount.upsert({
-      where: { code },
-      create: { partyId: party.id, code, type: "LIABILITY", currency },
-      update: { isActive: true },
-    });
-  }
-
-  private async platformAccount(
-    tx: Prisma.TransactionClient,
-    codeSuffix: string,
-    type: FinancialAccountType,
-    currency: string,
-  ) {
-    const party = await tx.financialParty.upsert({
-      where: { id: PLATFORM_PARTY_ID },
-      create: {
-        id: PLATFORM_PARTY_ID,
-        type: "PLATFORM",
-        displayName: "flaminGO",
-      },
-      update: {},
-    });
-    const code = `PLATFORM:${codeSuffix}:${currency}`;
-    return tx.financialAccount.upsert({
-      where: { code },
-      create: { partyId: party.id, code, type, currency },
-      update: { isActive: true },
-    });
-  }
-
-  private async post(tx: Prisma.TransactionClient, input: FinancialCommand) {
-    this.assertCurrency(input.currency);
-    this.assertBalanced(input.lines);
-    const existing = await tx.ledgerTransaction.findUnique({
-      where: { idempotencyKey: input.idempotencyKey },
-      include: { entries: true },
-    });
-    if (existing) return existing;
-    const row = await tx.ledgerTransaction.create({
-      data: {
-        command: input.command,
-        idempotencyKey: input.idempotencyKey,
-        currency: input.currency,
-        referenceType: input.referenceType,
-        referenceId: input.referenceId,
-        reversalOfId: input.reversalOfId,
-        createdBy: input.createdBy ?? "SYSTEM",
-        reason: input.reason,
-        status: "PENDING",
-      },
-    });
-    for (const line of input.lines) {
-      if (!Number.isFinite(line.amount) || toMinorUnits(line.amount) <= 0)
-        throw new BadRequestException("Ledger amount must be positive");
-      // نحدّث الرصيد أولاً لالتقاط balanceAfter (لقطة الرصيد الجاري بعد هذا القيد)
-      const account = await tx.financialAccount.update({
-        where: { id: line.accountId },
-        data: {
-          balanceCache: {
-            increment: line.direction === "CREDIT" ? line.amount : -line.amount,
-          },
-        },
-      });
-      await tx.ledgerEntry.create({
-        data: {
-          transactionId: row.id,
-          accountId: line.accountId,
-          direction: line.direction,
-          amount: line.amount,
-          currency: account.currency,
-          role: line.role ?? account.type,
-          balanceAfter: account.balanceCache,
-        },
-      });
-    }
-    return tx.ledgerTransaction.update({
-      where: { id: row.id },
-      data: { status: "POSTED", postedAt: new Date() },
-      include: { entries: true },
-    });
-  }
-
   /**
    * يمنح رصيدًا ترويجيًا لمحفظة مستخدم عبر إدخال مزدوج متوازن ضمن معاملة قائمة:
-   *   DEBIT  حساب مصروف الترويج (PLATFORM:PROMOTIONS �� EXPENSE)
+   *   DEBIT  حساب مصروف الترويج (PLATFORM:PROMOTIONS — EXPENSE)
    *   CREDIT محفظة المستخدم (USER:...:AVAILABLE — LIABILITY)
    * يعيد استخدام post/userAccount/platformAccount (بلا تكرار) وهو idempotent عبر idempotencyKey.
-   * إضافي بالكامل: لا يغيّر أي سلوك مالي قائم. يُستدعى من داخل معاملة المُستدعي ليبقى ذريًا مع عمله.
+   * إضافي بالكامل: لا يغير أي سلوك مالي قائم. يُستدعى من داخل معاملة المُستدعي ليبقى ذريًا مع عمله.
    */
   async grantPromotionalCredit(
     tx: Prisma.TransactionClient,
@@ -222,18 +76,22 @@ export class FinancialService {
       idempotencyKey: string;
     },
   ): Promise<void> {
-    this.assertCurrency(input.currency);
+    this.ledger.assertCurrency(input.currency);
     if (!Number.isFinite(input.amount) || toMinorUnits(input.amount) <= 0) {
       throw new BadRequestException("Promotional credit must be positive");
     }
-    const userAcc = await this.userAccount(tx, input.userId, input.currency);
-    const promoExpense = await this.platformAccount(
+    const userAcc = await this.ledger.userAccount(
+      tx,
+      input.userId,
+      input.currency,
+    );
+    const promoExpense = await this.ledger.platformAccount(
       tx,
       "PROMOTIONS",
       "EXPENSE",
       input.currency,
     );
-    await this.post(tx, {
+    await this.ledger.post(tx, {
       command: "grantPromotionalCredit",
       idempotencyKey: input.idempotencyKey,
       currency: input.currency,
@@ -273,7 +131,7 @@ export class FinancialService {
       idempotencyKey: string;
     },
   ): Promise<void> {
-    this.assertCurrency(input.currency);
+    this.ledger.assertCurrency(input.currency);
     if (!Number.isFinite(input.amount) || toMinorUnits(input.amount) <= 0) {
       throw new BadRequestException("Wallet fee must be positive");
     }
@@ -282,17 +140,21 @@ export class FinancialService {
       where: { idempotencyKey: input.idempotencyKey },
     });
     if (already) return;
-    const userAcc = await this.userAccount(tx, input.userId, input.currency);
+    const userAcc = await this.ledger.userAccount(
+      tx,
+      input.userId,
+      input.currency,
+    );
     if (Number(userAcc.balanceCache) + 1e-9 < input.amount) {
       throw new AppException("SUBSCRIPTION_INSUFFICIENT_BALANCE");
     }
-    const revenue = await this.platformAccount(
+    const revenue = await this.ledger.platformAccount(
       tx,
       input.revenueSuffix,
       "REVENUE",
       input.currency,
     );
-    await this.post(tx, {
+    await this.ledger.post(tx, {
       command: "chargeWalletFee",
       idempotencyKey: input.idempotencyKey,
       currency: input.currency,
@@ -326,7 +188,7 @@ export class FinancialService {
       idempotencyKey: string;
     },
   ): Promise<void> {
-    this.assertCurrency(input.currency);
+    this.ledger.assertCurrency(input.currency);
     if (!Number.isFinite(input.amount) || toMinorUnits(input.amount) <= 0) {
       throw new BadRequestException("Tip must be positive");
     }
@@ -337,12 +199,20 @@ export class FinancialService {
       where: { idempotencyKey: input.idempotencyKey },
     });
     if (already) return;
-    const payer = await this.userAccount(tx, input.fromUserId, input.currency);
+    const payer = await this.ledger.userAccount(
+      tx,
+      input.fromUserId,
+      input.currency,
+    );
     if (Number(payer.balanceCache) + 1e-9 < input.amount) {
       throw new BadRequestException("رصيد المحفظة غير كافٍ للإكرامية");
     }
-    const driver = await this.userAccount(tx, input.toUserId, input.currency);
-    await this.post(tx, {
+    const driver = await this.ledger.userAccount(
+      tx,
+      input.toUserId,
+      input.currency,
+    );
+    await this.ledger.post(tx, {
       command: "transferTip",
       idempotencyKey: input.idempotencyKey,
       currency: input.currency,
@@ -404,7 +274,7 @@ export class FinancialService {
             const commissionGross = round2(
               (grossFare * trip.commissionPct) / 100,
             );
-            // سياسة تمويل الكوبون تُقرَّر وقت الطلب وتُخزَّن على الرحلة، وتُدار
+            // سياسة تمويل الكوبون تُقرّر وقت الطلب وتُخزّن على الرحلة، وتُدار
             // بالكامل من لوحة التحكم (إعداد عام coupons.funding + تجاوز لكل
             // كوبون): PLATFORM=الشركة تتحمّل كامل الخصم، DRIVER=السائق،
             // SHARED=يُقسّم بحصة platformShare. لا شيء مبرمَج ثابتًا هنا.
@@ -425,12 +295,12 @@ export class FinancialService {
             const driverAvailable = round2(Math.min(driverNet, riderPays));
             const commissionCredit = round2(riderPays - driverAvailable);
             const driverLocked = round2(driverNet - driverAvailable);
-            const driver = await this.userAccount(
+            const driver = await this.ledger.userAccount(
               tx,
               trip.driver.userId,
               trip.currency,
             );
-            const revenue = await this.platformAccount(
+            const revenue = await this.ledger.platformAccount(
               tx,
               "COMMISSION",
               "REVENUE",
@@ -438,15 +308,15 @@ export class FinancialService {
             );
             const debit =
               trip.paymentMethod === "WALLET"
-                ? await this.userAccount(tx, trip.passengerId, trip.currency)
+                ? await this.ledger.userAccount(tx, trip.passengerId, trip.currency)
                 : trip.paymentMethod === "CARD"
-                  ? await this.platformAccount(
+                  ? await this.ledger.platformAccount(
                       tx,
                       "CARD_RECEIVABLE",
                       "ASSET",
                       trip.currency,
                     )
-                  : await this.platformAccount(
+                  : await this.ledger.platformAccount(
                       tx,
                       "CASH_CLEARING",
                       "ASSET",
@@ -473,7 +343,7 @@ export class FinancialService {
                   amount: commissionCredit,
                 });
               }
-              const posted = await this.post(tx, {
+              const posted = await this.ledger.post(tx, {
                 command: "settleTrip",
                 idempotencyKey: `trip:settle:${tripId}`,
                 currency: trip.currency,
@@ -497,12 +367,12 @@ export class FinancialService {
             // تعويض الكوبون: الشركة تموّل الفرق من عمولتها (DEBIT عمولة)
             // وتضيفه للسائق كرصيد مقفل غير قابل للسحب (CREDIT USER:...:LOCKED). idempotent.
             if (driverLocked > 0) {
-              const driverLockedAcc = await this.lockedUserAccount(
+              const driverLockedAcc = await this.ledger.lockedUserAccount(
                 tx,
                 trip.driver.userId,
                 trip.currency,
               );
-              await this.post(tx, {
+              await this.ledger.post(tx, {
                 command: "settleCouponCompensation",
                 idempotencyKey: `trip:couponcomp:${tripId}`,
                 currency: trip.currency,
@@ -534,8 +404,8 @@ export class FinancialService {
               },
               update: {},
             });
-            // إسقاط الأرباح يُشتقّ من قيود دفتر الأستاذ المرحّل�� (مصدر
-            // الحقيقة الوحيد) لا من قي��ة محسوبة مستقلة، ثم يُكتب عبر نفس
+            // إسقاط الأرباح يُشتقّ من قيود دفتر الأستاذ المرحّلة (مصدر
+            // الحقيقة الوحيد) لا من قيمة محسوبة مستقلة، ثم يُكتب عبر نفس
             // مسار إعادة البناء (projectTripEarnings) لإزالة التخزين المزدوج.
             const net = round2(base.net + driverLocked);
             const commission = round2(base.commission - driverLocked);
@@ -693,18 +563,18 @@ export class FinancialService {
                 });
                 return;
               }
-              const driverAcc = await this.userAccount(
+              const driverAcc = await this.ledger.userAccount(
                 tx,
                 trip.driver.userId,
                 currency,
               );
-              const revenue = await this.platformAccount(
+              const revenue = await this.ledger.platformAccount(
                 tx,
                 "DRIVER_CANCELLATION_PENALTY",
                 "REVENUE",
                 currency,
               );
-              await this.post(tx, {
+              await this.ledger.post(tx, {
                 command: "settleDriverCancellationPenalty",
                 idempotencyKey: `trip:drvcancelpen:${tripId}`,
                 currency,
@@ -844,7 +714,7 @@ export class FinancialService {
                   details: { withdrawalId },
                 });
               }
-              const user = await this.userAccount(
+              const user = await this.ledger.userAccount(
                 tx,
                 request.userId,
                 DEFAULT_CURRENCY,
@@ -853,13 +723,13 @@ export class FinancialService {
                 throw new AppException("INSUFFICIENT_BALANCE", {
                   details: { withdrawalId, userId: request.userId },
                 });
-              const reserve = await this.platformAccount(
+              const reserve = await this.ledger.platformAccount(
                 tx,
                 "WITHDRAWAL_RESERVE",
                 "LIABILITY",
                 DEFAULT_CURRENCY,
               );
-              await this.post(tx, {
+              await this.ledger.post(tx, {
                 command: "reserveWithdrawal",
                 idempotencyKey: `withdrawal:reserve:${withdrawalId}`,
                 currency: DEFAULT_CURRENCY,
@@ -887,8 +757,8 @@ export class FinancialService {
   }
 
   async releaseWithdrawal(id: string): Promise<void> {
-    const original = await this.byKey(`withdrawal:reserve:${id}`);
-    await this.reverseTransaction(
+    const original = await this.ledger.byKey(`withdrawal:reserve:${id}`);
+    await this.ledger.reverseTransaction(
       original.id,
       `withdrawal:release:${id}`,
       "releaseWithdrawal",
@@ -904,19 +774,19 @@ export class FinancialService {
         if (!payment || payment.method !== "CARD")
           throw new NotFoundException("Card payment not found");
         if (!payment.trip || !payment.trip.settledAt) return;
-        const cash = await this.platformAccount(
+        const cash = await this.ledger.platformAccount(
           tx,
           "CASH",
           "ASSET",
           payment.trip.currency,
         );
-        const receivable = await this.platformAccount(
+        const receivable = await this.ledger.platformAccount(
           tx,
           "CARD_RECEIVABLE",
           "ASSET",
           payment.trip.currency,
         );
-        await this.post(tx, {
+        await this.ledger.post(tx, {
           command: "captureCardPayment",
           idempotencyKey: `payment:capture:${paymentId}`,
           currency: payment.trip.currency,
@@ -950,7 +820,7 @@ export class FinancialService {
       );
       return;
     }
-    await this.reverseTransaction(
+    await this.ledger.reverseTransaction(
       original.id,
       `payment:refund:${id}`,
       "refundPayment",
@@ -960,19 +830,19 @@ export class FinancialService {
     await this.prisma.$transaction(async (tx) => {
       const request = await tx.withdrawRequest.findUnique({ where: { id } });
       if (!request) throw new NotFoundException("Withdrawal not found");
-      const reserve = await this.platformAccount(
+      const reserve = await this.ledger.platformAccount(
         tx,
         "WITHDRAWAL_RESERVE",
         "LIABILITY",
         DEFAULT_CURRENCY,
       );
-      const cash = await this.platformAccount(
+      const cash = await this.ledger.platformAccount(
         tx,
         "CASH",
         "ASSET",
         DEFAULT_CURRENCY,
       );
-      await this.post(tx, {
+      await this.ledger.post(tx, {
         command: "completeWithdrawal",
         idempotencyKey: `withdrawal:complete:${id}`,
         currency: DEFAULT_CURRENCY,
@@ -1008,18 +878,18 @@ export class FinancialService {
             "Driver funding request must be approved first",
           );
         }
-        const user = await this.userAccount(
+        const user = await this.ledger.userAccount(
           tx,
           request.driver.userId,
           DEFAULT_CURRENCY,
         );
-        const cash = await this.platformAccount(
+        const cash = await this.ledger.platformAccount(
           tx,
           "CASH",
           "ASSET",
           DEFAULT_CURRENCY,
         );
-        await this.post(tx, {
+        await this.ledger.post(tx, {
           command: "fundDriverWallet",
           idempotencyKey: `driverFunding:fund:${requestId}`,
           currency: DEFAULT_CURRENCY,
@@ -1059,12 +929,12 @@ export class FinancialService {
             "Driver transfer must be approved first",
           );
         }
-        const sender = await this.userAccount(
+        const sender = await this.ledger.userAccount(
           tx,
           transfer.fromDriver.userId,
           DEFAULT_CURRENCY,
         );
-        const receiver = await this.userAccount(
+        const receiver = await this.ledger.userAccount(
           tx,
           transfer.toDriver.userId,
           DEFAULT_CURRENCY,
@@ -1074,7 +944,7 @@ export class FinancialService {
             "Insufficient funds for driver transfer",
           );
         }
-        await this.post(tx, {
+        await this.ledger.post(tx, {
           command: "transferDriverFunds",
           idempotencyKey: `driverTransfer:complete:${transferId}`,
           currency: DEFAULT_CURRENCY,
@@ -1602,52 +1472,17 @@ export class FinancialService {
     return ids.filter((id) => !refs.has(id)).length;
   }
 
-  private async byKey(key: string) {
-    const row = await this.prisma.ledgerTransaction.findUnique({
-      where: { idempotencyKey: key },
-    });
-    if (!row || row.status !== "POSTED")
-      throw new NotFoundException("Posted ledger transaction not found");
-    return row;
-  }
+  /** واجهة متوافقة (facade): تفوّض عكس المعاملة إلى محرّك دفتر الأستاذ. */
   async reverseTransaction(
     id: string,
     key: string,
     command = "reverseTransaction",
   ): Promise<void> {
-    await this.prisma.$transaction(
-      async (tx) => {
-        const original = await tx.ledgerTransaction.findUnique({
-          where: { id },
-          include: { entries: true, reversedBy: true },
-        });
-        if (!original || original.status !== "POSTED")
-          throw new BadRequestException(
-            "Only posted transactions can be reversed",
-          );
-        if (original.reversedBy) return;
-        await this.post(tx, {
-          command,
-          idempotencyKey: key,
-          currency: original.currency,
-          referenceType: original.referenceType ?? undefined,
-          referenceId: original.referenceId ?? undefined,
-          reversalOfId: original.id,
-          lines: original.entries.map((entry) => ({
-            accountId: entry.accountId,
-            direction: entry.direction === "DEBIT" ? "CREDIT" : "DEBIT",
-            amount: Number(entry.amount),
-          })),
-        });
-      },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-    );
+    return this.ledger.reverseTransaction(id, key, command);
   }
+
   async getUserBalance(userId: string, currency = DEFAULT_CURRENCY) {
-    const account = await this.prisma.financialAccount.findUnique({
-      where: { code: `USER:${userId}:${currency}:AVAILABLE` },
-    });
-    return { balance: Number(account?.balanceCache ?? 0), currency };
+    return this.ledger.getUserBalance(userId, currency);
   }
 
   /**
@@ -1655,10 +1490,7 @@ export class FinancialService {
    * الكوبون الممنوح للسائق. منفصل عن الرصيد المتاح فلا يدخل السحب/التحويل.
    */
   async getLockedBalance(userId: string, currency = DEFAULT_CURRENCY) {
-    const account = await this.prisma.financialAccount.findUnique({
-      where: { code: `USER:${userId}:${currency}:LOCKED` },
-    });
-    return { locked: Number(account?.balanceCache ?? 0), currency };
+    return this.ledger.getLockedBalance(userId, currency);
   }
 
   /**

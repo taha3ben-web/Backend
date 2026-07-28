@@ -12,6 +12,7 @@ import {
   AuthUser,
   CurrentUser,
 } from "../../common/decorators/current-user.decorator";
+import { RequireIdempotency } from "../../common/http/require-idempotency.decorator";
 import { TipsService } from "./tips.service";
 import { SendTipDto } from "./dto/tip.dto";
 
@@ -39,6 +40,7 @@ export class TipsController {
   }
 
   @Post("trip/:tripId")
+  @RequireIdempotency()
   send(
     @CurrentUser() user: AuthUser,
     @Param("tripId", ParseUUIDPipe) tripId: string,

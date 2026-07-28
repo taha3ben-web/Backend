@@ -7,8 +7,23 @@ on:
   pull_request:
     branches: [main, master]
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+# قيم وهمية فقط. Prisma يطلب رابط قاعدة البيانات عند قراءة المخطط،
+# ولا يفتح أي اتصال فعلي في خطوات generate / validate / build.
+env:
+  DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci?schema=public"
+  DIRECT_URL: "postgresql://ci:ci@localhost:5432/ci?schema=public"
+  SHADOW_DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci_shadow?schema=public"
+  NODE_ENV: test
+
 jobs:
-  build-and-test:
+  build:
     name: Build & Unit Tests
     runs-on: ubuntu-latest
 
@@ -20,15 +35,50 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
+          cache: npm
 
       - name: Install dependencies
-        run: npm install
+        run: |
+          npm ci --no-audit --no-fund || {
+            echo "::warning::package-lock.json is out of sync with package.json - falling back to npm install. Regenerate the lockfile and commit it to restore reproducible builds."
+            npm install --no-audit --no-fund
+          }
 
       - name: Generate Prisma Client
         run: npx prisma generate
 
-      - name: Type-check & build
+      - name: Validate Prisma schema
+        run: npm run prisma:validate
+
+      - name: Build
         run: npm run build
 
-      - name: Run unit tests
-        run: npm test
+      - name: Unit tests
+        run: npm run test:ci
+
+  quality:
+    name: Lint & Strict Types
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: |
+          npm ci --no-audit --no-fund || npm install --no-audit --no-fund
+
+      - name: Generate Prisma Client
+        run: npx prisma generate
+
+      - name: ESLint
+        run: npm run lint:check
+
+      - name: Strict type-check
+        run: npm run typecheck:strict

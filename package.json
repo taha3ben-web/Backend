@@ -20,6 +20,7 @@
     "test:logic": "ts-node --transpile-only scripts/logic-test.ts",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
+    "test:e2e": "jest --config test/jest-e2e.json --runInBand",
     "smoke": "node scripts/smoke.mjs",
     "load": "node scripts/load-test.mjs",
     "docs:api": "node scripts/gen-openapi.mjs",
@@ -44,6 +45,7 @@
     "@nestjs/platform-express": "^10.3.8",
     "@nestjs/platform-socket.io": "^10.3.8",
     "@nestjs/schedule": "^4.0.2",
+    "@nestjs/swagger": "^7.4.2",
     "@nestjs/throttler": "^5.1.2",
     "@nestjs/websockets": "^10.3.8",
     "@prisma/client": "^5.15.0",
@@ -60,7 +62,8 @@
     "pdfkit": "^0.15.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
-    "socket.io": "^4.7.5"
+    "socket.io": "^4.7.5",
+    "swagger-ui-express": "^5.0.1"
   },
   "devDependencies": {
     "@nestjs/cli": "^10.3.2",
@@ -72,8 +75,13 @@
     "@types/node": "^20.14.2",
     "@types/passport-jwt": "^4.0.1",
     "@types/pdfkit": "^0.13.4",
+    "@types/supertest": "^6.0.2",
+    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/parser": "^7.18.0",
+    "eslint": "^8.57.0",
     "jest": "^29.7.0",
     "prisma": "^5.15.0",
+    "supertest": "^7.0.0",
     "ts-jest": "^29.1.5",
     "ts-node": "^10.9.2",
     "typescript": "^5.5.3"

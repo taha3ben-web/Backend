@@ -8,10 +8,14 @@ import {
 import { Observable } from "rxjs";
 import { tap } from "rxjs/operators";
 import { getRequestContext, setContextValue } from "./request-context";
+import { recordHttpRequest } from "./http-metrics";
 
 /**
  * يسجّل اكتمال كل طلب HTTP (المدة + رمز الحالة) مع حقول الربط، ويضبط
  * actorId على السياق فور توفّره بعد المصادقة حتى تحمله بقية سجلات الطلب.
+ *
+ * ويغذّي أيضًا سجل مقاييس HTTP الذي تقرأه نقطة `/api/metrics`. وُضع هنا لأنه
+ * مسجّل كـ `APP_INTERCEPTOR` عالمي، فيمرّ به كل طلب دون تعديل أي متحكم.
  */
 @Injectable()
 export class LoggingInterceptor implements NestInterceptor {
@@ -36,7 +40,7 @@ export class LoggingInterceptor implements NestInterceptor {
   }
 
   private logCompletion(
-    req: { method?: string },
+    req: { method?: string; originalUrl?: string },
     res: { statusCode?: number },
     start: number,
   ): void {
@@ -46,5 +50,17 @@ export class LoggingInterceptor implements NestInterceptor {
     this.logger.log(
       `${req.method ?? "?"} -> ${res.statusCode ?? "?"} ${durationMs}ms${path}`,
     );
+
+    // قياس بأفضل جهد: خلل في المقاييس لا يجوز أن يُسقط استجابة حقيقية.
+    try {
+      recordHttpRequest({
+        method: req.method,
+        path: ctx?.path ?? req.originalUrl,
+        statusCode: res.statusCode,
+        durationMs,
+      });
+    } catch {
+      // متجاهَل عمدًا.
+    }
   }
 }

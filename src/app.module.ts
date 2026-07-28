@@ -2,9 +2,10 @@ import { Module } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
 import { ThrottlerModule, ThrottlerGuard } from "@nestjs/throttler";
 import { ScheduleModule } from "@nestjs/schedule";
-import { APP_GUARD } from "@nestjs/core";
+import { APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
 import { JwtAuthGuard } from "./common/guards/jwt-auth.guard";
 import { RolesGuard } from "./common/guards/roles.guard";
+import { IdempotencyInterceptor } from "./common/http/idempotency.interceptor";
 import configuration from "./config/configuration";
 import { PrismaModule } from "./prisma/prisma.module";
 import { InfraModule } from "./common/infra/infra.module";
@@ -72,7 +73,7 @@ import { TripCommunicationModule } from "./modules/trip-communication/trip-commu
  * والافتراضي `all` (الاثنان معًا — مناسب للتطوير ولنسخة واحدة).
  *
  * لماذا يهم: مع توسيع أفقي (عدة نسخ) يُشغّل كل نسخة كل الـ cron في نفس اللحظة،
- * فيتكرر العمل المالي والإشعارات. القفل الموزّع يحمي، وفصل الدور يوفّر الموارد.
+ * فيتكرر العمل المالي والإشعارات. القفل الموزّع يحمي، وفصل الدور يوفر الموارد.
  */
 export type AppRole = "api" | "worker" | "all";
 
@@ -158,6 +159,9 @@ export const SCHEDULER_ENABLED = APP_ROLE !== "api";
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
+    // معترض idempotency عالمي: يمرّ الطلب دون تغيير ما لم تُرسَل ترويسة Idempotency-Key،
+    // فيمنع ازدواج طلبات الكتابة (خصوصًا الدفع) عند إعادة الإرسال أو تكرار الشبكة.
+    { provide: APP_INTERCEPTOR, useClass: IdempotencyInterceptor },
   ],
 })
 export class AppModule {}

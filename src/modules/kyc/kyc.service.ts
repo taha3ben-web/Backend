@@ -1,4 +1,4 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Injectable } from "@nestjs/common";
 import {
   IdentityVerificationStatus,
   Prisma,
@@ -21,8 +21,6 @@ import {
  */
 @Injectable()
 export class KycService {
-  private readonly logger = new Logger(KycService.name);
-
   constructor(private readonly prisma: PrismaService) {}
 
   /** أحدث سجل تحقق للمستخدم (إن وُجد). */
