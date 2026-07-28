@@ -1,4 +1,4 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Injectable } from "@nestjs/common";
 import { Prisma, Referral, ReferralCode } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import { PaginationDto } from "../../common/dto/pagination.dto";
@@ -26,8 +26,6 @@ export interface ReferralRewardResult {
  */
 @Injectable()
 export class ReferralService {
-  private readonly logger = new Logger(ReferralService.name);
-
   constructor(
     private readonly prisma: PrismaService,
     private readonly financial: FinancialService,
