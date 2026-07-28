@@ -19,6 +19,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { PrismaService } from "../../prisma/prisma.service";
 import { FinancialService } from "./financial.service";
+import { LedgerCoreService } from "./ledger-core.service";
 import { OutboxService } from "../../common/infra/outbox.service";
 
 const hasDb = Boolean(process.env.TEST_DATABASE_URL);
@@ -51,7 +52,14 @@ describeDb("financial integration (real DB)", () => {
     );
     // قفل صوري (دون Redis) ينفّذ الدالة مباشرة خلال الاختبار.
     const lock = { withLock: (_k: string, fn: () => any) => fn() } as any;
-    financial = new FinancialService(prisma as PrismaService, outbox, lock);
+    // محرّك دفتر الأستاذ المستخرَج (المرحلة 6) — يُمرّر كتبعية رابعة للمنشئ.
+    const ledger = new LedgerCoreService(prisma as PrismaService);
+    financial = new FinancialService(
+      prisma as PrismaService,
+      outbox,
+      lock,
+      ledger,
+    );
   });
 
   afterAll(async () => {
