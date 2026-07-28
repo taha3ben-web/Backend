@@ -20,7 +20,6 @@
 import { PrismaService } from "../../prisma/prisma.service";
 import { FinancialService } from "./financial.service";
 import { OutboxService } from "../../common/infra/outbox.service";
-import { PricingEngineService } from "../pricing-engine/pricing-engine.service";
 
 const hasDb = Boolean(process.env.TEST_DATABASE_URL);
 const describeDb = hasDb ? describe : describe.skip;
@@ -52,13 +51,7 @@ describeDb("financial integration (real DB)", () => {
     );
     // قفل صوري (دون Redis) ينفّذ الدالة مباشرة خلال الاختبار.
     const lock = { withLock: (_k: string, fn: () => any) => fn() } as any;
-    const pricingEngine = new PricingEngineService(prisma as PrismaService);
-    financial = new FinancialService(
-      prisma as PrismaService,
-      outbox,
-      lock,
-      pricingEngine,
-    );
+    financial = new FinancialService(prisma as PrismaService, outbox, lock);
   });
 
   afterAll(async () => {
