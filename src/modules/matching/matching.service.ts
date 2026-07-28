@@ -8,7 +8,6 @@ import {
   OnModuleDestroy,
   OnModuleInit,
   Optional,
-  ServiceUnavailableException,
   forwardRef,
 } from "@nestjs/common";
 import { Cron, CronExpression } from "@nestjs/schedule";
@@ -569,7 +568,7 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  /** ت��يين السائق ذريًا (يفشل إن تغيرت حالة الرحلة) */
+  /** تعيين السائق ذريًا (يفشل إن تغيرت حالة الرحلة) */
   private async assignDriver(
     tripId: string,
     driverUserId: string,
@@ -582,7 +581,7 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
     try {
       const updated = await this.prisma.$transaction(async (client) => {
         // 1) مطالبة ذرية بالسائق (قفل الصف): لا تنجح إلا إن كان ONLINE.
-        //    تمنع إسنا�� السائق نفسه لرحلتين متزامنتين (double assignment).
+        //    تمنع إسناد السائق نفسه لرحلتين متزامنتين (double assignment).
         const claimed = await client.driver.updateMany({
           where: { id: driver.id, availability: "ONLINE" },
           data: { availability: "ON_TRIP" },
@@ -783,7 +782,7 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
     const isOwner =
       trip.passengerId === userId || trip.driver?.userId === userId;
     if (!isOwner) {
-      throw new ForbiddenException("ل��ست لديك صلاحية على هذه الرحلة");
+      throw new ForbiddenException("ليست لديك صلاحية على هذه الرحلة");
     }
     // إخفاء الأرقام: الطرفان يريان رقمًا محجوبًا فقط؛ الاتصال يمرّ عبر /api/calls/connect.
     return {
@@ -816,7 +815,7 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
 
   /**
    * استرداد الرحلات العالقة في SEARCHING (فشل تعافٍ): إن تعطّلت النسخة
-   * التي كانت تُشغّل حلقة المطابقة تبقى الرحلة عالقة للأبد. هذا المهمّة
+   * التي كانت تُشغّل حلقة المطابقة تبقى الرحلة عالقة للأبد. هذه المهمّة
    * المجدولة تلغيها ذريًا (updateMany بحارس الحالة) فلا تكرار عبر النسخ.
    */
   @Cron(CronExpression.EVERY_5_MINUTES)
