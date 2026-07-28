@@ -7,8 +7,6 @@ import {
 import { WalletService } from "./wallet.service";
 import { PaginationDto } from "../../common/dto/pagination.dto";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
-import { RolesGuard } from "../../common/guards/roles.guard";
-import { Roles } from "../../common/decorators/roles.decorator";
 import {
   CurrentUser,
   AuthUser,
@@ -24,7 +22,4 @@ export class WalletController {
   myWallet(@CurrentUser() user: AuthUser, @Query() q: PaginationDto) {
     return this.wallet.getWithTransactions(user.userId, q);
   }
-
-
-
 }

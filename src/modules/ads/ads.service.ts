@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
-import { AdPlacement, Prisma } from "@prisma/client";
+import { AdPlacement } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import { CreateAdDto, UpdateAdDto } from "./dto/ad.dto";
 

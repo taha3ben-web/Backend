@@ -1,4 +1,4 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Injectable } from "@nestjs/common";
 import {
   GeoDirectionsResult,
   GeoGeocodeResult,
@@ -42,7 +42,6 @@ interface OsrmTableResponse {
 @Injectable()
 export class OsrmGeoProvider implements GeoProvider {
   readonly name = "osrm";
-  private readonly logger = new Logger(OsrmGeoProvider.name);
   private readonly timeoutMs = 4000;
 
   constructor(private readonly internal: InternalGeoProvider) {}
