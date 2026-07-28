@@ -1836,4 +1836,76 @@ export class FinancialService {
   async resolveReconciliationIncident(
     id: string,
     resolvedBy: string,
-    status: "RESO
+    status: "RESOLVED" | "IGNORED" = "RESOLVED",
+  ) {
+    const existing = await this.prisma.ledgerReconciliationIncident.findUnique({
+      where: { id },
+    });
+    if (!existing)
+      throw new NotFoundException("Reconciliation incident not found");
+    return this.prisma.ledgerReconciliationIncident.update({
+      where: { id },
+      data: { status, resolvedBy, resolvedAt: new Date() },
+    });
+  }
+
+  async listAccounts(page: number, limit: number, search?: string) {
+    const where: Prisma.FinancialAccountWhereInput = search
+      ? {
+          OR: [
+            { code: { contains: search, mode: "insensitive" } },
+            {
+              party: { displayName: { contains: search, mode: "insensitive" } },
+            },
+          ],
+        }
+      : {};
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.financialAccount.findMany({
+        where,
+        include: { party: true },
+        orderBy: { updatedAt: "desc" },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.financialAccount.count({ where }),
+    ]);
+    return { items, total, page, limit };
+  }
+  async listTransactions(
+    page: number,
+    limit: number,
+    status?: "PENDING" | "POSTED" | "FAILED" | "REVERSED" | "CANCELLED",
+    referenceType?: string,
+    search?: string,
+  ) {
+    const where: Prisma.LedgerTransactionWhereInput = {
+      ...(status ? { status } : {}),
+      ...(referenceType ? { referenceType } : {}),
+      ...(search
+        ? {
+            OR: [
+              { command: { contains: search, mode: "insensitive" } },
+              { idempotencyKey: { contains: search, mode: "insensitive" } },
+              { referenceId: { contains: search, mode: "insensitive" } },
+            ],
+          }
+        : {}),
+    };
+
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.ledgerTransaction.findMany({
+        where,
+        include: {
+          entries: { include: { account: { include: { party: true } } } },
+        },
+        orderBy: { createdAt: "desc" },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.ledgerTransaction.count({ where }),
+    ]);
+
+    return { items, total, page, limit };
+  }
+}
