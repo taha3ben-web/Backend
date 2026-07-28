@@ -402,7 +402,7 @@ export class FinancialService {
             const commissionGross = round2(
               (grossFare * trip.commissionPct) / 100,
             );
-            // سياسة تمويل الكوبون تُقرّر وقت الطلب وتُخزّن على الرحلة، وتُدار
+            // سياسة تمويل الكوبون تُقرَّر وقت الطلب وتُخزَّن على الرحلة، وتُدار
             // بالكامل من لوحة التحكم (إعداد عام coupons.funding + تجاوز لكل
             // كوبون): PLATFORM=الشركة تتحمّل كامل الخصم، DRIVER=السائق،
             // SHARED=يُقسّم بحصة platformShare. لا شيء مبرمَج ثابتًا هنا.
@@ -1823,4 +1823,255 @@ export class FinancialService {
           _sum: { amount: true },
         }),
       ]);
-    const comm
+    const commissionNum = round2(
+      Number(commissionCredit._sum.amount ?? 0) -
+        Number(commissionDebit._sum.amount ?? 0),
+    );
+    const driverNetNum = Number(driverNet._sum.amount ?? 0);
+    return {
+      commission: commissionNum,
+      driverNet: driverNetNum,
+      gross: Number((commissionNum + driverNetNum).toFixed(2)),
+    };
+  }
+
+  /**
+   * Periodic ledger integrity check: compares each account's balanceCache with
+   * the balance derived from its POSTED ledger entries (Σ CREDIT − Σ DEBIT).
+   * Any drift beyond tolerance is persisted as an OPEN reconciliation incident;
+   * an account that reconciles auto-resolves its stale OPEN incidents.
+   */
+  async reconcileLedgerBalances(options?: { tolerance?: number }): Promise<{
+    scannedAccounts: number;
+    mismatches: number;
+    openIncidents: number;
+    resolvedIncidents: number;
+  }> {
+    const tolerance = options?.tolerance ?? 0.005;
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        id: string;
+        code: string;
+        currency: string;
+        cached: Prisma.Decimal;
+        derived: Prisma.Decimal;
+      }>
+    >`
+      SELECT a.id, a.code, a.currency, a."balanceCache" AS cached,
+             COALESCE(SUM(CASE WHEN t.status = 'POSTED' AND e.direction = 'CREDIT' THEN e.amount
+                               WHEN t.status = 'POSTED' AND e.direction = 'DEBIT' THEN -e.amount
+                               ELSE 0 END), 0) AS derived
+      FROM "FinancialAccount" a
+      LEFT JOIN "LedgerEntry" e ON e."accountId" = a.id
+      LEFT JOIN "LedgerTransaction" t ON t.id = e."transactionId"
+      GROUP BY a.id, a.code, a.currency, a."balanceCache"
+    `;
+    let mismatches = 0;
+    let resolvedIncidents = 0;
+    for (const row of rows) {
+      const cached = Number(row.cached);
+      const derived = Number(row.derived);
+      const difference = accountBalanceDifference(cached, derived);
+      if (!isReconciled(cached, derived, tolerance)) {
+        mismatches += 1;
+        const detail = `balanceCache=${cached} ledger=${derived} diff=${difference}`;
+        const open = await this.prisma.ledgerReconciliationIncident.findFirst({
+          where: { accountId: row.id, status: "OPEN" },
+        });
+        if (open) {
+          await this.prisma.ledgerReconciliationIncident.update({
+            where: { id: open.id },
+            data: {
+              cachedBalance: cached,
+              derivedBalance: derived,
+              difference,
+              detail,
+            },
+          });
+        } else {
+          await this.prisma.ledgerReconciliationIncident.create({
+            data: {
+              accountId: row.id,
+              accountCode: row.code,
+              currency: row.currency,
+              cachedBalance: cached,
+              derivedBalance: derived,
+              difference,
+              detail,
+              status: "OPEN",
+            },
+          });
+        }
+        this.logger.error(
+          `Ledger reconciliation mismatch on ${row.code}: ${detail}`,
+        );
+        // تنبيه خارجي (best-effort) — عدم تطابق رصيد يمسّ المال.
+        void this.alerts?.emit({
+          kind: "reconciliation.mismatch",
+          severity: "CRITICAL",
+          title: `عدم تطابق دفتر الأستاذ (${row.code})`,
+          message: detail,
+          context: {
+            accountId: row.id,
+            accountCode: row.code,
+            currency: row.currency,
+            difference,
+          },
+        });
+      } else {
+        const stale = await this.prisma.ledgerReconciliationIncident.updateMany(
+          {
+            where: { accountId: row.id, status: "OPEN" },
+            data: {
+              status: "RESOLVED",
+              resolvedBy: "SYSTEM",
+              resolvedAt: new Date(),
+            },
+          },
+        );
+        resolvedIncidents += stale.count;
+      }
+    }
+    const openIncidents = await this.prisma.ledgerReconciliationIncident.count({
+      where: { status: "OPEN" },
+    });
+    return {
+      scannedAccounts: rows.length,
+      mismatches,
+      openIncidents,
+      resolvedIncidents,
+    };
+  }
+
+  @Cron("0 */30 * * * *")
+  async scheduledLedgerReconciliation(): Promise<void> {
+    // قفل موزّع: مع أكثر من نسخة تعمل يجب أن تنفّذ واحدة فقط كل دورة.
+    await this.lock.runExclusive(
+      "cron:ledger-reconciliation",
+      () => this.scheduledLedgerReconciliationTask(),
+      300000,
+    );
+  }
+
+  /** المنطق الفعلي للمهمة بعد الحصول على القفل. */
+  async scheduledLedgerReconciliationTask(): Promise<void> {
+    try {
+      const result = await this.reconcileLedgerBalances();
+      if (result.mismatches > 0) {
+        this.logger.error(
+          `Ledger reconciliation found ${result.mismatches} mismatch(es); ${result.openIncidents} open incident(s).`,
+        );
+        void this.alerts?.emit({
+          kind: "reconciliation.summary",
+          severity: "CRITICAL",
+          title: "فحص التطابق الدوري وجد اختلافات",
+          message: `${result.mismatches} اختلاف، ${result.openIncidents} حادثة مفتوحة.`,
+          context: {
+            mismatches: result.mismatches,
+            openIncidents: result.openIncidents,
+          },
+        });
+      }
+    } catch (error) {
+      this.logger.error(
+        `Ledger reconciliation cron failed: ${(error as Error).message}`,
+      );
+    }
+  }
+
+  async listReconciliationIncidents(
+    page: number,
+    limit: number,
+    status?: "OPEN" | "RESOLVED" | "IGNORED",
+  ) {
+    const where: Prisma.LedgerReconciliationIncidentWhereInput = status
+      ? { status }
+      : {};
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.ledgerReconciliationIncident.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.ledgerReconciliationIncident.count({ where }),
+    ]);
+    return { items, total, page, limit };
+  }
+
+  async resolveReconciliationIncident(
+    id: string,
+    resolvedBy: string,
+    status: "RESOLVED" | "IGNORED" = "RESOLVED",
+  ) {
+    const existing = await this.prisma.ledgerReconciliationIncident.findUnique({
+      where: { id },
+    });
+    if (!existing)
+      throw new NotFoundException("Reconciliation incident not found");
+    return this.prisma.ledgerReconciliationIncident.update({
+      where: { id },
+      data: { status, resolvedBy, resolvedAt: new Date() },
+    });
+  }
+
+  async listAccounts(page: number, limit: number, search?: string) {
+    const where: Prisma.FinancialAccountWhereInput = search
+      ? {
+          OR: [
+            { code: { contains: search, mode: "insensitive" } },
+            {
+              party: { displayName: { contains: search, mode: "insensitive" } },
+            },
+          ],
+        }
+      : {};
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.financialAccount.findMany({
+        where,
+        include: { party: true },
+        orderBy: { updatedAt: "desc" },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.financialAccount.count({ where }),
+    ]);
+    return { items, total, page, limit };
+  }
+  async listTransactions(
+    page: number,
+    limit: number,
+    status?: "PENDING" | "POSTED" | "FAILED" | "REVERSED" | "CANCELLED",
+    referenceType?: string,
+    search?: string,
+  ) {
+    const where: Prisma.LedgerTransactionWhereInput = {
+      ...(status ? { status } : {}),
+      ...(referenceType ? { referenceType } : {}),
+      ...(search
+        ? {
+            OR: [
+              { command: { contains: search, mode: "insensitive" } },
+              { idempotencyKey: { contains: search, mode: "insensitive" } },
+              { referenceId: { contains: search, mode: "insensitive" } },
+            ],
+          }
+        : {}),
+    };
+
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.ledgerTransaction.findMany({
+        where,
+        include: {
+          entries: { include: { account: { include: { party: true } } } },
+        },
+        orderBy: { createdAt: "desc" },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.ledgerTransaction.count({ where }),
+    ]);
+
+    return { items, total, page, limit };
+  }
+}
