@@ -3,6 +3,7 @@ import { APP_INTERCEPTOR } from "@nestjs/core";
 import { Test } from "@nestjs/testing";
 import request from "supertest";
 import { IdempotencyInterceptor } from "./idempotency.interceptor";
+import { RequireIdempotency } from "./require-idempotency.decorator";
 
 let counter = 0;
 
@@ -10,6 +11,13 @@ let counter = 0;
 class DummyController {
   @Post("pay")
   pay(): { id: number } {
+    counter += 1;
+    return { id: counter };
+  }
+
+  @Post("charge")
+  @RequireIdempotency()
+  charge(): { id: number } {
     counter += 1;
     return { id: counter };
   }
@@ -37,6 +45,7 @@ describe("IdempotencyInterceptor (e2e via supertest)", () => {
   });
 
   afterEach(async () => {
+    delete process.env.IDEMPOTENCY_ENFORCE;
     await app.close();
   });
 
@@ -80,5 +89,29 @@ describe("IdempotencyInterceptor (e2e via supertest)", () => {
       .get("/t/ping")
       .set("Idempotency-Key", "g");
     expect(counter).toBe(2);
+  });
+
+  it("allows a @RequireIdempotency route without key when enforcement is off (default)", async () => {
+    const res = await request(app.getHttpServer()).post("/t/charge");
+    expect(res.status).toBeLessThan(400);
+    expect(counter).toBe(1);
+  });
+
+  it("rejects a @RequireIdempotency route with 400 when enforcing and no key", async () => {
+    process.env.IDEMPOTENCY_ENFORCE = "true";
+    const res = await request(app.getHttpServer()).post("/t/charge");
+    expect(res.status).toBe(400);
+    expect(counter).toBe(0);
+  });
+
+  it("still dedupes a @RequireIdempotency route with a key while enforcing", async () => {
+    process.env.IDEMPOTENCY_ENFORCE = "true";
+    await request(app.getHttpServer())
+      .post("/t/charge")
+      .set("Idempotency-Key", "m1");
+    await request(app.getHttpServer())
+      .post("/t/charge")
+      .set("Idempotency-Key", "m1");
+    expect(counter).toBe(1);
   });
 });
