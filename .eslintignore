@@ -1,0 +1,7 @@
+dist/
+node_modules/
+coverage/
+prisma/migrations/
+scripts/
+*.mjs
+*.js
