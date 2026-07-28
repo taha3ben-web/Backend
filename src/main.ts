@@ -5,6 +5,7 @@ import {
   VersioningType,
   VERSION_NEUTRAL,
 } from "@nestjs/common";
+import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import helmet from "helmet";
 import { json, urlencoded } from "express";
 import { AppModule } from "./app.module";
@@ -111,6 +112,27 @@ async function bootstrap(): Promise<void> {
       transformOptions: { enableImplicitConversion: true },
     }),
   );
+
+  // توثيق OpenAPI تفاعلي (Swagger UI). يُفعّل تلقائيًا خارج الإنتاج، وفي
+  // الإنتاج فقط عند ضبط ENABLE_SWAGGER=true (كي لا نكشف سطح الـ API افتراضيًا).
+  if (!isProd || process.env.ENABLE_SWAGGER === "true") {
+    const swaggerConfig = new DocumentBuilder()
+      .setTitle("NOVA Ride API")
+      .setDescription(
+        "توثيق OpenAPI لواجهة NOVA. البادئة /api؛ وكل المسارات متاحة أيضًا تحت /api/v1.",
+      )
+      .setVersion("1.0.0")
+      .addBearerAuth(
+        { type: "http", scheme: "bearer", bearerFormat: "JWT" },
+        "bearerAuth",
+      )
+      .build();
+    const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);
+    SwaggerModule.setup("api/docs", app, swaggerDocument, {
+      swaggerOptions: { persistAuthorization: true },
+    });
+    Logger.log("Swagger UI متاح على /api/docs", "Bootstrap");
+  }
 
   // مُرشّح استثناءات موحّد (تسجيل داخلي + استجابة نظيفة).
   const errorReporter = app.get(ErrorReporterService);
