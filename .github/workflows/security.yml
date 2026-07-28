@@ -46,8 +46,5 @@ jobs:
           node-version: "20"
           cache: npm
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Audit
+      - name: Audit dependencies
         run: npm audit --audit-level=high
