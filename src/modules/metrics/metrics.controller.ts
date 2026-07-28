@@ -9,6 +9,11 @@ import {
 import { PrismaService } from "../../prisma/prisma.service";
 import { RedisService } from "../redis/redis.service";
 import { MetricsService } from "./metrics.service";
+import {
+  httpSeriesSnapshot,
+  httpSummary,
+  renderHttpPrometheus,
+} from "../../common/observability/http-metrics";
 
 type Check = { ok: boolean; latencyMs?: number; error?: string };
 
@@ -18,7 +23,7 @@ function round2(n: number): number {
 
 /**
  * نقاط رصد التشغيل (observability):
- *  - GET /api/metrics             → JSON (uptime, memory, WS, DB, Redis, drivers)
+ *  - GET /api/metrics             → JSON (uptime, memory, HTTP, WS, DB, Redis, drivers)
  *  - GET /api/metrics/prometheus  → صيغة Prometheus للماسحات
  *
  * الحماية: إن ضُبِط METRICS_TOKEN يُطلب تمريره عبر Authorization: Bearer <token>.
@@ -53,6 +58,7 @@ export class MetricsController {
         heapUsedMB: round2(mem.heapUsed / 1048576),
         heapTotalMB: round2(mem.heapTotal / 1048576),
       },
+      http: httpSummary(httpSeriesSnapshot()),
       websocket: {
         ...this.metrics.wsSnapshot(),
         ...this.metrics.counters(),
@@ -109,6 +115,7 @@ export class MetricsController {
       "# HELP nova_memory_rss_bytes Resident set size in bytes",
       "# TYPE nova_memory_rss_bytes gauge",
       `nova_memory_rss_bytes ${mem.rss}`,
+      ...renderHttpPrometheus(),
     ];
     return lines.join("\n") + "\n";
   }
