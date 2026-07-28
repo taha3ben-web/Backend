@@ -14,6 +14,14 @@ concurrency:
 permissions:
   contents: read
 
+# قيم وهمية فقط. Prisma يطلب رابط قاعدة البيانات عند قراءة المخطط،
+# ولا يفتح أي اتصال فعلي في خطوات generate / validate / build.
+env:
+  DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci?schema=public"
+  DIRECT_URL: "postgresql://ci:ci@localhost:5432/ci?schema=public"
+  SHADOW_DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci_shadow?schema=public"
+  NODE_ENV: test
+
 jobs:
   build:
     name: Build & Unit Tests
