@@ -2,6 +2,16 @@ import * as bcrypt from "bcryptjs";
 import { AppException } from "../../common/api/app.exception";
 import { PasswordService } from "./password.service";
 
+jest.mock("bcryptjs", () => ({
+  compare: jest.fn(),
+  hash: jest.fn(),
+}));
+
+const comparePassword = bcrypt.compare as jest.MockedFunction<
+  typeof bcrypt.compare
+>;
+const hashPassword = bcrypt.hash as jest.MockedFunction<typeof bcrypt.hash>;
+
 function createPrismaMock() {
   const prisma = {
     user: {
@@ -25,7 +35,7 @@ function createPrismaMock() {
 }
 
 describe("PasswordService", () => {
-  afterEach(() => jest.restoreAllMocks());
+  beforeEach(() => jest.clearAllMocks());
 
   it("changes the password and revokes every other session by default", async () => {
     const prisma = createPrismaMock();
@@ -34,11 +44,10 @@ describe("PasswordService", () => {
       passwordHash: "old-hash",
       status: "ACTIVE",
     });
-    jest
-      .spyOn(bcrypt, "compare")
-      .mockResolvedValueOnce(true as never)
-      .mockResolvedValueOnce(false as never);
-    jest.spyOn(bcrypt, "hash").mockResolvedValue("new-hash" as never);
+    comparePassword
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false);
+    hashPassword.mockResolvedValue("new-hash");
     const service = new PasswordService(prisma as never);
 
     await expect(
@@ -80,7 +89,7 @@ describe("PasswordService", () => {
       passwordHash: "old-hash",
       status: "ACTIVE",
     });
-    jest.spyOn(bcrypt, "compare").mockResolvedValue(false as never);
+    comparePassword.mockResolvedValue(false);
     const service = new PasswordService(prisma as never);
 
     await expect(
