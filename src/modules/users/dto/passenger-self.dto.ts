@@ -27,6 +27,17 @@ export class UpdatePassengerProfileDto {
   @IsOptional()
   @IsEnum(Gender)
   gender?: Gender;
+
+  /**
+   * كلمة المرور تُضبط عند إكمال الملف الشخصي، ليصبح الدخول اليومي
+   * برقم الهاتف + كلمة المرور بدل رسالة SMS في كل مرة. تُخزّن مجزّأة بـ bcryptjs
+   * عبر نفس آلية AuthService (الحقل User.passwordHash).
+   */
+  @IsOptional()
+  @IsString()
+  @MinLength(6)
+  @MaxLength(72)
+  password?: string;
 }
 
 export class PassengerUploadUrlDto {

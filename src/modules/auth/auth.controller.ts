@@ -5,6 +5,7 @@ import { AuthService } from "./auth.service";
 import { PasswordService } from "./password.service";
 import { RegisterDto } from "./dto/register.dto";
 import { LoginDto } from "./dto/login.dto";
+import { ChangePasswordDto } from "./dto/change-password.dto";
 import { RefreshDto } from "./dto/refresh.dto";
 import { FirebaseLoginDto } from "./dto/firebase-login.dto";
 import { RequestOtpDto, VerifyOtpDto } from "./dto/otp.dto";
@@ -70,6 +71,17 @@ export class AuthController {
   @Post("me")
   me(@CurrentUser() user: AuthUser) {
     return this.auth.me(user.userId);
+  }
+
+  // تغيير كلمة المرور من صفحة الحساب (مستخدم مُصادَق عليه).
+  @UseGuards(JwtAuthGuard)
+  @Throttle(AUTH_RATE_LIMITS.passwordChange)
+  @Post("password/change")
+  changePassword(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: ChangePasswordDto,
+  ) {
+    return this.auth.changePassword(user.userId, dto, user.sessionId);
   }
 
   @UseGuards(JwtAuthGuard)

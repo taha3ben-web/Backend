@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
+import * as bcrypt from "bcryptjs";
 import { Prisma, UserStatus, UserType } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import { PaginationDto } from "../../common/dto/pagination.dto";
@@ -14,6 +15,11 @@ import {
 } from "./dto/passenger-self.dto";
 import { FinancialService } from "../financial/financial.service";
 import { SettingsService } from "../settings/settings.service";
+
+/** مقدّمة مفاتيح صور الركّاب في التخزين. */
+const AVATAR_PREFIX = "passenger-profiles/";
+/** مدّة الرابط الموقّع حين لا يكون R2_PUBLIC_URL مضبوطاً (أسبوع). */
+const AVATAR_READ_TTL_MINUTES = 60 * 24 * 7;
 
 @Injectable()
 export class UsersService {
@@ -286,7 +292,11 @@ export class UsersService {
       },
     });
     if (!user) throw new NotFoundException("Passenger profile not found");
-    return { ...user, profileComplete: user.onboardingCompletedAt !== null };
+    return {
+      ...user,
+      avatarUrl: await this.resolveAvatarUrl(user.avatarUrl),
+      profileComplete: user.onboardingCompletedAt !== null,
+    };
   }
 
   async updatePassengerProfile(userId: string, dto: UpdatePassengerProfileDto) {
@@ -294,15 +304,23 @@ export class UsersService {
     if (current.status !== UserStatus.ACTIVE) {
       throw new BadRequestException("Account is not active");
     }
+    // نفس تكلفة bcrypt المعتمدة في AuthService.register (10).
+    const passwordHash = dto.password
+      ? await bcrypt.hash(dto.password, 10)
+      : undefined;
     try {
       const updated = await this.prisma.user.update({
         where: { id: userId },
         data: {
           name: dto.name?.trim(),
           phone: dto.phone?.trim(),
-          avatarUrl: dto.avatarUrl?.trim(),
+          avatarUrl:
+            dto.avatarUrl === undefined
+              ? undefined
+              : this.normalizeAvatarInput(dto.avatarUrl),
           locale: dto.locale?.trim(),
           gender: dto.gender,
+          ...(passwordHash ? { passwordHash } : {}),
         },
         select: { name: true, avatarUrl: true, locale: true, gender: true, onboardingCompletedAt: true },
       });
@@ -322,6 +340,47 @@ export class UsersService {
     return this.getPassengerProfile(userId);
   }
 
+  /**
+   * يحوّل ما هو مخزّن في User.avatarUrl إلى رابط صالح للعرض.
+   *
+   * المخزّن هو مفتاح الكائن (object key) وليس رابطاً موقّعاً، لأن الروابط
+   * الموقّعة تنتهي صلاحيتها. يُولّد الرابط عند القراءة عبر StorageService.readUrl
+   * الموجودة أصلاً: تُرجِع الرابط العام الدائم من R2_PUBLIC_URL إن كان مضبوطاً،
+   * وإلا فرابطاً موقّعاً مؤقتاً.
+   *
+   * القيم القديمة المخزّنة كروابط كاملة تُعاد كما هي (توافق خلفي).
+   */
+  private async resolveAvatarUrl(stored: string | null): Promise<string | null> {
+    if (!stored) return null;
+    if (/^https?:\/\//i.test(stored)) return stored;
+    if (!this.storage.isEnabled()) return null;
+    try {
+      return await this.storage.readUrl(stored, AVATAR_READ_TTL_MINUTES);
+    } catch {
+      // تعذّر توليد الرابط لا يجب أن يُسقِط الملف الشخصي بأكمله.
+      return null;
+    }
+  }
+
+  /**
+   * يقبل من العميل إمّا مفتاح الكائن مباشرة (المفضّل) أو رابطاً سبق أن
+   * أرجعناه، ويخزّن المفتاح وحده دون توقيع ولا معاملات استعلام.
+   */
+  private normalizeAvatarInput(value: string): string {
+    const trimmed = value.trim();
+    if (!/^https?:\/\//i.test(trimmed)) return trimmed.replace(/^\/+/, "");
+    let pathname: string;
+    try {
+      pathname = new URL(trimmed).pathname;
+    } catch {
+      return trimmed;
+    }
+    const marker = pathname.indexOf(AVATAR_PREFIX);
+    // روابط خارجية (مثل صورة من مزوّد آخر) تُحفظ كما هي.
+    if (marker === -1) return trimmed;
+    return pathname.slice(marker);
+  }
+
   async createPassengerUploadUrl(userId: string, dto: PassengerUploadUrlDto) {
     await this.getPassengerProfile(userId);
     if (!this.storage.isEnabled()) {
@@ -337,7 +396,9 @@ export class UsersService {
       objectPath,
       contentType,
     );
-    const readUrl = await this.storage.signedReadUrl(objectPath, 60 * 24 * 7);
+    // readUrl يُفضّل الرابط العام الدائم (R2_PUBLIC_URL) ويرجع للتوقيع المؤقّت إن لم
+    // يكن مضبوطاً. العميل يحفظ objectPath في الملف الشخصي، ويستعمل readUrl للعرض فوراً.
+    const readUrl = await this.storage.readUrl(objectPath, AVATAR_READ_TTL_MINUTES);
     return { uploadUrl, objectPath, readUrl, contentType };
   }
 

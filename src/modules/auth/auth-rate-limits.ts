@@ -28,5 +28,5 @@ export const AUTH_RATE_LIMITS = {
   refresh: rule(30),
   otpRequest: rule(5),
   otpVerify: rule(10),
-  changePassword: rule(5),
+  passwordChange: rule(5),
 };

@@ -10,6 +10,7 @@ import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import { RegisterDto } from "./dto/register.dto";
 import { LoginDto } from "./dto/login.dto";
+import { ChangePasswordDto } from "./dto/change-password.dto";
 import { FirebaseLoginDto } from "./dto/firebase-login.dto";
 import { FirebaseAdminService } from "./firebase-admin.service";
 import { CountryConfigService } from "../country-config/country-config.service";
@@ -322,6 +323,64 @@ export class AuthService {
       sessionId: sessionId ?? null,
     });
     return this.issueTokens(payload.sub, sessionId);
+  }
+
+  /**
+   * تغيير كلمة المرور من داخل الحساب — نفس تخزين bcryptjs المستخدم في
+   * register/login، دون أي نظام مصادقة موازٍ.
+   *
+   * بعد التغيير تُنهى الجلسات الأخرى (وتُبطَل رموز التحديث) ما لم يطلب
+   * العميل خلاف ذلك، مع الإبقاء على الجلسة الحالية.
+   */
+  async changePassword(
+    userId: string,
+    dto: ChangePasswordDto,
+    sessionId?: string,
+  ): Promise<{ ok: boolean; otherSessionsRevoked: boolean }> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, status: true, passwordHash: true },
+    });
+    if (!user) throw new UnauthorizedException("User no longer exists");
+    if (user.status !== "ACTIVE") throw new AppException("ACCOUNT_INACTIVE");
+
+    const valid = await bcrypt.compare(dto.currentPassword, user.passwordHash);
+    if (!valid) throw new AppException("INVALID_CREDENTIALS");
+
+    const same = await bcrypt.compare(dto.newPassword, user.passwordHash);
+    if (same) {
+      throw new AppException("VALIDATION_ERROR", {
+        details: { newPassword: "must differ from the current password" },
+      });
+    }
+
+    const passwordHash = await bcrypt.hash(dto.newPassword, 10);
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash },
+    });
+
+    const revokeOthers = dto.revokeOtherSessions !== false;
+    if (revokeOthers) {
+      await this.prisma.$transaction([
+        this.prisma.refreshToken.updateMany({
+          where: sessionId
+            ? { userId, revoked: false, NOT: { sessionId } }
+            : { userId, revoked: false },
+          data: { revoked: true },
+        }),
+        this.prisma.session.deleteMany({
+          where: sessionId ? { userId, NOT: { id: sessionId } } : { userId },
+        }),
+      ]);
+    }
+
+    await this.safeRecordActivity(userId, "AUTH_PASSWORD_CHANGE", null, {
+      sessionId: sessionId ?? null,
+      otherSessionsRevoked: revokeOthers,
+    });
+
+    return { ok: true, otherSessionsRevoked: revokeOthers };
   }
 
   async logout(userId: string, sessionId?: string): Promise<{ ok: boolean }> {
