@@ -2,14 +2,12 @@ import { Body, Controller, Post, Req, UseGuards } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
 import type { Request } from "express";
 import { AuthService } from "./auth.service";
-import { PasswordService } from "./password.service";
 import { RegisterDto } from "./dto/register.dto";
 import { LoginDto } from "./dto/login.dto";
 import { ChangePasswordDto } from "./dto/change-password.dto";
 import { RefreshDto } from "./dto/refresh.dto";
 import { FirebaseLoginDto } from "./dto/firebase-login.dto";
 import { RequestOtpDto, VerifyOtpDto } from "./dto/otp.dto";
-import { ChangePasswordDto } from "./dto/change-password.dto";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
 import { Public } from "../../common/decorators/public.decorator";
 import {
@@ -20,10 +18,7 @@ import { AUTH_RATE_LIMITS } from "./auth-rate-limits";
 
 @Controller("auth")
 export class AuthController {
-  constructor(
-    private readonly auth: AuthService,
-    private readonly passwords: PasswordService,
-  ) {}
+  constructor(private readonly auth: AuthService) {}
 
   @Public()
   @Throttle(AUTH_RATE_LIMITS.register)
@@ -82,16 +77,6 @@ export class AuthController {
     @Body() dto: ChangePasswordDto,
   ) {
     return this.auth.changePassword(user.userId, dto, user.sessionId);
-  }
-
-  @UseGuards(JwtAuthGuard)
-  @Throttle(AUTH_RATE_LIMITS.changePassword)
-  @Post("password/change")
-  changePassword(
-    @CurrentUser() user: AuthUser,
-    @Body() dto: ChangePasswordDto,
-  ) {
-    return this.passwords.changePassword(user.userId, user.sessionId, dto);
   }
 
   @UseGuards(JwtAuthGuard)

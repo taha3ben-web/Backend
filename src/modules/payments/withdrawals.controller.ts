@@ -21,7 +21,6 @@ import {
   CurrentUser,
   AuthUser,
 } from "../../common/decorators/current-user.decorator";
-import { RequireIdempotency } from "../../common/http/require-idempotency.decorator";
 
 @UseGuards(JwtAuthGuard)
 @Controller("withdrawals")
@@ -29,7 +28,6 @@ export class WithdrawalsController {
   constructor(private readonly withdrawals: WithdrawalsService) {}
 
   @Post()
-  @RequireIdempotency()
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateWithdrawDto) {
     return this.withdrawals.createForDriver(
       user.userId,

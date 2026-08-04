@@ -17,7 +17,6 @@ import {
   CurrentUser,
   AuthUser,
 } from "../../common/decorators/current-user.decorator";
-import { RequireIdempotency } from "../../common/http/require-idempotency.decorator";
 import { PayoutBatchService, PayoutItemDraft } from "./payout-batch.service";
 import { PayoutBridgeService } from "./payout-bridge.service";
 import { PayoutBatchStatus } from "./payout.util";
@@ -32,7 +31,6 @@ export class PayoutsController {
   ) {}
 
   @Post()
-  @RequireIdempotency()
   create(
     @Body("provider") provider: string,
     @Body("items") items: PayoutItemDraft[],
@@ -49,7 +47,6 @@ export class PayoutsController {
 
   /** ينشئ دفعة من طلبات سحب معتمدة مباشرة. */
   @Post("from-withdrawals")
-  @RequireIdempotency()
   fromWithdrawals(
     @Body("provider") provider: string,
     @Body("withdrawRequestIds") withdrawRequestIds: string[],
@@ -74,7 +71,6 @@ export class PayoutsController {
 
   /** إتمام الدفعة: يصرف كل طلب سحب مرتبط ويُفرِج عن المبلغ المحجوز. */
   @Post(":id/settle")
-  @RequireIdempotency()
   settle(@Param("id") id: string, @CurrentUser() user: AuthUser) {
     return this.bridge.settleBatch(id, user.userId);
   }

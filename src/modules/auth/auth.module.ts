@@ -2,7 +2,6 @@ import { Module } from "@nestjs/common";
 import { JwtModule } from "@nestjs/jwt";
 import { PassportModule } from "@nestjs/passport";
 import { AuthService } from "./auth.service";
-import { PasswordService } from "./password.service";
 import { AuthController } from "./auth.controller";
 import { JwtStrategy } from "./strategies/jwt.strategy";
 import { FirebaseAdminService } from "./firebase-admin.service";
@@ -16,7 +15,6 @@ import { CountryConfigModule } from "../country-config/country-config.module";
   controllers: [AuthController],
   providers: [
     AuthService,
-    PasswordService,
     JwtStrategy,
     FirebaseAdminService,
     LoginThrottleService,
@@ -25,6 +23,6 @@ import { CountryConfigModule } from "../country-config/country-config.module";
     // NotificationsModule (الذي يستورد AuthModule ويُنتج تبعية دائرية).
     SmsProvider,
   ],
-  exports: [AuthService, PasswordService, FirebaseAdminService],
+  exports: [AuthService, FirebaseAdminService],
 })
 export class AuthModule {}

@@ -3,7 +3,6 @@ import { CurrentUser, type AuthUser } from "../../common/decorators/current-user
 import { Roles } from "../../common/decorators/roles.decorator";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
 import { RolesGuard } from "../../common/guards/roles.guard";
-import { RequireIdempotency } from "../../common/http/require-idempotency.decorator";
 import { CreatePaymentCheckoutDto } from "./dto/payments.dto";
 import { PaymentsService } from "./payments.service";
 
@@ -24,7 +23,6 @@ export class PassengerPaymentsController {
   }
 
   @Post("trip/:tripId/checkout")
-  @RequireIdempotency()
   checkout(
     @CurrentUser() user: AuthUser,
     @Param("tripId") tripId: string,
