@@ -9,6 +9,10 @@ import {
 import { PrismaService } from "../../prisma/prisma.service";
 import { RealtimeGateway } from "../realtime/realtime.gateway";
 import { SettingsService } from "../settings/settings.service";
+import {
+  StorageService,
+  STORED_MEDIA_READ_TTL_MINUTES,
+} from "../storage/storage.service";
 import { PaginationDto } from "../../common/dto/pagination.dto";
 
 type CommunicationPolicy = {
@@ -29,6 +33,7 @@ export class TripCommunicationService {
     private readonly settings: SettingsService,
     @Inject(forwardRef(() => RealtimeGateway))
     private readonly realtime: RealtimeGateway,
+    private readonly storage: StorageService,
   ) {}
 
   async context(userId: string, tripId: string) {
@@ -47,7 +52,15 @@ export class TripCommunicationService {
       canCall: callable && phoneNumber !== null,
       phoneMode: policy.phoneMode ?? "HIDDEN",
       phoneNumber,
-      participant: { id: other.id, name: other.name, avatarUrl: other.avatarUrl },
+      participant: {
+        id: other.id,
+        name: other.name,
+        // مفتاح الكائن لا يصلح للعرض؛ يُولّد الرابط عند كل طلب.
+        avatarUrl: await this.storage.resolveStoredUrl(
+          other.avatarUrl,
+          STORED_MEDIA_READ_TTL_MINUTES,
+        ),
+      },
     };
   }
 

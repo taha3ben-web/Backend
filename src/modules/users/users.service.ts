@@ -351,15 +351,9 @@ export class UsersService {
    * القيم القديمة المخزّنة كروابط كاملة تُعاد كما هي (توافق خلفي).
    */
   private async resolveAvatarUrl(stored: string | null): Promise<string | null> {
-    if (!stored) return null;
-    if (/^https?:\/\//i.test(stored)) return stored;
-    if (!this.storage.isEnabled()) return null;
-    try {
-      return await this.storage.readUrl(stored, AVATAR_READ_TTL_MINUTES);
-    } catch {
-      // تعذّر توليد الرابط لا يجب أن يُسقِط الملف الشخصي بأكمله.
-      return null;
-    }
+    // المنطق موحّد في StorageService حتى لا يتفرّع سلوك الروابط بين الراكب
+    // والسائق ووثائقه كما حدث سابقاً.
+    return this.storage.resolveStoredUrl(stored, AVATAR_READ_TTL_MINUTES);
   }
 
   /**
@@ -367,18 +361,8 @@ export class UsersService {
    * أرجعناه، ويخزّن المفتاح وحده دون توقيع ولا معاملات استعلام.
    */
   private normalizeAvatarInput(value: string): string {
-    const trimmed = value.trim();
-    if (!/^https?:\/\//i.test(trimmed)) return trimmed.replace(/^\/+/, "");
-    let pathname: string;
-    try {
-      pathname = new URL(trimmed).pathname;
-    } catch {
-      return trimmed;
-    }
-    const marker = pathname.indexOf(AVATAR_PREFIX);
-    // روابط خارجية (مثل صورة من مزوّد آخر) تُحفظ كما هي.
-    if (marker === -1) return trimmed;
-    return pathname.slice(marker);
+    // نفس السلوك السابق، لكن من مصدر واحد مشترك.
+    return this.storage.toObjectPath(value, [AVATAR_PREFIX]);
   }
 
   async createPassengerUploadUrl(userId: string, dto: PassengerUploadUrlDto) {

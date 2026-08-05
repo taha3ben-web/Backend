@@ -26,6 +26,7 @@ import { CityScalingService } from "../city-scaling/city-scaling.service";
 import { TracerService } from "../../common/observability/tracer.service";
 import { AppException } from "../../common/api/app.exception";
 import { loadPassengerSummary } from "../../common/passenger-summary";
+import { StorageService } from "../storage/storage.service";
 import { maskPhone } from "../calls/call-masking.adapter";
 import { DistributedLockService } from "../../common/infra/distributed-lock.service";
 
@@ -84,6 +85,7 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
     private readonly cityScaling: CityScalingService,
     @Inject(forwardRef(() => RealtimeGateway))
     private readonly realtime: RealtimeGateway,
+    private readonly storage: StorageService,
     @Optional() private readonly tracer?: TracerService,
   ) {}
 
@@ -481,7 +483,11 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
     driverUserId: string,
   ): Promise<boolean> {
     const key = `${trip.id}:${driverUserId}`;
-    const passenger = await loadPassengerSummary(this.prisma, trip.passengerId);
+    const passenger = await loadPassengerSummary(
+      this.prisma,
+      trip.passengerId,
+      this.storage,
+    );
 
     this.realtime.emitToUser(driverUserId, "ride:offer", {
       tripId: trip.id,

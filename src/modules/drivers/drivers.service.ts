@@ -3,12 +3,17 @@ import { DriverStatus, Prisma } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import { RedisService } from "../redis/redis.service";
 import { PaginationDto } from "../../common/dto/pagination.dto";
+import {
+  StorageService,
+  STORED_MEDIA_READ_TTL_MINUTES,
+} from "../storage/storage.service";
 
 @Injectable()
 export class DriversService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
+    private readonly storage: StorageService,
   ) {}
 
   async findAll(q: PaginationDto, status?: DriverStatus) {
@@ -60,7 +65,17 @@ export class DriversService {
 
     // الموقع اللحظي من Redis (إن وجد)
     const live = await this.redis.client.hgetall(`driver:${id}`);
-    return { ...driver, live: live?.lat ? live : null };
+    // وثائق السائق مخزّنة كمفاتيح؛ تُحوّل لروابط عند كل طلب مراجعة.
+    const documents = await Promise.all(
+      (driver.documents ?? []).map(async (doc) => ({
+        ...doc,
+        url: await this.storage.resolveStoredUrl(
+          doc.url,
+          STORED_MEDIA_READ_TTL_MINUTES,
+        ),
+      })),
+    );
+    return { ...driver, documents, live: live?.lat ? live : null };
   }
 
   setStatus(id: string, status: DriverStatus) {

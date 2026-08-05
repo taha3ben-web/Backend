@@ -7,7 +7,10 @@ import {
 import { DriverAvailability, Prisma } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import { maskPhone } from "../calls/call-masking.adapter";
-import { StorageService } from "../storage/storage.service";
+import {
+  StorageService,
+  STORED_MEDIA_READ_TTL_MINUTES,
+} from "../storage/storage.service";
 import { DriverSanctionsService } from "./driver-sanctions.service";
 import { PaginationDto } from "../../common/dto/pagination.dto";
 import { round2 } from "../../common/money.util";
@@ -27,6 +30,12 @@ type DriverWithRelations = Prisma.DriverGetPayload<{
     city: { select: { id: true; name: true } };
   };
 }>;
+
+/**
+ * نافذة رفع الوثيقة. الافتراضي في StorageService هو 15 دقيقة، وهي قصيرة
+ * لسائق يصوّر رخصته على شبكة بطيئة ثم يعود للتطبيق.
+ */
+const DOCUMENT_UPLOAD_TTL_MINUTES = 30;
 
 /**
  * خدمة الخدمة الذاتية للسائق (تطبيق السائق):
@@ -69,17 +78,35 @@ export class DriverSelfService {
     return this.serialize(driver as DriverWithRelations);
   }
 
-  private serialize(driver: DriverWithRelations) {
+  private async serialize(driver: DriverWithRelations) {
     const vehicle = driver.vehicles?.[0] ?? null;
-    const docUrl = (type: string) =>
-      driver.documents?.find((d) => d.type === type)?.url ?? null;
+    // قاعدة البيانات تحفظ مفتاح الكائن؛ رابط العرض يُولّد هنا عند كل طلب حتى
+    // لا تموت صورة الوثيقة بعد انتهاء توقيع محفوظ.
+    const documents = await Promise.all(
+      (driver.documents ?? []).map(async (d) => ({
+        id: d.id,
+        type: d.type,
+        url: await this.storage.resolveStoredUrl(
+          d.url,
+          STORED_MEDIA_READ_TTL_MINUTES,
+        ),
+        status: d.status,
+      })),
+    );
+    const photoUrl =
+      (await this.storage.resolveStoredUrl(
+        driver.user?.avatarUrl ?? null,
+        STORED_MEDIA_READ_TTL_MINUTES,
+      )) ??
+      documents.find((d) => d.type === "PROFILE_PHOTO")?.url ??
+      null;
     return {
       id: driver.id,
       userId: driver.userId,
       name: driver.user?.name ?? null,
       phone: driver.user?.phone ?? null,
       email: driver.user?.email ?? null,
-      photoUrl: driver.user?.avatarUrl ?? docUrl("PROFILE_PHOTO"),
+      photoUrl,
       status: driver.status,
       approved: driver.status === "APPROVED",
       availability: driver.availability,
@@ -99,12 +126,7 @@ export class DriverSelfService {
             vehicleTypeId: vehicle.vehicleTypeId ?? null,
           }
         : null,
-      documents: (driver.documents ?? []).map((d) => ({
-        id: d.id,
-        type: d.type,
-        url: d.url,
-        status: d.status,
-      })),
+      documents,
     };
   }
 
@@ -292,14 +314,23 @@ export class DriverSelfService {
 
   async addDocument(userId: string, dto: AddDocumentDto) {
     const driver = await this.requireDriver(userId);
-    return this.prisma.driverDocument.create({
+    // يُقبل مفتاح الكائن أو رابط سبق أن أرجعناه، ويُخزَّن المفتاح وحده: لا
+    // توقيع ولا معاملات استعلام تنتهي صلاحيتها داخل قاعدة البيانات.
+    const created = await this.prisma.driverDocument.create({
       data: {
         driverId: driver.id,
         type: dto.type,
-        url: dto.url,
+        url: this.storage.toObjectPath(dto.url),
         status: "PENDING",
       },
     });
+    return {
+      ...created,
+      url: await this.storage.resolveStoredUrl(
+        created.url,
+        STORED_MEDIA_READ_TTL_MINUTES,
+      ),
+    };
   }
 
   async createUploadUrl(userId: string, dto: UploadUrlDto) {
@@ -310,8 +341,17 @@ export class DriverSelfService {
     const contentType = dto.contentType ?? "image/jpeg";
     const ext = contentType.includes("png") ? "png" : "jpg";
     const objectPath = `driver-docs/${driver.id}/${dto.kind}-${Date.now()}.${ext}`;
-    const uploadUrl = await this.storage.signedUploadUrl(objectPath, contentType);
-    const readUrl = await this.storage.signedReadUrl(objectPath, 60 * 24 * 7);
+    const uploadUrl = await this.storage.signedUploadUrl(
+      objectPath,
+      contentType,
+      DOCUMENT_UPLOAD_TTL_MINUTES,
+    );
+    // readUrl (لا signedReadUrl) تحترم R2_PUBLIC_URL فتُرجِع رابطاً عاماً دائماً
+    // عند ضبطه. وهو للعرض الفوري فقط؛ المخزَّن في قاعدة البيانات هو objectPath.
+    const readUrl = await this.storage.readUrl(
+      objectPath,
+      STORED_MEDIA_READ_TTL_MINUTES,
+    );
     return { uploadUrl, objectPath, readUrl };
   }
 }

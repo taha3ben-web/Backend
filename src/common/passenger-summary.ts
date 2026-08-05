@@ -1,4 +1,6 @@
 import { PrismaService } from "../prisma/prisma.service";
+import type { StorageService } from "../modules/storage/storage.service";
+import { STORED_MEDIA_READ_TTL_MINUTES } from "../modules/storage/storage.service";
 
 export interface PublicPassengerSummary {
   id: string;
@@ -13,6 +15,8 @@ export interface PublicPassengerSummary {
 export async function loadPassengerSummaries(
   prisma: PrismaService,
   passengerIds: string[],
+  // اختيارية حتى لا تُكسَر المناداة القديمة؛ دونها يُعاد المخزّن كما هو.
+  storage?: StorageService,
 ): Promise<Map<string, PublicPassengerSummary>> {
   const ids = [...new Set(passengerIds.filter(Boolean))];
   if (!ids.length) return new Map();
@@ -55,8 +59,8 @@ export async function loadPassengerSummaries(
   );
   const ratingById = new Map(ratingRows.map((row) => [row.targetId, row]));
 
-  return new Map(
-    users.map((user) => {
+  const entries = await Promise.all(
+    users.map(async (user): Promise<[string, PublicPassengerSummary]> => {
       const rating = ratingById.get(user.id);
       const average = rating?._avg.stars ?? null;
       return [
@@ -64,7 +68,13 @@ export async function loadPassengerSummaries(
         {
           id: user.id,
           name: user.name,
-          avatarUrl: user.avatarUrl,
+          // المخزّن مفتاح كائن؛ يُحوّل لرابط عند العرض للطرف الآخر.
+          avatarUrl: storage
+            ? await storage.resolveStoredUrl(
+                user.avatarUrl,
+                STORED_MEDIA_READ_TTL_MINUTES,
+              )
+            : user.avatarUrl,
           completedTrips: completedById.get(user.id) ?? 0,
           rating: average == null ? null : Math.round(average * 10) / 10,
           ratingCount: rating?._count._all ?? 0,
@@ -72,12 +82,18 @@ export async function loadPassengerSummaries(
       ];
     }),
   );
+  return new Map(entries);
 }
 
 export async function loadPassengerSummary(
   prisma: PrismaService,
   passengerId: string,
+  storage?: StorageService,
 ): Promise<PublicPassengerSummary | null> {
-  const summaries = await loadPassengerSummaries(prisma, [passengerId]);
+  const summaries = await loadPassengerSummaries(
+    prisma,
+    [passengerId],
+    storage,
+  );
   return summaries.get(passengerId) ?? null;
 }

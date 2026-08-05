@@ -20,6 +20,23 @@ import { GcsStorageDriver, type GcsConfig } from "./drivers/gcs.driver";
  *
  * لا توجد أي قيمة ثابتة (مفتاح، نطاق، أو bucket) داخل الكود.
  */
+/**
+ * مقدّمات مفاتيح الكائنات التي يملكها هذا النظام داخل التخزين.
+ * تُستخدم لاستخراج مفتاح الكائن من رابط كامل قد يرسله عميل قديم.
+ * أي رابط لا يطابق إحداها يُعتبر رابطاً خارجياً ويُحفظ كما هو.
+ */
+export const OWNED_OBJECT_PREFIXES = [
+  "passenger-profiles/",
+  "driver-docs/",
+] as const;
+
+/**
+ * مدّة الرابط الموقّع لصور الملفات الشخصية ووثائق السائقين، وتُستعمل فقط
+ * حين لا يكون R2_PUBLIC_URL مضبوطاً. قيمة واحدة مشتركة حتى لا يتفرّع السلوك
+ * بين الوحدات كما حدث سابقاً.
+ */
+export const STORED_MEDIA_READ_TTL_MINUTES = 60 * 24 * 7;
+
 @Injectable()
 export class StorageService {
   private readonly logger = new Logger(StorageService.name);
@@ -113,6 +130,68 @@ export class StorageService {
     const direct = this.publicUrl(objectPath);
     if (direct) return direct;
     return this.signedReadUrl(objectPath, expiresInMinutes);
+  }
+
+  /**
+   * يحوّل ما هو مخزّن في قاعدة البيانات إلى رابط صالح للعرض الآن.
+   *
+   * المخزّن يجب أن يكون مفتاح الكائن (object key) لا رابطاً موقّعاً، لأن
+   * الروابط الموقّعة تنتهي صلاحيتها بينما السجل يبقى. لذلك يُولّد الرابط عند
+   * كل قراءة: عام دائم من R2_PUBLIC_URL إن توفّر، وإلا موقّع جديد.
+   *
+   * تتحمّل القيم القديمة: الرابط الموقّع المحفوظ سابقاً يُقشَّر إلى مفتاحه
+   * ثم يُوقّع من جديد، فلا تظهر صورة معطوبة للمستخدم.
+   * الروابط الخارجية (مزوّد آخر) تُعاد كما هي.
+   */
+  async resolveStoredUrl(
+    stored: string | null | undefined,
+    expiresInMinutes = 15,
+  ): Promise<string | null> {
+    if (!stored) return null;
+    const key = this.toObjectPath(stored);
+    if (!key) return null;
+    if (/^https?:\/\//i.test(key)) return key;
+    if (!this.isEnabled()) return null;
+    try {
+      return await this.readUrl(key, expiresInMinutes);
+    } catch {
+      // تعذّر توليد الرابط لا يجب أن يُسقِط الاستجابة بأكملها.
+      this.logger.warn(`تعذّر توليد رابط قراءة للكائن ${key}`);
+      return null;
+    }
+  }
+
+  /**
+   * يستخرج مفتاح الكائن مما يرسله العميل: مفتاحاً مباشرة (المفضّل) أو رابطاً
+   * سبق أن أرجعناه. يُسقِط التوقيع ومعاملات الاستعلام واسم الـ bucket، فلا
+   * يُخزَّن رابط مؤقّت في قاعدة البيانات أبداً.
+   */
+  toObjectPath(
+    value: string,
+    prefixes: readonly string[] = OWNED_OBJECT_PREFIXES,
+  ): string {
+    const trimmed = value.trim();
+    if (!trimmed) return trimmed;
+    if (!/^https?:\/\//i.test(trimmed)) return trimmed.replace(/^\/+/, "");
+    let pathname: string;
+    try {
+      // pathname وحده يُسقِط التوقيع لأن المعاملات ليست جزءاً منه.
+      pathname = new URL(trimmed).pathname;
+    } catch {
+      return trimmed;
+    }
+    let decoded = pathname;
+    try {
+      decoded = decodeURIComponent(pathname);
+    } catch {
+      decoded = pathname;
+    }
+    for (const prefix of prefixes) {
+      const marker = decoded.indexOf(prefix);
+      // القصّ من المقدّمة يتخطّى اسم الـ bucket في نمط المسار تلقائياً.
+      if (marker !== -1) return decoded.slice(marker);
+    }
+    return trimmed;
   }
 
   /** يختار المزوّد مرةً واحدة عند الإقلاع حسب متغيرات البيئة. */

@@ -10,6 +10,10 @@ import {
   AdminFareOfferQueryDto,
 } from "./dto/fare-offer.dto";
 import { loadPassengerSummaries } from "../../common/passenger-summary";
+import {
+  StorageService,
+  STORED_MEDIA_READ_TTL_MINUTES,
+} from "../storage/storage.service";
 import { DistributedLockService } from "../../common/infra/distributed-lock.service";
 
 type DriverBidProfile = Prisma.DriverGetPayload<{
@@ -45,6 +49,7 @@ export class FareOffersService {
     @Inject(forwardRef(() => RealtimeGateway))
     private readonly realtime: RealtimeGateway,
     private readonly notifications: NotificationsService,
+    private readonly storage: StorageService,
   ) {}
 
   /** يحلّ userId لسائق واحد (لغرفة user:{id} في الـ WebSocket). */
@@ -168,6 +173,7 @@ export class FareOffersService {
     const passengerById = await loadPassengerSummaries(
       this.prisma,
       matching.map((quote) => quote.passengerId),
+      this.storage,
     );
     return matching.map((quote) => ({
       id: quote.id,
@@ -380,22 +386,28 @@ export class FareOffersService {
         })
       : [];
     const byId = new Map(drivers.map((d) => [d.id, d]));
-    return offers.map((o) => {
-      const d = byId.get(o.driverId);
-      return {
-        ...this.serialize(o),
-        driver: d
-          ? {
-              id: d.id,
-              name: d.user?.name ?? null,
-              avatarUrl: d.user?.avatarUrl ?? null,
-              rating: d.rating,
-              totalTrips: d.totalTrips,
-              vehicle: d.vehicles[0] ?? null,
-            }
-          : null,
-      };
-    });
+    return Promise.all(
+      offers.map(async (o) => {
+        const d = byId.get(o.driverId);
+        return {
+          ...this.serialize(o),
+          driver: d
+            ? {
+                id: d.id,
+                name: d.user?.name ?? null,
+                // صورة السائق مخزّنة كمفتاح؛ تُحوّل لرابط عند عرض العروض للراكب.
+                avatarUrl: await this.storage.resolveStoredUrl(
+                  d.user?.avatarUrl ?? null,
+                  STORED_MEDIA_READ_TTL_MINUTES,
+                ),
+                rating: d.rating,
+                totalTrips: d.totalTrips,
+                vehicle: d.vehicles[0] ?? null,
+              }
+            : null,
+        };
+      }),
+    );
   }
 
   /**
