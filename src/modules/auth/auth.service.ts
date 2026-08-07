@@ -237,6 +237,18 @@ export class AuthService {
           data: { firebaseUid },
         });
       }
+      // حساب راكب موجود يمكنه أيضًا أن يصبح سائقًا (والعكس): الحساب واحد،
+      // لكن ملف السائق كيان مستقل. لا نلمس `type` هنا أبدًا - فهو يبقى
+      // "النوع الأساسي" للحساب كما سُجِّل أول مرة، بينما دور الجلسة الفعلي
+      // (driver أو passenger) يُحسم لكل تسجيل دخول حسب `role` المطلوب هنا،
+      // ويُتحقق منه حيًّا من قاعدة البيانات في jwt.strategy عند كل طلب.
+      if (role === "DRIVER") {
+        await this.prisma.driver.upsert({
+          where: { userId: user.id },
+          create: { userId: user.id },
+          update: {},
+        });
+      }
     } else {
       const unusablePasswordHash = await bcrypt.hash(
         `firebase:${firebaseUid}`,
@@ -268,7 +280,9 @@ export class AuthService {
         userAgent: session?.userAgent ?? null,
       },
     );
-    return this.issueTokens(user.id, sessionId);
+    // دور الجلسة هو الدور المطلوب فعليًا فـ هذا التطبيق (role)، ماشي `user.type`
+    // الثابت - هذا هو اللي يسمح لنفس الحساب يكون راكب وسائق فنفس الوقت.
+    return this.issueTokens(user.id, sessionId, role);
   }
 
   async refresh(refreshToken: string): Promise<Tokens> {
@@ -322,7 +336,15 @@ export class AuthService {
     await this.safeRecordActivity(payload.sub, "AUTH_REFRESH", null, {
       sessionId: sessionId ?? null,
     });
-    return this.issueTokens(payload.sub, sessionId);
+    // دور الجلسة القديم (من التوكن المُنعش نفسه) يُحمَل معه، وإلا كل تحديث
+    // توكن لسائق كان يرجّعه بصمت لـ `user.type` الافتراضي (PASSENGER) عبر
+    // issueTokens - وهو نفس العطل اللي كنا بصدد إصلاحه، بس فمسار مختلف.
+    // jwt.strategy.validate يعيد التحقق الحي (driver موجود؟) فكل الأحوال.
+    const sessionRole =
+      payload.role === "DRIVER" || payload.role === "PASSENGER"
+        ? payload.role
+        : undefined;
+    return this.issueTokens(payload.sub, sessionId, sessionRole);
   }
 
   /**
@@ -432,13 +454,19 @@ export class AuthService {
   private async issueTokens(
     userId: string,
     sessionId?: string,
+    /**
+     * دور الجلسة الصريح، يُستعمل فقط من `loginWithFirebase` حيث حساب واحد
+     * يمكن يحمل أكثر من دور (راكب + سائق). كل مسارات الدخول الأخرى
+     * (register/login) لا تمرّر شيئًا فيبقى السلوك القديم: `user.type`.
+     */
+    sessionRole?: "PASSENGER" | "DRIVER",
   ): Promise<Tokens> {
     const authData = await this.loadAuthData(userId);
     if (!authData) throw new UnauthorizedException("User no longer exists");
     if (authData.user.status !== "ACTIVE") {
       throw new UnauthorizedException("Account is not active");
     }
-    const actualRole = authData.user.type;
+    const actualRole = sessionRole ?? authData.user.type;
 
     const payload = sessionId
       ? { sub: userId, role: actualRole, sid: sessionId }
