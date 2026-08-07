@@ -99,7 +99,7 @@ export class MatchingEngineService {
     const vehicleFilter = ctx.vehicleTypeId
       ? { isActive: true, vehicleTypeId: ctx.vehicleTypeId }
       : { isActive: true, rideClass: ctx.rideClass };
-    const eligible = await this.prisma.driver.findMany({
+    let eligible = await this.prisma.driver.findMany({
       where: {
         userId: { in: userIds },
         status: "APPROVED",
@@ -108,6 +108,20 @@ export class MatchingEngineService {
       },
       select: { userId: true, rating: true },
     });
+    // تراجع لمطابقة rideClass إن لم يوجد أي سائق مطابق تمامًا لـ vehicleTypeId.
+    // سائق مركبته لم تُربط بعد بنوع محدد من الكتالوج (vehicleTypeId فارغ) يبقى
+    // ظاهرًا للمطابقة طالما فئة مركبته (rideClass) صحيحة - بدل أن يختفي تمامًا.
+    if (ctx.vehicleTypeId && eligible.length === 0) {
+      eligible = await this.prisma.driver.findMany({
+        where: {
+          userId: { in: userIds },
+          status: "APPROVED",
+          availability: "ONLINE",
+          vehicles: { some: { isActive: true, rideClass: ctx.rideClass } },
+        },
+        select: { userId: true, rating: true },
+      });
+    }
     const ratingByUser = new Map<string, number | null>(
       eligible.map((d) => [d.userId, d.rating ?? null]),
     );

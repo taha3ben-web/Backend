@@ -63,8 +63,10 @@ export class DriversService {
     });
     if (!driver) throw new NotFoundException("Driver not found");
 
-    // الموقع اللحظي من Redis (إن وجد)
-    const live = await this.redis.client.hgetall(`driver:${id}`);
+    // الموقع اللحظي من Redis (إن وجد). المفتاح مبني على userId (كما يُكتب في
+    // realtime.gateway.ts عبر redis.setDriverLocation)، وليس driver.id -
+    // كانا مفتاحين مختلفين هنا فيرجع live فارغًا دائمًا حتى مع GPS فعّال.
+    const live = await this.redis.client.hgetall(`driver:${driver.userId}`);
     // وثائق السائق مخزّنة كمفاتيح؛ تُحوّل لروابط عند كل طلب مراجعة.
     const documents = await Promise.all(
       (driver.documents ?? []).map(async (doc) => ({
