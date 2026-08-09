@@ -17,6 +17,7 @@ import { PrismaService } from "../../prisma/prisma.service";
 import { PaginationDto } from "../../common/dto/pagination.dto";
 import { RedisService } from "../redis/redis.service";
 import { RealtimeGateway } from "../realtime/realtime.gateway";
+import { NotificationDispatcher } from "../notifications/notification-dispatcher.service";
 import { PricingService } from "./pricing.service";
 import { CouponsService } from "../coupons/coupons.service";
 import { RequestRideDto } from "./dto/matching.dto";
@@ -85,6 +86,8 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
     private readonly cityScaling: CityScalingService,
     @Inject(forwardRef(() => RealtimeGateway))
     private readonly realtime: RealtimeGateway,
+    @Inject(forwardRef(() => NotificationDispatcher))
+    private readonly notifications: NotificationDispatcher,
     private readonly storage: StorageService,
     @Optional() private readonly tracer?: TracerService,
   ) {}
@@ -506,6 +509,22 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
       expiresInMs: OFFER_TIMEOUT_MS,
       passenger,
     });
+
+    // قناة احتياطية عبر Push: الـ socket هو المسار الأساسي وهو ما يعرض
+    // الطلب فورًا وقت التطبيق مفتوح، لكن نظام التشغيل (خصوصًا MIUI) يعلّق
+    // اتصال الـ socket في الخلفية بلا ضمان. لا ننتظر النتيجة ولا نكسر تدفّق
+    // العرض لو فشل الإرسال — نفس نمط نشر Redis أسفله (fire-and-forget).
+    void this.notifications
+      .dispatch({
+        channel: "PUSH",
+        userIds: [driverUserId],
+        title: "طلب رحلة جديد",
+        body: trip.pickupAddress
+          ? `من ${trip.pickupAddress}`
+          : "لديك عرض رحلة بانتظار ردّك",
+        data: { tripId: trip.id, type: "ride_offer" },
+      })
+      .catch(() => undefined);
 
     return new Promise<boolean>((resolve) => {
       const timer = setTimeout(() => {

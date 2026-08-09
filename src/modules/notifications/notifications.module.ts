@@ -23,6 +23,11 @@ import { EmailProvider } from "./providers/email.provider";
     EmailProvider,
   ],
   controllers: [NotificationsController],
-  exports: [NotificationsService, DeviceTokensService, SmsProvider],
+  exports: [
+    NotificationsService,
+    NotificationDispatcher,
+    DeviceTokensService,
+    SmsProvider,
+  ],
 })
 export class NotificationsModule {}

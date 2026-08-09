@@ -7,10 +7,15 @@ import { CouponsModule } from "../coupons/coupons.module";
 import { PricingEngineModule } from "../pricing-engine/pricing-engine.module";
 import { MatchingEngineModule } from "./engine/matching-engine.module";
 import { CityScalingModule } from "../city-scaling/city-scaling.module";
+import { NotificationsModule } from "../notifications/notifications.module";
 
 @Module({
   imports: [
     forwardRef(() => RealtimeModule),
+    // RealtimeModule يستخدم forwardRef أصلاً للعودة إلى MatchingModule؛
+    // المرور عبر NotificationsModule -> RealtimeModule يصل لنفس الحلقة،
+    // فهذا الاستيراد يحتاج نفس المعاملة.
+    forwardRef(() => NotificationsModule),
     CouponsModule,
     PricingEngineModule,
     MatchingEngineModule,
