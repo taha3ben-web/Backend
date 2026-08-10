@@ -69,15 +69,7 @@ export class MatchingEngineService {
     const notExcluded = nearby
       .map((entry) => entry.driverId)
       .filter((id) => !exclude.has(id));
-    if (notExcluded.length === 0) {
-      // تشخيص مؤقت (Stage: driver-not-reached): لو هذا صار صفر، السائق أصلا
-      // غايب من drivers:geo — أي مشكلة تسجيل الموقع، لا علاقة لها بالفئة
-      // ولا بالـ push. يُزال بعد تأكيد السبب.
-      this.logger.debug(
-        `selectCandidates: nearby=${nearby.length} notExcluded=0 (كل السائقين القريبين مستبعدون أو لا يوجد أحد في drivers:geo) radiusKm=${ctx.radiusKm}`,
-      );
-      return [];
-    }
+    if (notExcluded.length === 0) return [];
 
     // استبعاد السائقين المحجوزين حاليًا لعرض آخر (مطابقة موزّعة، fail-open).
     let reserved = new Set<string>();
@@ -144,11 +136,6 @@ export class MatchingEngineService {
         rating: ratingByUser.get(id) ?? null,
       });
     });
-    // تشخيص مؤقت (Stage: driver-not-reached): يوري بالضبط أين يسقط السائق —
-    // موجود جغرافيًا (userIds) لكن busy؟ أو غير eligible (فئة/حالة الموافقة)؟
-    this.logger.debug(
-      `selectCandidates: nearby=${nearby.length} notExcluded=${notExcluded.length} reserved=${reserved.size} userIds=${userIds.length} busy=${busy.size} eligible=${eligible.length} finalCandidates=${candidates.length} vehicleTypeId=${ctx.vehicleTypeId ?? "null"} rideClass=${ctx.rideClass}`,
-    );
     if (candidates.length === 0) return [];
 
     // 4) إثراء المرشّحين بـ ETA حقيقي على شبكة الطرق قبل الترتيب.

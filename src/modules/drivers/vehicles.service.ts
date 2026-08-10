@@ -64,6 +64,8 @@ export class VehiclesService {
     status: "APPROVED" | "REJECTED",
     reviewedById: string,
     note?: string,
+    rideClass?: RideClass,
+    vehicleTypeId?: string,
   ) {
     const vehicle = await this.prisma.vehicle.findUnique({ where: { id } });
     if (!vehicle) throw new AppException("VEHICLE_NOT_FOUND");
@@ -74,6 +76,24 @@ export class VehiclesService {
         verificationNote: note ?? null,
         verifiedById: reviewedById,
         verifiedAt: new Date(),
+        ...(rideClass ? { rideClass } : {}),
+        ...(vehicleTypeId !== undefined ? { vehicleTypeId } : {}),
+      },
+    });
+  }
+
+  /**
+   * تغيير فئة/نوع مركبة لاحقًا (بعد الاعتماد)، بلا المرور بدورة المراجعة
+   * كاملة. الاستخدام: مركبة معتمدة تبيّن أن فئتها المسجّلة غير صحيحة.
+   */
+  async reclassify(id: string, rideClass?: RideClass, vehicleTypeId?: string) {
+    const vehicle = await this.prisma.vehicle.findUnique({ where: { id } });
+    if (!vehicle) throw new AppException("VEHICLE_NOT_FOUND");
+    return this.prisma.vehicle.update({
+      where: { id },
+      data: {
+        ...(rideClass ? { rideClass } : {}),
+        ...(vehicleTypeId !== undefined ? { vehicleTypeId } : {}),
       },
     });
   }

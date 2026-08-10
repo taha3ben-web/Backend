@@ -152,9 +152,7 @@ export class DriverSelfService {
       dto.carModel !== undefined ||
       dto.carColor !== undefined ||
       dto.carPlate !== undefined ||
-      dto.carYear !== undefined ||
-      dto.rideClass !== undefined ||
-      dto.vehicleTypeId !== undefined;
+      dto.carYear !== undefined;
 
     if (touchesVehicle) {
       const active = await this.prisma.vehicle.findFirst({
@@ -171,8 +169,10 @@ export class DriverSelfService {
         color: dto.carColor ?? active?.color ?? null,
         plate,
         year: dto.carYear ?? active?.year ?? null,
-        rideClass: dto.rideClass ?? active?.rideClass ?? "ECONOMY",
-        vehicleTypeId: dto.vehicleTypeId ?? active?.vehicleTypeId ?? null,
+        // الفئة ونوع المركبة لم يعودا يُكتبان من هنا — يضبطهما الإداري فقط عبر
+        // PATCH /vehicles/:id/verify، حتى لا يغيّر السائق فئته بنفسه بلا مراجعة.
+        rideClass: active?.rideClass ?? "ECONOMY",
+        vehicleTypeId: active?.vehicleTypeId ?? null,
       };
       if (active) {
         // عند تغيّر هوية المركبة (الصانع/الطراز/اللوحة/السنة) يُعاد ضبط التحقق للمراجعة.

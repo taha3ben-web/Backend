@@ -2,6 +2,7 @@ import { Body, Controller, Param, Patch, Query, UseGuards, Get } from "@nestjs/c
 import { RideClass, VehicleVerificationStatus } from "@prisma/client";
 import { VehiclesService } from "./vehicles.service";
 import { ReviewVehicleDto } from "./dto/review-vehicle.dto";
+import { ReclassifyVehicleDto } from "./dto/reclassify-vehicle.dto";
 import { PaginationDto } from "../../common/dto/pagination.dto";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
 import { RolesGuard } from "../../common/guards/roles.guard";
@@ -39,6 +40,20 @@ export class VehiclesController {
     @Body() dto: ReviewVehicleDto,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.vehicles.review(id, dto.status, user.userId, dto.note);
+    return this.vehicles.review(
+      id,
+      dto.status,
+      user.userId,
+      dto.note,
+      dto.rideClass,
+      dto.vehicleTypeId,
+    );
+  }
+
+  /** تصحيح فئة/نوع مركبة معتمدة مسبقًا، بلا إعادة فتح دورة المراجعة. */
+  @RequirePermissions("drivers.manage")
+  @Patch(":id/reclassify")
+  reclassify(@Param("id") id: string, @Body() dto: ReclassifyVehicleDto) {
+    return this.vehicles.reclassify(id, dto.rideClass, dto.vehicleTypeId);
   }
 }

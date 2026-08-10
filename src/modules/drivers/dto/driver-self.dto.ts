@@ -25,10 +25,6 @@ export class UpdateDriverProfileDto {
   @IsOptional() @IsString() @MaxLength(30) carColor?: string;
   @IsOptional() @IsString() @MaxLength(20) carPlate?: string;
   @IsOptional() @IsInt() @Min(1970) carYear?: number;
-  @IsOptional() @IsIn(RIDE_CLASSES) rideClass?: (typeof RIDE_CLASSES)[number];
-  // النظام الجديد: السائق يختار الفئة ثم نوع المركبة (ديناميكي).
-  @IsOptional() @IsString() vehicleTypeId?: string;
-  @IsOptional() @IsString() vehicleCategoryId?: string;
   @IsOptional() @IsString() cityId?: string;
 }
 
