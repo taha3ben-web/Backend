@@ -436,6 +436,24 @@ export class FareOffersService {
       throw new AppException("FARE_OFFER_EXPIRED");
     }
 
+    // المرحلة 7 (حماية من التلاعب): إعادة التحقق من أن مبلغ العرض ما زال داخل
+    // نطاق التفاوض الذي أصدره الخادم [minFare, maxFare] لحظة القبول أيضًا،
+    // وليس عند إنشاء العرض فقط. مصدر الحقيقة هو حدود عرض السعر المحفوظة
+    // في قاعدة البيانات والتي ولّدها محرك التسعير، لا أي رقم من العميل.
+    const offeredAmount = round2(Number(offer.amount));
+    const bandMin = round2(Number(quote.minFare));
+    const bandMax = round2(Number(quote.maxFare));
+    if (
+      !Number.isFinite(offeredAmount) ||
+      offeredAmount <= 0 ||
+      offeredAmount < bandMin ||
+      offeredAmount > bandMax
+    ) {
+      throw new AppException("FARE_OFFER_OUT_OF_RANGE", {
+        details: { min: bandMin, max: bandMax, proposed: offeredAmount },
+      });
+    }
+
     // منع رحلتين نشطتين للراكب نفسه.
     const activeTrip = await this.prisma.trip.findFirst({
       where: {

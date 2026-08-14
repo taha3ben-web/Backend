@@ -51,6 +51,15 @@ export class MatchingController {
     return this.matching.requestRide(user.userId, dto);
   }
 
+  /**
+   * D-7 — ما سيحدث لو ألغى الراكب الآن (قرار الخادم، بلا أي مبلغ مالي).
+   * يُستدعى من PassengerApp قبل عرض نافذة تأكيد الإلغاء.
+   */
+  @Get(":id/cancel-preview")
+  cancelPreview(@Param("id") id: string, @CurrentUser() user: AuthUser) {
+    return this.matching.cancelPreview(user.userId, id);
+  }
+
   /** الراكب يلغي البحث */
   @Patch(":id/cancel")
   cancel(@Param("id") id: string, @CurrentUser() user: AuthUser) {

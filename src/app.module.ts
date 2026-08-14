@@ -61,6 +61,7 @@ import { CityScalingModule } from "./modules/city-scaling/city-scaling.module";
 import { PoolingModule } from "./modules/pooling/pooling.module";
 import { LegalModule } from "./modules/legal/legal.module";
 import { GeoModule } from "./modules/geo/geo.module";
+import { GeographyModule } from "./modules/geography/geography.module";
 import { FeatureFlagsModule } from "./modules/settings/feature-flags.module";
 import { BootstrapModule } from "./modules/bootstrap/bootstrap.module";
 import { FareQuotesModule } from "./modules/fare-quotes/fare-quotes.module";
@@ -138,6 +139,9 @@ export const SCHEDULER_ENABLED = APP_ROLE !== "api";
     AppVersionsModule,
     LegalModule,
     GeoModule,
+    // المرحلة 8: التقسيم الإداري (ولايات/مدن). منفصلة عن GeoModule الذي يخص
+    // المسارات والمسافات (Google Routes).
+    GeographyModule,
     FeatureFlagsModule,
     BootstrapModule,
     FareQuotesModule,

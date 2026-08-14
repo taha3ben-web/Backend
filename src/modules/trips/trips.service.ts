@@ -21,7 +21,10 @@ import { InvoicesService } from "../invoices/invoices.service";
 import { LoyaltyService } from "../loyalty/loyalty.service";
 import { ReferralService } from "../referral/referral.service";
 import { TransactionalEmailService } from "../notifications/transactional-email.service";
+import { CallMaskingService } from "../calls/call-masking.service";
 import { formatEmailAmount } from "../notifications/transactional-email.util";
+import { ArrivalGuardService } from "./arrival-guard.service";
+import { ProfileLevelsService } from "../profile-levels/profile-levels.service";
 
 @Injectable()
 export class TripsService {
@@ -40,6 +43,12 @@ export class TripsService {
     private readonly loyalty: LoyaltyService,
     private readonly referral: ReferralService,
     private readonly mailer: TransactionalEmailService,
+    // يُستعمل لإبطال جلسات الاتصال المقنّعة فور انتهاء الرحلة أو إلغائها.
+    private readonly calls: CallMaskingService,
+    // D-6: منع تسجيل الوصول قبل الاقتراب الفعلي من الراكب.
+    private readonly arrivalGuard: ArrivalGuardService,
+    // المرحلة 11: إعادة حساب مستوى الطرفين بعد اكتمال الرحلة.
+    private readonly profileLevels: ProfileLevelsService,
   ) {}
 
   async findAll(
@@ -208,11 +217,39 @@ export class TripsService {
 
     if (to === "COMPLETED") {
       await this.settleCompletedTrip(id);
+      // المرحلة 11 — المكان canonical لاكتمال الرحلة: يُعاد حساب المستوى
+      // للراكب والسائق ويُبثّ لحطيًا. fire-and-forget: تحديث عرض لا يجوز
+      // أن يُسقط إنهاء الرحلة أو تسويتها المالية.
+      void this.profileLevels.onTripCompleted(id).catch((err: unknown) =>
+        this.logger.warn(
+          `تعذّر تحديث مستوى الملف الشخصي للرحلة ${id}: ${(err as Error).message}`,
+        ),
+      );
+    }
+
+    if (to === "CANCELLED") {
+      // المرحلة 7: ربط رسم/غرامة الإلغاء بمسار الإلغاء الفعلي.
+      // قبلها كانت settleDriverCancellationPenalty موجودة بلا مستدعٍ إطلاقًا
+      // (ما عدا مهمة إعادة المحاولة)، ورسم إلغاء الراكب لم يكن يُحسم أبدًا.
+      await this.settleCancellationFinancials(id, actor);
     }
 
     if (to === "COMPLETED" || to === "CANCELLED") {
       await this.releaseDriver(trip.driverId);
       this.deviation.forget(id);
+      // إبطال جلسات الاتصال المقنّعة للرحلة المنتهية.
+      //
+      // كان CallMaskingService.revokeForTrip() موجودًا لكنه لا يُستدعى من أي مكان:
+      // الجلسة تبقى صالحة حتى CALL_LINK_TTL_MIN (60 دقيقة)، فيمكن الاتصال
+      // بالطرف الآخر عبر رقم الجسر لمدة ساعة بعد نزول الراكب — ثغرة خصوصية
+      // حقيقية وليست مسألة واجهة. لا يُفشِل إنهاء الرحلة إن فشل.
+      try {
+        await this.calls.revokeForTrip(id);
+      } catch (err) {
+        this.logger.warn(
+          `revoking call sessions for trip ${id} failed: ${(err as Error).message}`,
+        );
+      }
     }
 
     this.realtime.emitTripStatus(id, to);
@@ -253,12 +290,24 @@ export class TripsService {
       select: {
         id: true,
         passengerId: true,
+        pickupLat: true,
+        pickupLng: true,
         driver: { select: { userId: true } },
       },
     });
     if (!trip) throw new NotFoundException("Trip not found");
     if (!trip.driver || trip.driver.userId !== driverUserId) {
       throw new ForbiddenException("لست السائق المكلّف بهذه الرحلة");
+    }
+    // D-6 — حماية وقت الانتطار: يُمنع ARRIVING إلا من داخل نصف القطر
+    // المضبوط من لوحة التحكم، وباعتماد موقع الخادم لا إحداثيات الطلب.
+    if (to === "ARRIVING") {
+      await this.arrivalGuard.assertCanMarkArriving({
+        tripId,
+        driverUserId,
+        pickupLat: trip.pickupLat,
+        pickupLng: trip.pickupLng,
+      });
     }
     const result = await this.changeStatus(tripId, to, reason, "DRIVER");
     this.notifyTripPush(trip.passengerId, tripId, to);
@@ -371,6 +420,35 @@ export class TripsService {
       await this.redis.client
         .del(`driver:${driver.userId}:trip`)
         .catch(() => undefined);
+    }
+  }
+
+  /**
+   * التسوية المالية للإلغاء حسب الطرف الملغي — نقطة دخول واحدة يستخدمها
+   * مسار REST (changeStatus) ومسار WebSocket (MatchingService.passengerCancel)
+   * معًا، حتى لا يوجد مسار إلغاء يفلت من السياسة المالية.
+   *
+   * - PASSENGER → رسم إلغاء الراكب من pricing.fees.cancellation (معطّل افتراضيًا).
+   * - DRIVER → غرامة إلغاء السائق من trips.driverCancellationPenaltyPct (0 افتراضيًا).
+   * - STAFF/SYSTEM → لا شيء: إلغاء إداري لا يُحمّل طرفًا أي تكلفة.
+   *
+   * أفضل-جهد: فشل التسوية لا يكسر الإلغاء نفسه؛ مهمة إعادة المحاولة
+   * الدورية في FinancialService تلتقط ما فشل.
+   */
+  async settleCancellationFinancials(
+    tripId: string,
+    actor: ActorKind,
+  ): Promise<void> {
+    try {
+      if (actor === "DRIVER") {
+        await this.financial.settleDriverCancellationPenalty(tripId);
+      } else if (actor === "PASSENGER") {
+        await this.financial.settlePassengerCancellationFee(tripId);
+      }
+    } catch (err) {
+      this.logger.warn(
+        `تسوية إلغاء الرحلة ${tripId} فشلت: ${(err as Error).message}`,
+      );
     }
   }
 

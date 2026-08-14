@@ -364,6 +364,20 @@ export class RealtimeGateway
     });
   }
 
+  /**
+   * إيصال قراءة: يُعلِم الطرف الآخر أن رسائله قُرئت.
+   *
+   * `readerId` هو من قرأ؛ العميل يتجاهل الحدث إن كان هو القارئ، ويضع علامة
+   * القراءة على رسائله المُرسَلة إن كان هو الطرف الآخر. البثّ لغرفة الرحلة فقط.
+   */
+  emitTripMessagesRead(tripId: string, readerId: string, readAt: Date): void {
+    this.server.to(`trip:${tripId}`).emit("trip:messages_read", {
+      tripId,
+      readerId,
+      readAt: readAt.toISOString(),
+    });
+  }
+
   /** يستدعى من الخدمات لبث تغيير حالة الرحلة لحظيًا */
   emitTripStatus(tripId: string, status: string): void {
     this.server.to(`trip:${tripId}`).emit("trip:status", { tripId, status });

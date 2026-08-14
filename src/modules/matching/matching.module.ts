@@ -8,6 +8,8 @@ import { PricingEngineModule } from "../pricing-engine/pricing-engine.module";
 import { MatchingEngineModule } from "./engine/matching-engine.module";
 import { CityScalingModule } from "../city-scaling/city-scaling.module";
 import { NotificationsModule } from "../notifications/notifications.module";
+import { TripGuardsModule } from "../trips/trip-guards.module";
+import { ProfileLevelsModule } from "../profile-levels/profile-levels.module";
 
 @Module({
   imports: [
@@ -20,6 +22,10 @@ import { NotificationsModule } from "../notifications/notifications.module";
     PricingEngineModule,
     MatchingEngineModule,
     CityScalingModule,
+    // تسجيل مخاطر إلغاء الراكب + معاينة قرار الخادم قبل الإلغاء.
+    TripGuardsModule,
+    // المرحلة 11: مستوى السائق المعروض للراكب أثناء الرحلة.
+    ProfileLevelsModule,
   ],
   providers: [MatchingService, PricingService],
   controllers: [MatchingController],

@@ -12,6 +12,7 @@ import { PricingAdminService } from "./pricing-admin.service";
 import {
   CreatePeakPricingDto,
   CreatePricingRuleDto,
+  UpdatePricingFeesDto,
   UpdatePricingRuleDto,
 } from "./dto/pricing.dto";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
@@ -25,6 +26,24 @@ import { RequirePermissions } from "../../common/decorators/permissions.decorato
 @Controller("pricing")
 export class PricingAdminController {
   constructor(private readonly pricing: PricingAdminService) {}
+
+  // ---------- رسوم الأجرة المركزية (المرحلة 7) ----------
+
+  /**
+   * رسوم الخدمة والانتظار والإلغاء — مصدرها الوحيد اللوحة،
+   * وتستهلكها دوال الأجرة القائمة في fare-breakdown.util.ts.
+   */
+  @RequirePermissions("pricing.manage")
+  @Get("fees")
+  getFees() {
+    return this.pricing.getFees();
+  }
+
+  @RequirePermissions("pricing.manage")
+  @Patch("fees")
+  updateFees(@Body() dto: UpdatePricingFeesDto) {
+    return this.pricing.updateFees(dto);
+  }
 
   // ---------- قواعد التسعير ----------
 

@@ -31,10 +31,17 @@ import {
 export class CouponsController {
   constructor(private readonly coupons: CouponsService) {}
 
-  /** الراكب يتحقق من كوبون ويرى الخصم قبل الطلب */
+  /**
+   * الراكب يتحقق من كوبون ويرى الخصم قبل الطلب.
+   * معاينة فقط: الخصم الملزِم يُعاد حسابه في الخادم عند طلب الرحلة
+   * انطلاقًا من أجرة محسوبة خادميًا، فلا تؤثّر قيمة fare القادمة من التطبيق ماليًا.
+   */
   @Post("validate")
   validate(@CurrentUser() user: AuthUser, @Body() dto: ValidateCouponDto) {
-    return this.coupons.validateAndCompute(dto.code, user.userId, dto.fare);
+    return this.coupons.validateAndCompute(dto.code, user.userId, dto.fare, {
+      rideClass: dto.rideClass,
+      cityId: dto.cityId,
+    });
   }
 
   // ---------- إدارة (STAFF) ----------

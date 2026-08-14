@@ -27,4 +27,15 @@ export class TripCommunicationController {
   send(@CurrentUser() user: AuthUser, @Param("tripId") tripId: string, @Body() dto: SendTripMessageDto) {
     return this.communication.send(user.userId, tripId, dto.body);
   }
+
+  /**
+   * تعليم رسائل الطرف الآخر كمقروءة.
+   *
+   * المسار يخصّ المستخدم المصادَق عليه فقط؛ لا يمكن تعليم رسائل نيابة عن غيره،
+   * وملكية الرحلة تُتحقّق داخل الخدمة.
+   */
+  @Post(":tripId/messages/read")
+  markRead(@CurrentUser() user: AuthUser, @Param("tripId") tripId: string) {
+    return this.communication.markRead(user.userId, tripId);
+  }
 }

@@ -1,5 +1,9 @@
 import { PrismaClient } from "@prisma/client";
 import * as bcrypt from "bcryptjs";
+import {
+  ALGERIA_WILAYAS,
+  assertWilayaDatasetIntegrity,
+} from "./data/algeria-wilayas";
 
 const prisma = new PrismaClient();
 
@@ -23,6 +27,9 @@ async function main(): Promise<void> {
     { key: "transfer.read", description: "عرض تحويلات السائقين" },
     { key: "transfer.manage", description: "إدارة تحويلات السائقين" },
     { key: "coupons.manage", description: "إدارة الكوبونات" },
+    // الرموز الترويجية (شحن المحفظة) — كانت مستعملة في PromoCodesController
+    // لكنها لم تكن معرّفة هنا، فلم يكن ممكنًا منحها لأي دور غير المدير العام.
+    { key: "promoCodes.manage", description: "إدارة الرموز الترويجية" },
     { key: "kyc.manage", description: "إدارة ومراجعة تحقق هوية المستخدمين" },
     { key: "subscriptions.manage", description: "إدارة الاشتراكات" },
     { key: "pricing.manage", description: "إدارة التسعير" },
@@ -109,6 +116,7 @@ async function main(): Promise<void> {
         "trips.manage",
         "pricing.manage",
         "coupons.manage",
+        "promoCodes.manage",
         "subscriptions.manage",
         "kyc.manage",
         "notifications.send",
@@ -210,18 +218,78 @@ async function main(): Promise<void> {
     },
   });
 
+  // ---------- المرحلة 8: الولايات الجزائرية الـ69 ----------
+  // idempotent بالكامل: المفتاح هو number (الرقم الرسمي)، فإعادة التشغيل
+  // تُحدّث الأسماء/الإحداثيات ولا تنشئ تكرارًا.
+  //
+  // ما لا يُلمس عند إعادة التشغيل: isOperational.
+  // لماذا: هو قرار تجاري تتخذه الإدارة من اللوحة (أين يعمل flaminGO)،
+  // وليس بيانًا مرجعيًا. دوسه هنا كان سيطفئ مناطق تشغيل حية عند كل نشر.
+  assertWilayaDatasetIntegrity();
+  for (const item of ALGERIA_WILAYAS) {
+    await prisma.wilaya.upsert({
+      where: { number: item.number },
+      update: {
+        code: item.code,
+        nameAr: item.nameAr,
+        nameFr: item.nameFr,
+        nameEn: item.nameEn,
+        seatAr: item.seatAr,
+        seatFr: item.seatFr,
+        centerLat: item.lat,
+        centerLng: item.lng,
+        isActive: true,
+      },
+      create: {
+        number: item.number,
+        code: item.code,
+        nameAr: item.nameAr,
+        nameFr: item.nameFr,
+        nameEn: item.nameEn,
+        seatAr: item.seatAr,
+        seatFr: item.seatFr,
+        centerLat: item.lat,
+        centerLng: item.lng,
+        isActive: true,
+        isOperational: false,
+      },
+    });
+  }
+  console.log(`Wilayas seeded: ${ALGERIA_WILAYAS.length}`);
+
+  const algiersWilaya = await prisma.wilaya.findUnique({
+    where: { number: 16 },
+  });
+
   // مدينة افتراضية + قاعدة تسعير
   const city = await prisma.city.upsert({
     where: { id: "seed-city-algiers" },
-    update: {},
+    // ربط المدينة الافتراضية بولايتها عند إعادة التشغيل أيضًا، لأن قواعد بيانات
+    // موجودة من قبل المرحلة 8 فيها المدينة دون wilayaId.
+    update: algiersWilaya ? { wilayaId: algiersWilaya.id } : {},
     create: {
       id: "seed-city-algiers",
       name: "Algiers",
       country: "DZ",
       centerLat: 36.7538,
       centerLng: 3.0588,
+      wilayaId: algiersWilaya?.id ?? null,
     },
   });
+
+  // الولاية التي نعمل فيها فعليًا عند أول تثبيت. تُفعّل مرة واحدة فقط عند الإنشاء
+  // لكي لا يُعيد الـseed تفعيل ما عطّلته الإدارة عمدًا.
+  if (algiersWilaya && !algiersWilaya.isOperational) {
+    const anyOperational = await prisma.wilaya.count({
+      where: { isOperational: true },
+    });
+    if (anyOperational === 0) {
+      await prisma.wilaya.update({
+        where: { id: algiersWilaya.id },
+        data: { isOperational: true },
+      });
+    }
+  }
 
   const existingRule = await prisma.pricingRule.findFirst({
     where: { cityId: city.id, rideClass: "ECONOMY" },
@@ -278,11 +346,114 @@ async function main(): Promise<void> {
       value: { privacyPolicyUrl: "", termsUrl: "" },
     },
     {
+      // رقم الطوارئ الظاهر في تطبيقَي الراكب والسائق.
+      // لا رقم افتراضي مكتوب في الكود عمدًا: القيمة فارغة و enabled=false حتى
+      // تضبطها الإدارة من لوحة التحكم (الإعدادات). ما دامت فارغة يختفي زر
+      // الاتصال في التطبيقات بدل أن يتصل برقم مخترع.
+      // ملاحظة: هذا رقم اتصال هاتفي مباشر فقط، ولا علاقة له بزر SOS الذي
+      // يمرّ دائمًا عبر POST /safety/incidents.
+      key: "safety.emergency",
+      group: "safety",
+      isPublic: true,
+      value: { enabled: false, phone: "", label: "" },
+    },
+    {
+      // سياسة التواصل بين الراكب والسائق (دردشة الرحلة + زر الاتصال).
+      //
+      // سبب وجود هذا المفتاح: TripCommunicationService يقرأ
+      // settings.getValue("passenger.tripCommunication") ويشترط
+      // policy.enabled === true. وبدون صفّ في جدول Setting كانت الدالة تُرجع
+      // undefined، فتصبح active=false و canChat=false دائمًا — أي أن دردشة
+      // الرحلة كانت معطّلة كليًا رغم اكتمال الواجهات والـ socket.
+      //
+      // phoneMode: "HIDDEN" افتراضيًا عن قصد. لا نكشف رقم أي طرف قبل قرار
+      // إداري صريح، ولا نضع رقم جسر (bridgeNumber) مخترعًا. تفعيل الاتصال
+      // يتم من لوحة التحكم، أو عبر مزوّد الإخفاء الحقيقي
+      // (CALL_MASKING_PROVIDER=twilio) الذي لا يكشف أي رقم.
+      key: "passenger.tripCommunication",
+      group: "passenger",
+      value: {
+        enabled: true,
+        chatEnabled: true,
+        callEnabled: false,
+        phoneMode: "HIDDEN",
+        bridgeNumber: "",
+        // الحالات التي تُعتبر فيها الرحلة قائمة، فتُفتح الدردشة.
+        // بعد COMPLETED/CANCELLED تُغلق تلقائيًا (يبقى السجل للقراءة).
+        // المرحلة 9: أُزيل "ARRIVED" — لا وجود له في enum TripStatus (الوصول
+        // تمثّله ARRIVING). كان سلسلة ميتة لا تطابق أي حالة رحلة حقيقية.
+        activeStatuses: ["ACCEPTED", "ARRIVING", "IN_PROGRESS"],
+        // حد الإرسال لكل مستخدم داخل الرحلة الواحدة (مكافحة الإغراق).
+        rateLimitPerMinute: 20,
+      },
+    },
+    {
+      // رسوم الأجرة المركزية (المرحلة 7): رسوم الخدمة والانتظار والإلغاء.
+      // تُدار حصرًا من لوحة التحكم (Pricing ← رسوم الأجرة) عبر GET/PATCH /pricing/fees،
+      // ويقرأها PricingPolicyService ثم تدخل في حساب الأجرة عبر fare-breakdown.util.ts.
+      // كل ��لقيم أصفار/معطّلة افتراضيًا: لا نفرض رسومًا لم تقررها الإدارة.
+      key: "pricing.fees",
+      group: "pricing",
+      value: {
+        serviceFee: 0,
+        waiting: {
+          enabled: false,
+          freeSeconds: 300,
+          perMinute: 0,
+          maxCharge: null,
+        },
+        cancellation: {
+          enabled: false,
+          graceSeconds: 120,
+          feeAfterAccept: 0,
+          feeAfterArrival: 0,
+          driverCompensationPct: 0,
+        },
+        // حدود التفاوض: كانت في متغير بيئة (FARE_QUOTE_BAND_PCT) غير قابل للضبط
+        // من اللوحة؛ أصبحت هنا ليكون مركز التسعير واحدًا. 0.2 = ±20%.
+        negotiation: {
+          bandPct: 0.2,
+        },
+      },
+    },
+    {
       // نسبة غرامة إلغاء السائق (%) من قيمة الرحلة الملغاة، تُحسم تلقائيًا من محفظة السائق.
       // 0 = الميزة معطّلة. قابلة للضبط من لوحة التحكم (الإعدادات).
+      // ملاحظة: هذه غرامة على السائق، وتختلف عن pricing.fees.cancellation
+      // التي هي رسم إلغاء على الراكب.
       key: "trips.driverCancellationPenaltyPct",
       group: "trips",
-      value: { pct: 0 },
+      value: { pct: 20 },
+    },
+    {
+      // D-4 — مخاطر إلغاء الراكب. **لا توجد أي غرامة مالية على الراكب**؛
+      // البديل هو تحذير ثم تجميد تلقائي للحساب (فك التجميد من لوحة التحكم فقط).
+      // windowDays: النافذة المتدحرجة | warnThreshold: عتبة التحذير
+      // freezeThreshold: عتبة التجميد (0 = معطّل) | countOnlyAfterAccept: لا تُحسب
+      // الإلغاءات قبل قبول السائق.
+      key: "trips.passengerCancellationRisk",
+      group: "trips",
+      value: {
+        enabled: true,
+        windowDays: 30,
+        warnThreshold: 2,
+        freezeThreshold: 3,
+        countOnlyAfterAccept: true,
+      },
+    },
+    {
+      // D-6 — حماية وقت الانتظار: لا يُسمح بتسجيل ARRIVING إلا داخل
+      // radiusMeters من نقطة الالتقاء، باعتماد موقع السائق المحفوظ على الخادم.
+      // blockWhenLocationMissing: true = fail-closed (غياب GPS أو موقع قديم يمنع
+      // تسجيل الوصول) — قرار معتمد لمنع التلاعب بزمن الانتظار.
+      key: "trips.arrivalGeofence",
+      group: "trips",
+      value: {
+        enabled: true,
+        radiusMeters: 200,
+        maxLocationAgeSeconds: 120,
+        blockWhenLocationMissing: true,
+      },
     },
     {
       // نظام عقوبات إلغاء السائق (كما في الشركات الكبرى): تصعيد تحذير/تعليق/حظر.

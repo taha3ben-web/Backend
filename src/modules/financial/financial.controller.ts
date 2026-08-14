@@ -150,4 +150,32 @@ export class FinancialController {
       body?.to,
     );
   }
+
+  /**
+   * إيداع يدوي في محفظة مستخدم (راكب أو سائق) من لوحة التحكم.
+   * يطلب payments.manage كبقية الحركات المالية، ويُسجّل منفّذه في قيد
+   * الدفتر (referenceId) للتدقيق. التحقق من القيمة والسبب يتم في الخدمة.
+   */
+  @RequirePermissions("payments.manage")
+  @Post("accounts/credit")
+  creditWallet(
+    @CurrentUser() user: AuthUser,
+    @Body()
+    body: {
+      userId?: string;
+      amount?: number | string;
+      currency?: string;
+      reason?: string;
+      reference?: string;
+    },
+  ) {
+    return this.financial.adminCreditWallet({
+      userId: String(body?.userId ?? "").trim(),
+      amount: Number(body?.amount),
+      currency: body?.currency,
+      reason: String(body?.reason ?? ""),
+      performedBy: user.userId,
+      reference: body?.reference,
+    });
+  }
 }

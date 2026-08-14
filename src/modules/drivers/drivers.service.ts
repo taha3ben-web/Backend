@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from "@nestjs/common";
 import { DriverStatus, Prisma } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import { RedisService } from "../redis/redis.service";
+import { ProfileLevelsService } from "../profile-levels/profile-levels.service";
 import { PaginationDto } from "../../common/dto/pagination.dto";
 import {
   StorageService,
@@ -14,6 +15,8 @@ export class DriversService {
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
     private readonly storage: StorageService,
+    // المرحلة 11: نفس نقطة حساب المستوى المستخدمة في تطبيق السائق.
+    private readonly profileLevels: ProfileLevelsService,
   ) {}
 
   async findAll(q: PaginationDto, status?: DriverStatus) {
@@ -77,7 +80,17 @@ export class DriversService {
         ),
       })),
     );
-    return { ...driver, documents, live: live?.lat ? live : null };
+    // المرحلة 11: مستوى السائق وعدد رحلاته المكتملة للعرض فقط في لوحة
+    // الإدارة؛ لا يوجد endpoint لتعديلهما من الخارج.
+    const level = await this.profileLevels.forDriver(driver.id);
+    return {
+      ...driver,
+      documents,
+      live: live?.lat ? live : null,
+      completedTripsCount: level.completedTripsCount,
+      profileLevel: level.profileLevel,
+      profileFrameUrl: level.profileFrameUrl,
+    };
   }
 
   setStatus(id: string, status: DriverStatus) {

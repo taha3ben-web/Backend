@@ -8,10 +8,14 @@ import { RoutingService, type RouteResult } from "../geo/routing.service";
 import { computeFare } from "../matching/pricing.util";
 import {
   buildFareBreakdown,
+  computeCancellationFee,
+  computeWaitingCharge,
+  type CancellationStage,
   type CouponPolicy,
   type FareBreakdown,
   type WaitingPolicy,
 } from "./fare-breakdown.util";
+import { PricingPolicyService } from "./pricing-policy.service";
 import { CountryConfigService } from "../country-config/country-config.service";
 import { CityScalingService } from "../city-scaling/city-scaling.service";
 import { GrowthService } from "../growth/growth.service";
@@ -25,7 +29,14 @@ export interface PricingContext {
   vehicleTypeId?: string;
   rideClass?: RideClass;
   cityId?: string;
+  /**
+   * المرحلة 8: الولاية كنطاق تسعير وسيط بين المدينة والوطن.
+   * لا يرسله العميل مطلقًا؛ يُشتق في Backend من cityId (انظر resolveWilayaId).
+   * يُستخدم للتصنيف والتسعير فقط، ولا يدخل إطلاقًا في حساب المسافة أو المدة.
+   */
+  wilayaId?: string;
   serviceAreaId?: string;
+  /** @deprecated منذ المرحلة 8 — استخدم wilayaId */
   state?: string;
   country?: string;
   customerType?: string;
@@ -128,7 +139,29 @@ export class PricingEngineService {
     @Optional() private readonly growth?: GrowthService,
     @Optional() private readonly routing?: RoutingService,
     @Optional() private readonly surge?: SurgeService,
+    @Optional() private readonly policy?: PricingPolicyService,
   ) {}
+
+  /**
+   * رسم الإلغاء وفق سياسة اللوحة (pricing.fees.cancellation).
+   *
+   * إغلاق المرحلة 10 — قرار D-4: أُلغيت رسوم إلغاء الراكب نهائيًا،
+   * فلم يبقَ لهذه الدالة أي مستدعٍ في مسارات الإلغاء أو التسوية.
+   * تُرك كما هي للمرجعية وللاختبارات فقط، ولا يجوز ربطها بأي مسار
+   * يخصم من الراكب (لا من محفظته ولا من أجرة الرحلة).
+   * أي إعادة تفعيل تحتاج قرارًا صريحًا من مالك المشروع.
+   */
+  async cancellationFee(
+    stage: CancellationStage,
+    elapsedSecondsSinceAccept = 0,
+  ): Promise<{ fee: number; driverCompensationPct: number }> {
+    const policy = await this.policy?.cancellationPolicy();
+    if (!policy) return { fee: 0, driverCompensationPct: 0 };
+    return {
+      fee: computeCancellationFee(stage, policy, elapsedSecondsSinceAccept),
+      driverCompensationPct: policy.driverCompensationPct ?? 0,
+    };
+  }
 
   /**
    * يركّب الأجرة النهائية وخريطة التسوية (توزيع سائق/منصة) انطلاقًا من نتيجة quote
@@ -157,14 +190,28 @@ export class PricingEngineService {
   }
 
   /**
-   * يطلب مسارًا حقيقيًا من محرك التوجيه عند توفر الإحداثيات.
+   * يطلب مسارًا حقيقيًا من محرك التوجيه (Google Routes) عند توفر الإحداثيات.
    *
-   * - لا يُستدعى إطلاقًا إذا أرسل المتصل المسافة والمدة معًا (مصدر حقيقة أقوى).
+   * تغيير المرحلة 7 (أمني مهم):
+   * سابقًا كان يُرجع null فورًا إذا أرسل المتصل distanceKm + durationSec،
+   * أي أن العميل كان يستطيع تجاوز التوجيه وفرض مسافة ومدة من عنده
+   * (تلاعب مباشر بالسعر). الآن ما دامت الإحداثيات متوفرة نسأل المزوّد
+   * دائمًا، ونتجاهل قيم العميل (انظر quote).
+   *
+   * الاستثناء الوحيد: trustClientMetrics يضبطه الخادم نفسه في محاكاة اللوحة
+   * (STAFF) حيث يريد الموظف اختبار مسافة افتراضية بلا استهلاك طلب Routes.
+   *
    * - أي فشل يُرجع null فيسقط الحساب للتقدير القديم — التسعير لا يتوقف أبدًا.
    */
   private async resolveRoute(ctx: PricingContext): Promise<RouteResult | null> {
     if (!this.routing) return null;
-    if (ctx.distanceKm != null && ctx.durationSec != null) return null;
+    if (
+      ctx.trustClientMetrics &&
+      ctx.distanceKm != null &&
+      ctx.durationSec != null
+    ) {
+      return null;
+    }
     if (
       ctx.pickupLat == null ||
       ctx.pickupLng == null ||
@@ -183,14 +230,17 @@ export class PricingEngineService {
     }
   }
 
-  /** حساب أجرة كاملة (السعر + العمولة + القاعدة المستخدمة). */
+  /** حساب أجرة كاملة (السع�� + العمولة + القاعدة المستخدمة). */
   async quote(ctx: PricingContext): Promise<PricingResult> {
     // المسافة والمدة من محرك التوجيه (طرق حقيقية) وليس خطًا مستقيمًا،
     // لأن فرق 20–40% في المسافة يعني أجرة غير عادلة للراكب أو للسائق.
     const routed = await this.resolveRoute(ctx);
+    // أولوية المصدر (المرحلة 7): ما يعود من مزوّد التوجيه أولًا دائمًا،
+    // ثم ما أرسله العميل، ثم التقدير الهوائي. الترتيب كان معكوسًا قبل المرحلة 7
+    // فكانت قيمة العميل تفوز على Google Routes.
     const distanceKm =
-      ctx.distanceKm ??
       routed?.distanceKm ??
+      ctx.distanceKm ??
       (ctx.pickupLat != null &&
       ctx.pickupLng != null &&
       ctx.destLat != null &&
@@ -205,8 +255,8 @@ export class PricingEngineService {
           ) / 100
         : 0);
     const durationSec =
-      ctx.durationSec ??
       routed?.durationSeconds ??
+      ctx.durationSec ??
       estimateDurationSec(distanceKm);
 
     const rule = await this.resolve(ctx);
@@ -239,10 +289,25 @@ export class PricingEngineService {
       peakMultiplier,
     );
 
+    // المرحلة 7: رسوم الخدمة والانتظار من إعدادات اللوحة (pricing.fees).
+    // تُضاف قبل الضريبة وقبل احتساب العمولة، لأن العمولة في buildFareBreakdown
+    // تُحتسب أيضًا على (الأساس + الانتظار + الرسوم)، فيبقى المساران متسقين.
+    const serviceFee = this.policy ? await this.policy.serviceFee() : 0;
+    const waitingPolicy = this.policy
+      ? await this.policy.waitingPolicy()
+      : null;
+    const waitingSeconds = Math.max(0, Math.round(ctx.waitingSeconds ?? 0));
+    const waitingCharge =
+      waitingPolicy && waitingSeconds > 0
+        ? computeWaitingCharge(waitingSeconds, waitingPolicy)
+        : 0;
+    const fareBeforeExtras = fare;
+    const fareWithExtras = round2(fare + serviceFee + waitingCharge);
+
     const tax =
       countryCode && this.countryConfig
-        ? await this.countryConfig.taxFor(countryCode, fare)
-        : { net: fare, tax: 0, gross: fare };
+        ? await this.countryConfig.taxFor(countryCode, fareWithExtras)
+        : { net: fareWithExtras, tax: 0, gross: fareWithExtras };
     const currency =
       countryCode && this.countryConfig
         ? await this.countryConfig.currencyFor(countryCode)
@@ -268,6 +333,12 @@ export class PricingEngineService {
       durationSec,
       ruleUsed: rule.ruleUsed,
       experimentVariant,
+      extras: {
+        serviceFee,
+        waitingCharge,
+        waitingSeconds,
+        fareBeforeExtras,
+      },
       breakdown: {
         baseFare,
         distanceCost,
@@ -380,11 +451,12 @@ export class PricingEngineService {
   }
 
   /**
-   * يختار أنسب قاعدة: يستبعد القواعد ذات القيود غير المتحققة، ثم يرتّب حسب الأولوية ثم التخصيص.
+   * يختار أن��ب قاعدة: يستبعد القواعد ذات القيود غير المتحققة، ثم يرتّب حسب الأولوية ثم التخصيص.
    */
   private pickBestRule<
     T extends {
       cityId: string | null;
+      wilayaId: string | null;
       serviceAreaId: string | null;
       state: string | null;
       country: string | null;
@@ -404,6 +476,7 @@ export class PricingEngineService {
 
     const candidates = rules.filter((r) => {
       if (!matchStr(r.cityId, ctx.cityId)) return false;
+      if (!matchStr(r.wilayaId, ctx.wilayaId)) return false;
       if (!matchStr(r.serviceAreaId, ctx.serviceAreaId)) return false;
       if (!matchStr(r.state, ctx.state)) return false;
       if (!matchStr(r.country, ctx.country)) return false;
@@ -427,8 +500,11 @@ export class PricingEngineService {
     });
     if (candidates.length === 0) return undefined;
 
+    // المدينة تزن 2 والولاية تزن 1: لو تساوتا لأصبحت قاعدة "ولاية + دولة"
+    // تهزم قاعدة "مدينة" الأدق، وهذا عكس المطلوب: مدينة > ولاية > وطني.
     const specificity = (r: T) =>
-      (r.cityId ? 1 : 0) +
+      (r.cityId ? 2 : 0) +
+      (r.wilayaId ? 1 : 0) +
       (r.serviceAreaId ? 1 : 0) +
       (r.state ? 1 : 0) +
       (r.country ? 1 : 0) +
@@ -441,18 +517,55 @@ export class PricingEngineService {
     )[0];
   }
 
-  private async resolveLegacy(rideClass: RideClass, cityId?: string) {
-    const rule =
-      (cityId
-        ? await this.prisma.pricingRule.findFirst({
-            where: { cityId, rideClass, isActive: true },
-          })
-        : null) ??
-      (await this.prisma.pricingRule.findFirst({
-        where: { rideClass, isActive: true },
-        orderBy: { createdAt: "asc" },
-      }));
-    if (rule) return rule;
+  /**
+   * المرحلة 8 — يشتق الولاية من المدينة.
+   *
+   * لماذا الاشتقاق وليس الثقة بما يرسله العميل:
+   * نفس مبدأ المرحلة 7 في distance/duration. لو قبلنا wilayaId من التطبيق،
+   * لأمكن لراكب ادّعاء ولاية رخيصة والحصول على تسعيرة أقل. Backend هو مصدر الحقيقة.
+   */
+  private async resolveWilayaId(ctx: PricingContext): Promise<string | undefined> {
+    if (!ctx.cityId) return undefined;
+    const city = await this.prisma.city.findUnique({
+      where: { id: ctx.cityId },
+      select: { wilayaId: true },
+    });
+    return city?.wilayaId ?? undefined;
+  }
+
+  /**
+   * أولوية القواعد بعد المرحلة 8: مدينة > ولاية > وطني > افتراضي.
+   *
+   * القاعدة الوطنية هي ما كان cityId وwilayaId كلاهما null. من المهم استثناء
+   * قواعد المدن/الولايات الأخرى صراحة في المستوى الوطني، وإلا قد تُلتقط قاعدة
+   * خاصة بوهران لرحلة في قسنطينة لمجرد أنها الأقدم.
+   */
+  private async resolveLegacy(
+    rideClass: RideClass,
+    cityId?: string,
+    wilayaId?: string,
+  ) {
+    const cityRule = cityId
+      ? await this.prisma.pricingRule.findFirst({
+          where: { cityId, rideClass, isActive: true },
+        })
+      : null;
+    if (cityRule) return cityRule;
+
+    const wilayaRule = wilayaId
+      ? await this.prisma.pricingRule.findFirst({
+          where: { wilayaId, cityId: null, rideClass, isActive: true },
+          orderBy: { createdAt: "asc" },
+        })
+      : null;
+    if (wilayaRule) return wilayaRule;
+
+    const nationalRule = await this.prisma.pricingRule.findFirst({
+      where: { cityId: null, wilayaId: null, rideClass, isActive: true },
+      orderBy: { createdAt: "asc" },
+    });
+    if (nationalRule) return nationalRule;
+
     return { id: null as string | null, ...DEFAULT_RULE };
   }
 

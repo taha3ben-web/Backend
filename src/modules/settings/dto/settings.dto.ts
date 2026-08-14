@@ -74,6 +74,14 @@ export class CreateCityDto {
   @MaxLength(120)
   declare name: string;
 
+  /**
+   * المرحلة 8: الولاية الأم. اختياري لأن المدن قد تُنشأ قبل ربطها،
+   * ولأن النظام يدعم مدنًا خارج الجزائر مستقبلًا (country موجود أصلًا).
+   */
+  @IsOptional()
+  @IsString()
+  wilayaId?: string;
+
   @IsOptional()
   @IsString()
   @MaxLength(3)
@@ -97,6 +105,10 @@ export class CreateCityDto {
 }
 
 export class UpdateCityDto {
+  /** المرحلة 8: نقل المدينة إلى ولاية أخرى، أو null لفك الربط */
+  @IsOptional()
+  @IsString()
+  wilayaId?: string | null;
   @IsOptional()
   @IsString()
   @IsNotEmpty()

@@ -4,6 +4,7 @@ import { AlertService } from "../../common/observability/alert.service";
 import { NotificationsService } from "../notifications/notifications.service";
 import { decodePolyline, distanceToPathMeters } from "../geo/geo.util";
 import type { GeoLatLng } from "../geo/providers/geo-provider.interface";
+import type { TripStatus } from "@prisma/client";
 
 /**
  * كشف انحراف المسار (Route Deviation).
@@ -25,8 +26,18 @@ import type { GeoLatLng } from "../geo/providers/geo-provider.interface";
 export const DEVIATION_THRESHOLD_M = 600;
 /** عدد النقاط المتتالية المطلوبة قبل إطلاق الإنذار. */
 export const DEVIATION_STRIKES = 3;
-/** الحالات التي يُفحص فيها الانحراف (أثناء وجود الراكب في السيارة فقط). */
-export const DEVIATION_STATUSES = ["ONGOING"] as const;
+/**
+ * الحالات التي يُفحص فيها الانحراف (أثناء وجود الراكب في السيارة فقط).
+ *
+ * إصلاح المرحلة 9 (أخطر عيوب هذه المرحلة): كانت القيمة "ONGOING" وهي
+ * **غير موجودة إطلاقًا** في enum TripStatus (الحالة الصحيحة IN_PROGRESS).
+ * ولأن الفحص في stateFor() يقارن status بهذه القائمة ثم يُرجع null عند عدم
+ * التطابق، فإنّ كشف الانحراف عن المسار لم يعمل ولا مرة واحدة: كل نقطة موقع
+ * كانت تُرفض بصمت قبل أي حساب، فلم يُطلَق إنذار سلامة واحد منذ كتابة الوحدة.
+ * لا يوجد اختبار كان ليكشف ذلك لأن isDeviating() النقية تعمل صحيحًا معزولة،
+ * والعيب كان في البوّابة قبلها.
+ */
+export const DEVIATION_STATUSES: TripStatus[] = ["IN_PROGRESS"];
 /** مدّة حفظ المسار المفكوك في الذاكرة (ثوانٍ). */
 export const ROUTE_CACHE_TTL_MS = 30 * 60_000;
 

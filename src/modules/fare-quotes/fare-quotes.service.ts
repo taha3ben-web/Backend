@@ -11,6 +11,7 @@ import {
 import {
   CreateFareQuoteDto,
   AdminFareQuoteQueryDto,
+  SimulateFareQuoteDto,
 } from "./dto/fare-quote.dto";
 
 /** مدّة صلاحية العرض (دقائق) من البيئة مع افتراض آمن. */
@@ -39,8 +40,20 @@ export class FareQuotesService {
     private readonly engine: PricingEngineService,
   ) {}
 
-  /** يبني سياق التسعير من مدخلات الراكب. */
-  private buildContext(dto: CreateFareQuoteDto): PricingContext {
+  /**
+   * يبني سياق التسعير من مدخلات الراكب.
+   *
+   * المرحلة 7: لم تعد المسافة والمدة تمرّ من الراكب إطلاقًا؛ يحسبهما
+   * محرك التسعير من الإحداثيات عبر مزوّد التوجيه. الاستثناء الوحيد هو
+   * محاكاة اللوحة (STAFF) عبر allowClientMetrics.
+   */
+  private buildContext(
+    dto: CreateFareQuoteDto | SimulateFareQuoteDto,
+    allowClientMetrics = false,
+  ): PricingContext {
+    const simulated = allowClientMetrics
+      ? (dto as SimulateFareQuoteDto)
+      : undefined;
     return {
       vehicleTypeId: dto.vehicleTypeId,
       rideClass: dto.rideClass,
@@ -50,8 +63,12 @@ export class FareQuotesService {
       country: dto.country,
       customerType: dto.customerType,
       couponCode: dto.couponCode,
-      distanceKm: dto.distanceKm,
-      durationSec: dto.durationSec,
+      distanceKm: simulated?.distanceKm,
+      durationSec: simulated?.durationSec,
+      trustClientMetrics:
+        allowClientMetrics &&
+        simulated?.distanceKm != null &&
+        simulated?.durationSec != null,
       pickupLat: dto.pickupLat,
       pickupLng: dto.pickupLng,
       destLat: dto.destLat,
@@ -87,11 +104,16 @@ export class FareQuotesService {
   }
 
   /** يحسب العرض والنطاق دون حفظ (يُستخدم في الإنشاء والمحاكاة). */
-  private async price(dto: CreateFareQuoteDto): Promise<{
+  private async price(
+    dto: CreateFareQuoteDto | SimulateFareQuoteDto,
+    allowClientMetrics = false,
+  ): Promise<{
     result: PricingResult;
     band: NegotiationBand;
   }> {
-    const result = await this.engine.quote(this.buildContext(dto));
+    const result = await this.engine.quote(
+      this.buildContext(dto, allowClientMetrics),
+    );
     return { result, band: this.computeBand(result) };
   }
 
@@ -190,9 +212,11 @@ export class FareQuotesService {
     return quotes.map((q) => this.serialize(q));
   }
 
-  /** محاكاة للوحة (دون حفظ). */
-  async simulate(dto: CreateFareQuoteDto) {
-    const { result, band } = await this.price(dto);
+  /**
+   * محاكاة للوحة (دون حفظ) — المسار الوحيد المسموح له بمسافة/مدة يدوية.
+   */
+  async simulate(dto: SimulateFareQuoteDto) {
+    const { result, band } = await this.price(dto, true);
     return {
       currency: result.currency,
       distanceKm: result.distanceKm,
@@ -203,6 +227,8 @@ export class FareQuotesService {
       commissionPct: result.commissionPct,
       pricingSource: result.ruleUsed.source,
       pricingRuleId: result.ruleUsed.id,
+      /** رسوم الخدمة/الانتظار المطبّقة فعليًا — تظهر في محاكاة اللوحة. */
+      extras: result.extras,
       breakdown: result.breakdown,
     };
   }

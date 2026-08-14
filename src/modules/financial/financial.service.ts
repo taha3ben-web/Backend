@@ -13,6 +13,19 @@ import {
   deriveTripEarnings,
   splitCouponFunding,
 } from "../trips/settlement.util";
+import type { CouponFundingSource } from "../trips/settlement.util";
+import { buildFareBreakdown } from "../pricing-engine/fare-breakdown.util";
+import {
+  PRICING_FEES_SETTING_KEY,
+  DEFAULT_PRICING_FEES,
+  normalizePricingFees,
+  waitingPolicyFrom,
+  type PricingFeesSetting,
+} from "../pricing-engine/pricing-policy.service";
+import {
+  ARRIVAL_EVENT_TYPE,
+  computeWaitingSeconds,
+} from "../trips/waiting-time.util";
 import {
   DEFAULT_CURRENCY,
   round2,
@@ -74,6 +87,10 @@ export class FinancialService {
       referenceId?: string;
       reason?: string;
       idempotencyKey: string;
+      /** حساب المصروف المقابل. افتراضيًا PROMOTIONS فلا يتغير أي مستدعٍ قائم. */
+      expenseSuffix?: string;
+      /** اسم الأمر في الدفتر، لتمييز الإيداع الإداري عن المنحة الترويجية. */
+      command?: string;
     },
   ): Promise<void> {
     this.ledger.assertCurrency(input.currency);
@@ -87,12 +104,12 @@ export class FinancialService {
     );
     const promoExpense = await this.ledger.platformAccount(
       tx,
-      "PROMOTIONS",
+      input.expenseSuffix ?? "PROMOTIONS",
       "EXPENSE",
       input.currency,
     );
     await this.ledger.post(tx, {
-      command: "grantPromotionalCredit",
+      command: input.command ?? "grantPromotionalCredit",
       idempotencyKey: input.idempotencyKey,
       currency: input.currency,
       referenceType: input.referenceType,
@@ -107,6 +124,63 @@ export class FinancialService {
         { accountId: userAcc.id, direction: "CREDIT", amount: input.amount },
       ],
     });
+  }
+
+  /**
+   * إيداع يدوي في محفظة مستخدم ينفّذه موظّف من لوحة التحكم.
+   *
+   * لا يوجد شحن ذاتي للمحفظة اليوم لأن بوّابات الدفع لم تُفعّل بعد، وكان
+   * الرصيد يدخل المحفظة عبر الولاء/الإحالات/الرموز الترويجية فقط — أي أن الإدارة
+   * لم تكن تملك أي وسيلة لتغذية محفظة أو تعويض راكب. قيد مزدوج متوازن:
+   *   DEBIT  PLATFORM:GOODWILL (EXPENSE) — لا PROMOTIONS، فالإيداع الإداري ليس حملة ترويج
+   *   CREDIT محفظة المستخدم (USER:...:AVAILABLE)
+   * يعيد استخدام grantPromotionalCredit/post القائمين بلا نظام موازٍ، وهو
+   * idempotent عبر مرجع العملية فلا تُكرّر نقرة مزدوجة الإيداع.
+   */
+  async adminCreditWallet(input: {
+    userId: string;
+    amount: number;
+    currency?: string;
+    reason: string;
+    performedBy: string;
+    reference?: string;
+  }): Promise<{ credited: true; balance: number; currency: string }> {
+    const currency = (input.currency ?? DEFAULT_CURRENCY).toUpperCase();
+    if (!Number.isFinite(input.amount) || toMinorUnits(input.amount) <= 0) {
+      throw new BadRequestException("قيمة الإيداع يجب أن تكون أكبر من صفر");
+    }
+    const reason = input.reason?.trim();
+    if (!reason) {
+      throw new BadRequestException("سبب الإيداع مطلوب للتدقيق");
+    }
+    // مفتاح الخمول: مرجع صريح من الواجهة إن وُجد، وإلا مرجع مشتق يمنع
+    // الإيداع المزدوج من نقرة مكررة خلال الدقيقة نفسها.
+    const reference =
+      input.reference?.trim() ||
+      `${input.userId}:${toMinorUnits(input.amount)}:${new Date()
+        .toISOString()
+        .slice(0, 16)}`;
+    await this.prisma.$transaction(
+      async (tx) => {
+        await this.grantPromotionalCredit(tx, {
+          userId: input.userId,
+          amount: input.amount,
+          currency,
+          referenceType: "ADMIN_CREDIT",
+          referenceId: input.performedBy,
+          reason,
+          idempotencyKey: `wallet:admincredit:${reference}`,
+          expenseSuffix: "GOODWILL",
+          command: "adminCreditWallet",
+        });
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
+    const { balance } = await this.ledger.getUserBalance(
+      input.userId,
+      currency,
+    );
+    return { credited: true as const, balance, currency };
   }
 
   /**
@@ -269,26 +343,73 @@ export class FinancialService {
             // قبل الخصم فيبقى صافي السائق كرحلة بلا كوبون، ويُضاف تعويض الخصم للسائق
             // كرصيد مقفل غير قابل للسحب (USER:...:LOCKED).
             const discount = Math.max(Number(trip.discountAmount ?? 0), 0);
-            const riderPays = round2(Number(trip.fare));
-            const grossFare = round2(riderPays + discount);
-            const commissionGross = round2(
-              (grossFare * trip.commissionPct) / 100,
+            // المرحلة 7 — مصدر حقيقة واحد للأجرة:
+            // زمن الانتظار يُشتق من طوابع الخادم فقط (حدث status:ARRIVING
+            // الذي يكتبه changeStatus ثم trip.startedAt)، ولا يصل أي رقم
+            // انتظار من تطبيق السائق أو الراكب.
+            const arrival = await tx.tripEvent.findFirst({
+              where: { tripId, type: ARRIVAL_EVENT_TYPE },
+              orderBy: { createdAt: "asc" },
+              select: { createdAt: true },
+            });
+            const waitingSeconds = computeWaitingSeconds(
+              arrival?.createdAt,
+              trip.startedAt,
             );
+            const waitingPolicy = waitingPolicyFrom(
+              await this.loadPricingFees(),
+            );
+            // إعادة تركيب الأجرة بنفس الدالة التي يستعملها محرك التسعير
+            // (buildFareBreakdown) بدل حساب يدوي موازٍ: الأساس هو ما رآه الراكب
+            // وقت الطلب (شامل الأساس والمسافة والمدة والحد الأدنى ورسوم
+            // الخدمة والضريبة) قبل خصم الكوبون، ويُضاف إليه رسم الانتظار
+            // المحتسب خادميًا إن كانت سياسة اللوحة مفعّلة.
+            const breakdown = buildFareBreakdown({
+              baseComputedFare: round2(Number(trip.fare) + discount),
+              commissionPct: trip.commissionPct,
+              waitingSeconds,
+              waitingPolicy,
+              coupon:
+                discount > 0
+                  ? {
+                      kind: "FIXED",
+                      value: discount,
+                      funding: (trip.couponFundingSource ??
+                        "PLATFORM") as CouponFundingSource,
+                      platformShare:
+                        trip.couponPlatformShare != null
+                          ? Number(trip.couponPlatformShare)
+                          : undefined,
+                    }
+                  : null,
+            });
+            const waitingCharge = breakdown.components.waitingCharge;
+            const riderPays = breakdown.riderPays;
+            const grossFare = breakdown.grossFare;
+            const commissionGross = breakdown.commission;
+            if (waitingCharge > 0) {
+              // تثبيت المبلغ النهائي على الرحلة حتى لا يختلف ما يراه الراكب
+              // في الفاتورة عمّا دخل دفتر الأستاذ.
+              await tx.trip.update({
+                where: { id: tripId },
+                data: { fare: new Prisma.Decimal(riderPays) },
+              });
+              await tx.tripEvent.create({
+                data: {
+                  tripId,
+                  type: "fare:waiting_applied",
+                  actor: "SYSTEM",
+                  meta: { waitingSeconds, waitingCharge, riderPays },
+                },
+              });
+            }
             // سياسة تمويل الكوبون تُقرّر وقت الطلب وتُخزّن على الرحلة، وتُدار
             // بالكامل من لوحة التحكم (إعداد عام coupons.funding + تجاوز لكل
             // كوبون): PLATFORM=الشركة تتحمّل كامل الخصم، DRIVER=السائق،
             // SHARED=يُقسّم بحصة platformShare. لا شيء مبرمَج ثابتًا هنا.
-            const { driverFunded } = splitCouponFunding(
-              discount,
-              trip.couponFundingSource,
-              trip.couponPlatformShare != null
-                ? Number(trip.couponPlatformShare)
-                : undefined,
-            );
+            const { driverFunded } = breakdown.coupon;
             // صافي السائق المستحق = أرباحه الكاملة ناقص ما يتحمّله من الخصم.
-            const driverNet = round2(
-              grossFare - commissionGross - driverFunded,
-            );
+            const driverNet = breakdown.driverNet;
             // السائق يسحب كامل ما دفعه الراكب (بحدّ أقصى إجماليه المستحق)؛
             // العمولة تُقتطع أولًا من تعويض الخصم لا من رصيده المتاح، فيبقى
             // المقفل = ما تتحمّله الشركة فعليًا (تعويض الخصم ناقص العمولة، ولا يقلّ عن صفر).
@@ -322,6 +443,25 @@ export class FinancialService {
                       "ASSET",
                       trip.currency,
                     );
+            // محفظة الراكب حساب حقيقي لا حساب مقاصّة: خصم يتجاوز رصيدها يتركه
+            // سالبًا بلا غطاء. فحص وقت الـcheckout لا يكفي وحده لأن الرصيد قد
+            // ينخفض بين إنشاء الدفعة والتسوية (اشتراك، إكرامية، سحب، رحلة أخرى).
+            // نرفض هنا فتُوسَم الرحلة FAILED ويعيد retryUnsettledTrips المحاولة،
+            // وتظهر في طابور التسوية بدل أن تُنشئ رصيدًا سالبًا صامتًا.
+            if (
+              trip.paymentMethod === "WALLET" &&
+              riderPays > 0 &&
+              Number(debit.balanceCache) + 1e-9 < riderPays
+            ) {
+              throw new AppException("INSUFFICIENT_BALANCE", {
+                details: {
+                  tripId,
+                  required: riderPays,
+                  balance: Number(debit.balanceCache),
+                  currency: trip.currency,
+                },
+              });
+            }
             // القيد الأساسي: توزيع ما دفعه الراكب فعليًا بين رصيد السائق المتاح
             // والعمولة. بلا كوبون (discount=0) يطابق السلوك السابق حرفيًا.
             let base = { gross: 0, commission: 0, net: 0 };
@@ -391,6 +531,17 @@ export class FinancialService {
                     amount: driverLocked,
                   },
                 ],
+              });
+            }
+            // تحصيل غرامات إلغاء السائق المتراكمة من مستحقّه في نفس المعاملة
+            // (لا خصم مباشر من المحفظة، ومقيد بالمبلغ المتاح driverAvailable).
+            if (trip.driverId) {
+              await this.recoverDriverCancellationPenalties(tx, {
+                settledTripId: tripId,
+                driverId: trip.driverId,
+                driverAccountId: driver.id,
+                currency: trip.currency,
+                maxRecoverable: driverAvailable,
               });
             }
             await tx.payment.upsert({
@@ -510,11 +661,18 @@ export class FinancialService {
   }
 
   /**
-   * غرامة إلغاء السائق: تُحسم تلقائيًا من محفظة السائق عبر دفتر الأستاذ
-   * (مصدر الحقيقة المالي) عند إلغائه للرحلة. الغرامة = نسبة % مضبوطة من
-   * لوحة التحكم مضروبة في قيمة الرحلة الملغاة (fare). قيد مزدوج متوازن +
-   * idempotent (مفتاح trip:drvcancelpen:<tripId>): DEBIT محفظة السائق،
-   * CREDIT إيراد المنصة. لا رسوم على الراكب إطلاقًا.
+   * غرامة إلغاء السائق — السياسة الوحيدة المعتمدة (إغلاق المرحلة 10):
+   *
+   *   - الغرامة على السائق فقط؛ لا توجد أي غرامة مالية على الراكب إطلاقًا.
+   *   - **لا خصم مباشر من محفظة السائق**: تُقيد الغرامة كمستحقّ (أصل):
+   *       DEBIT  PLATFORM:DRIVER_PENALTY_RECEIVABLE
+   *       CREDIT PLATFORM:DRIVER_CANCELLATION_PENALTY
+   *     ثم تُحصّل من مستحقّ السائق عند تسوية أول رحلة مكتملة داخل
+   *     settleTrip() عبر recoverDriverCancellationPenalties — مصدر حقيقة واحد
+   *     للتسوية، ومقيد بالمبلغ المتاح فلا يصبح الرصيد سالبًا.
+   *   - لا غرامة إذا ألغى السائق قبل قبول الرحلة (acceptedAt = null).
+   *   - النسبة مضبوطة من لوحة التحكم (trips.driverCancellationPenaltyPct).
+   *   - قيد مزدوج متوازن + idempotent (trip:drvcancelpen:<tripId>) فلا تُحسب مرتين.
    */
   async settleDriverCancellationPenalty(tripId: string): Promise<void> {
     return this.withTrace(
@@ -540,6 +698,26 @@ export class FinancialService {
                 return;
               }
               if (trip.cancellationSettledAt) return; // عولجت سابقًا.
+              // قرار معتمد: لا غرامة إن ألغى السائق قبل قبول الرحلة.
+              if (!trip.acceptedAt) {
+                await tx.trip.update({
+                  where: { id: tripId },
+                  data: {
+                    cancellationSettledAt: new Date(),
+                    cancellationSettlementError: null,
+                    cancellationSettlementAttempts: { increment: 1 },
+                  },
+                });
+                await tx.tripEvent.create({
+                  data: {
+                    tripId,
+                    type: "driver_cancel_penalty:before_accept",
+                    actor: "SYSTEM",
+                    meta: { policy: "NO_PENALTY_BEFORE_ACCEPT" },
+                  },
+                });
+                return;
+              }
               const pct = await this.loadDriverCancellationPenaltyPct();
               const penalty = round2((Number(trip.fare) * pct) / 100);
               const currency = trip.currency;
@@ -563,9 +741,12 @@ export class FinancialService {
                 });
                 return;
               }
-              const driverAcc = await this.ledger.userAccount(
+              // استحقاق لا خصم: أصل (مستحقّ على السائق) مقابل إيراد المنصة.
+              // محفظة السائق لا تُمسّ هنا إطلاقًا.
+              const receivable = await this.ledger.platformAccount(
                 tx,
-                trip.driver.userId,
+                "DRIVER_PENALTY_RECEIVABLE",
+                "ASSET",
                 currency,
               );
               const revenue = await this.ledger.platformAccount(
@@ -580,10 +761,11 @@ export class FinancialService {
                 currency,
                 referenceType: "TRIP",
                 referenceId: tripId,
-                reason: "Driver cancellation penalty",
+                reason:
+                  "Driver cancellation penalty (accrued, recovered at settlement)",
                 lines: [
                   {
-                    accountId: driverAcc.id,
+                    accountId: receivable.id,
                     direction: "DEBIT",
                     amount: penalty,
                   },
@@ -606,9 +788,15 @@ export class FinancialService {
               await tx.tripEvent.create({
                 data: {
                   tripId,
-                  type: "driver_cancel_penalty:settled",
+                  type: "driver_cancel_penalty:accrued",
                   actor: "SYSTEM",
-                  meta: { penalty, pct, fare: Number(trip.fare) },
+                  meta: {
+                    penalty,
+                    pct,
+                    fare: Number(trip.fare),
+                    walletDebited: false,
+                    recovery: "next_trip_settlement",
+                  },
                 },
               });
             },
@@ -634,6 +822,205 @@ export class FinancialService {
         }
       },
     );
+  }
+
+  /**
+   * سياسة رسوم الأجرة (pricing.fees) من جدول الإعدادات الذي تديره اللوحة.
+   *
+   * تُقرأ مباشرةً من صف Setting وتُطبّع بنفس الدالة النقية التي يستعملها
+   * محرك التسعير (normalizePricingFees)، فلا يوجد منطق تطبيع مكرر ولا
+   * اعتماد دائري بين الوحدة المالية ووحدة التسعير.
+   */
+  private async loadPricingFees(): Promise<PricingFeesSetting> {
+    try {
+      const setting = await this.prisma.setting.findUnique({
+        where: { key: PRICING_FEES_SETTING_KEY },
+      });
+      const raw = (setting?.publishedValue ?? setting?.value) as
+        | Partial<PricingFeesSetting>
+        | null;
+      return normalizePricingFees(raw);
+    } catch {
+      return DEFAULT_PRICING_FEES;
+    }
+  }
+
+  /**
+   * D-4 — إلغاء الراكب: **لا توجد أي غرامة مالية إطلاقًا** (قرار نهائي معتمد).
+   *
+   *   - لا خصم من محفظة الراكب، ولا قيد دفتر أستاذ، ولا رصيد سالب.
+   *   - بدل الغرامة: نظام تحذير/مخاطر وتجميد في
+   *     PassengerCancellationRiskService (RiskEvent + RiskHold + AuditLog).
+   *   - تُبقى الدالة لأن settleCancellationFinancials والـcron يناديانها،
+   *     لكن أصبح أثرها وسم الرحلة كمُعالجة وتصفير cancellationFee فقط،
+   *     وتسجيل TripEvent للشفافية (passenger_cancel:no_fee).
+   *   - محتفظ بالـidempotency عبر cancellationSettledAt.
+   *
+   * ملاحظة: الوصف القديم (الخصم من المحفظة وجواز الرصيد السالب حتى أول
+   * شحن) ملغٍ نهائيًا ولا يجوز إعادته.
+   */
+  async settlePassengerCancellationFee(tripId: string): Promise<void> {
+    const trip = await this.prisma.trip.findUnique({
+      where: { id: tripId },
+      select: {
+        id: true,
+        status: true,
+        cancelledBy: true,
+        cancellationSettledAt: true,
+        cancellationFee: true,
+      },
+    });
+    if (!trip) throw new NotFoundException("Trip not found");
+    if (trip.status !== "CANCELLED") return;
+    if (trip.cancelledBy !== "PASSENGER") return;
+    if (trip.cancellationSettledAt) return; // مُعالجة سابقًا — idempotent.
+
+    await this.prisma.$transaction(async (tx) => {
+      const fresh = await tx.trip.findUnique({
+        where: { id: tripId },
+        select: { cancellationSettledAt: true },
+      });
+      if (!fresh || fresh.cancellationSettledAt) return;
+      await tx.trip.update({
+        where: { id: tripId },
+        data: {
+          cancellationFee: null,
+          cancellationSettledAt: new Date(),
+          cancellationSettlementError: null,
+          cancellationSettlementAttempts: { increment: 1 },
+        },
+      });
+      await tx.tripEvent.create({
+        data: {
+          tripId,
+          type: "passenger_cancel:no_fee",
+          actor: "SYSTEM",
+          meta: {
+            policy: "PASSENGER_CANCELLATION_FEE_ABOLISHED",
+            chargedAmount: 0,
+            walletDebited: false,
+          },
+        },
+      });
+    });
+  }
+
+  /**
+   * تحصيل غرامات إلغاء السائق المتراكمة من مستحقّه وقت التسوية.
+   *
+   * يُنادى داخل معاملة settleTrip() نفسها بعد القيد الأساسي:
+   *   DEBIT  محفظة السائق (خصم من المستحقّ المُقيد توّا لهذه الرحلة)
+   *   CREDIT PLATFORM:DRIVER_PENALTY_RECEIVABLE (إقفال المستحقّ)
+   *
+   * ضمانات:
+   *   - مقيد بـ maxRecoverable (= driverAvailable) فلا يصبح رصيد السائق سالبًا.
+   *   - idempotent مرتين: مفتاح trip:drvpenrecover:<penaltyTrip>:<settledTrip>
+   *     يمنع تكرار نفس التسوية، وفحص referenceId يمنع تحصيل نفس
+   *     الغرامة مرة أخرى في تسوية لاحقة.
+   *   - القيد منفصل عن baseLines قصدًا حتى لا تختلط الغرامة بالعمولة
+   *     في deriveTripEarnings.
+   */
+  private async recoverDriverCancellationPenalties(
+    tx: Prisma.TransactionClient,
+    input: {
+      settledTripId: string;
+      driverId: string;
+      driverAccountId: string;
+      currency: string;
+      maxRecoverable: number;
+    },
+  ): Promise<number> {
+    let remaining = round2(input.maxRecoverable);
+    if (remaining <= 0) return 0;
+
+    const pendingPenalties = await tx.trip.findMany({
+      where: {
+        driverId: input.driverId,
+        status: "CANCELLED",
+        cancelledBy: "DRIVER",
+        currency: input.currency,
+        cancellationFee: { gt: 0 },
+        id: { not: input.settledTripId },
+      },
+      select: { id: true, cancellationFee: true },
+      orderBy: { cancellationSettledAt: "asc" },
+      take: 20,
+    });
+    if (pendingPenalties.length === 0) return 0;
+
+    const receivable = await this.ledger.platformAccount(
+      tx,
+      "DRIVER_PENALTY_RECEIVABLE",
+      "ASSET",
+      input.currency,
+    );
+
+    let collectedTotal = 0;
+    for (const penalty of pendingPenalties) {
+      if (remaining <= 0) break;
+      // هل حُصّلت هذه الغرامة من قبل (في أي تسوية)؟
+      const already = await tx.ledgerTransaction.findFirst({
+        where: {
+          command: "recoverDriverCancellationPenalty",
+          referenceType: "TRIP",
+          referenceId: penalty.id,
+        },
+        select: { id: true },
+      });
+      if (already) continue;
+
+      const amount = round2(
+        Math.min(Number(penalty.cancellationFee), remaining),
+      );
+      if (amount <= 0) continue;
+
+      await this.ledger.post(tx, {
+        command: "recoverDriverCancellationPenalty",
+        idempotencyKey: `trip:drvpenrecover:${penalty.id}:${input.settledTripId}`,
+        currency: input.currency,
+        referenceType: "TRIP",
+        referenceId: penalty.id,
+        reason: `Driver cancellation penalty recovered from settlement of trip ${input.settledTripId}`,
+        lines: [
+          {
+            accountId: input.driverAccountId,
+            direction: "DEBIT",
+            amount,
+          },
+          {
+            accountId: receivable.id,
+            direction: "CREDIT",
+            amount,
+          },
+        ],
+      });
+
+      await tx.tripEvent.create({
+        data: {
+          tripId: penalty.id,
+          type: "driver_cancel_penalty:collected",
+          actor: "SYSTEM",
+          meta: {
+            amount,
+            settledTripId: input.settledTripId,
+            fromWallet: false,
+            source: "driver_settlement",
+          },
+        },
+      });
+      await tx.tripEvent.create({
+        data: {
+          tripId: input.settledTripId,
+          type: "settlement:driver_penalty_deducted",
+          actor: "SYSTEM",
+          meta: { amount, penaltyTripId: penalty.id },
+        },
+      });
+
+      remaining = round2(remaining - amount);
+      collectedTotal = round2(collectedTotal + amount);
+    }
+    return collectedTotal;
   }
 
   /** نسبة غرامة إلغاء السائق (0..100) من الإعدادات (قابلة للضبط من اللوحة)، افتراضيًا 0. */
@@ -683,6 +1070,30 @@ export class FinancialService {
       } catch (error) {
         this.logger.warn(
           `Driver cancellation penalty retry failed for ${trip.id}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+
+    // المرحلة 7: نفس شبكة الأمان لإلغاءات الراكب — إن فشل حسم رسم الإلغاء
+    // لحظة الإلغاء (تعارض أو انقطاع) تُعاد المحاولة هنا بدل أن يضيع الرسم صامتًا.
+    // لا شرط fare > 0 هنا لأن رسم الإلغاء مستقل عن قيمة الرحلة.
+    const cancelledByPassenger = await this.prisma.trip.findMany({
+      where: {
+        status: "CANCELLED",
+        cancelledBy: "PASSENGER",
+        cancellationSettledAt: null,
+        cancellationSettlementAttempts: { lt: 20 },
+      },
+      select: { id: true },
+      orderBy: { updatedAt: "asc" },
+      take: 100,
+    });
+    for (const trip of cancelledByPassenger) {
+      try {
+        await this.settlePassengerCancellationFee(trip.id);
+      } catch (error) {
+        this.logger.warn(
+          `Passenger cancellation fee retry failed for ${trip.id}: ${error instanceof Error ? error.message : String(error)}`,
         );
       }
     }
@@ -1270,7 +1681,7 @@ export class FinancialService {
           id: `FUNDING_LEDGER_GAP:${row.id}`,
           type: "FUNDING_LEDGER_GAP",
           referenceId: row.id,
-          title: "شحن منفذ بلا قيد دفتر",
+          title: "شحن ��نفذ بلا قيد دفتر",
           detail: `${row.driver.user.name} / ${Number(row.amount)} ${DEFAULT_CURRENCY}`,
           createdAt: row.fundedAt ?? row.createdAt,
           severity: "medium" as const,
@@ -1787,7 +2198,7 @@ export class FinancialService {
     );
   }
 
-  /** المنطق الفعلي للمهمة بعد الحصول على القفل. */
+  /** المنطق الفعلي للمهمة بع�� الحصول على القفل. */
   async scheduledLedgerReconciliationTask(): Promise<void> {
     try {
       const result = await this.reconcileLedgerBalances();

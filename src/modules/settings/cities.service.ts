@@ -19,6 +19,11 @@ export class CitiesService {
       where: includeInactive ? undefined : { isActive: true },
       orderBy: { name: "asc" },
       include: {
+        // المرحلة 8: الولاية الأم تظهر مع كل مدينة لكي ترى الإدارة فورًا
+        // المدن غير المربوطة (wilaya = null) بدل اكتشافها لاحقًا عبر خلل في التسعير.
+        wilaya: {
+          select: { id: true, number: true, nameAr: true, nameFr: true },
+        },
         _count: { select: { zones: true, drivers: true, trips: true } },
       },
     });
@@ -29,6 +34,9 @@ export class CitiesService {
       where: { id },
       include: {
         zones: { orderBy: { name: "asc" } },
+        wilaya: {
+          select: { id: true, number: true, nameAr: true, nameFr: true },
+        },
         _count: { select: { zones: true, drivers: true, trips: true } },
       },
     });
@@ -38,6 +46,7 @@ export class CitiesService {
 
   async create(dto: CreateCityDto) {
     await this.ensureNameAvailable(dto.name, dto.country);
+    if (dto.wilayaId) await this.ensureWilayaExists(dto.wilayaId);
     const created = await this.prisma.city.create({
       data: {
         name: dto.name.trim(),
@@ -45,6 +54,7 @@ export class CitiesService {
         isActive: dto.isActive ?? true,
         centerLat: dto.centerLat,
         centerLng: dto.centerLng,
+        wilayaId: dto.wilayaId ?? null,
       },
     });
     await this.versions.bump();
@@ -60,9 +70,13 @@ export class CitiesService {
         id,
       );
     }
+    if (dto.wilayaId) await this.ensureWilayaExists(dto.wilayaId);
     const updated = await this.prisma.city.update({
       where: { id },
       data: {
+        ...(dto.wilayaId !== undefined
+          ? { wilayaId: dto.wilayaId ?? null }
+          : {}),
         ...(dto.name !== undefined ? { name: dto.name.trim() } : {}),
         ...(dto.country !== undefined
           ? { country: dto.country.trim().toUpperCase() || null }
@@ -105,6 +119,18 @@ export class CitiesService {
     await this.prisma.city.delete({ where: { id } });
     await this.versions.bump();
     return { success: true };
+  }
+
+  /**
+   * المرحلة 8: التحقق من وجود الولاية قبل الربط.
+   * بدونه سيرمي Prisma خطأ FK خامًا غير مفهوم في واجهة لوحة التحكم.
+   */
+  private async ensureWilayaExists(wilayaId: string) {
+    const wilaya = await this.prisma.wilaya.findUnique({
+      where: { id: wilayaId },
+      select: { id: true },
+    });
+    if (!wilaya) throw new NotFoundException("الولاية غير موجودة");
   }
 
   private async ensureNameAvailable(

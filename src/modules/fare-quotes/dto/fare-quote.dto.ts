@@ -13,8 +13,15 @@ import {
 import { FareQuoteStatus, RideClass } from "@prisma/client";
 
 /**
- * طلب عرض سعر تفاوضي من الراكب. الإحداثيات مطلوبة لاشتقاق المسافة،
- * ويمكن تمرير distanceKm/durationSec جاهزين لتجاوز الحساب الجغرافي.
+ * طلب عرض سعر تفاوضي من الراكب.
+ *
+ * المرحلة 7 (إصلاح ثغرة تلاعب بالسعر):
+ * حُذف حقلا distanceKm و durationSec من مدخل الراكب. كان الراكب يستطيع
+ * إرسال مسافة ومدة من عنده فيتجاوز مزوّد التوجيه ويخفّض الأجرة المقترحة
+ * ونطاق التفاوض المبني عليها.
+ *
+ * المسافة والمدة الآن من الخادم حصرًا (Google Routes عبر RoutingService).
+ * للمحاكاة الإدارية استخدم SimulateFareQuoteDto المحمية بصلاحية STAFF.
  */
 export class CreateFareQuoteDto {
   @IsOptional()
@@ -84,18 +91,6 @@ export class CreateFareQuoteDto {
   @IsString()
   @MaxLength(300)
   destAddress?: string;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  @IsPositive()
-  distanceKm?: number;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @IsPositive()
-  durationSec?: number;
 }
 
 /** اقتراح الراكب لسعر ضمن النطاق المسموح. */
@@ -112,8 +107,26 @@ export class ProposeFareDto {
   note?: string;
 }
 
-/** محاكاة عرض سعر من اللوحة (دون حفظ). نفس حقول الإنشاء. */
-export class SimulateFareQuoteDto extends CreateFareQuoteDto {}
+/**
+ * محاكاة عرض سعر من اللوحة (دون حفظ) — STAFF فقط.
+ *
+ * هذا هو المكان الوحيد الذي يُسمح فيه بتمرير مسافة ومدة يدوية، لأن الموظف
+ * يختبر أثر قواعد التسعير على سيناريو افتراضي دون استهلاك طلب Routes.
+ * لا أثر له على أي رحلة حقيقية (لا يُحفظ ولا يُنشئ Trip).
+ */
+export class SimulateFareQuoteDto extends CreateFareQuoteDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @IsPositive()
+  distanceKm?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @IsPositive()
+  durationSec?: number;
+}
 
 /** مرشّحات قائمة اللوحة. */
 export class AdminFareQuoteQueryDto {

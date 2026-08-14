@@ -9,10 +9,29 @@ import { PrismaService } from "../../prisma/prisma.service";
 import { AlertService } from "../../common/observability/alert.service";
 import { SmsProvider } from "../notifications/providers/sms.provider";
 import { PaginationDto } from "../../common/dto/pagination.dto";
+import { AuditService } from "../rbac/audit.service";
+import { NotificationsService } from "../notifications/notifications.service";
 import {
   CreateSafetyIncidentDto,
   ResolveSafetyIncidentDto,
 } from "./dto/safety.dto";
+
+/**
+ * الانتقالات المسموحة لحالة بلاغ السلامة.
+ *
+ * البلاغ المُغلق (RESOLVED / FALSE_ALARM) نهائي: إعادة فتحه كانت تمسح
+ * `resolvedById` و`resolvedAt` — أي تمحو بالضبط الدليل على من أغلق البلاغ ومتى،
+ * وهو أهم ما يُطلب بعد حادث حقيقي. الإغلاق الخاطئ يُصحَّح ببلاغ جديد لا بالتراجع.
+ */
+const ALLOWED_TRANSITIONS: Record<
+  SafetyIncidentStatus,
+  SafetyIncidentStatus[]
+> = {
+  OPEN: ["ACKNOWLEDGED", "RESOLVED", "FALSE_ALARM"],
+  ACKNOWLEDGED: ["RESOLVED", "FALSE_ALARM"],
+  RESOLVED: [],
+  FALSE_ALARM: [],
+};
 
 @Injectable()
 export class SafetyService {
@@ -22,6 +41,8 @@ export class SafetyService {
     private readonly prisma: PrismaService,
     private readonly sms: SmsProvider,
     private readonly alerts: AlertService,
+    private readonly audit: AuditService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async create(userId: string, dto: CreateSafetyIncidentDto) {
@@ -72,6 +93,23 @@ export class SafetyService {
     // ولا يصل أحدًا — وهذا أخطر من عدم وجود الميزة أصلًا لأنّه يمنح طمأنينة كاذبة.
     // الإبلاغ بأفضل جهد ولا يُفشل الطلب (البلاغ محفوظ على كل حال).
     void this.dispatchSos(created).catch(() => undefined);
+
+    // سجل التدقيق: من أنشأ البلاغ ومتى. حقول الجدول تحفظ المعالِج فقط،
+    // فبدون هذا السطر لا يظهر إنشاء البلاغ في سجل التدقيق المركزي إطلاقًا.
+    void this.audit
+      .record({
+        actorId: userId,
+        action: "safety.incident.created",
+        entity: "SafetyIncident",
+        entityId: created.id,
+        meta: {
+          type: created.type,
+          tripId: created.tripId ?? null,
+          hasPosition: created.lat != null && created.lng != null,
+        },
+      })
+      .catch(() => undefined);
+
     return created;
   }
 
@@ -117,6 +155,22 @@ export class SafetyService {
         userId: incident.userId,
       },
     });
+
+    // إشعار داخل التطبيق للمبلّغ نفسه: تأكيد أن النداء وصل فعلًا.
+    // بدونه يبقى المستخدم في لحظة خطر بلا أي دليل على أن أحدًا استلم بلاغه.
+    void this.notifications
+      .notifyUser(
+        incident.userId,
+        "تم استلام نداء الاستغاثة",
+        "فريق السلامة اطّلع على بلاغك ويتابعه الآن.",
+        "PUSH",
+        {
+          kind: "safety",
+          incidentId: incident.id,
+          tripId: incident.tripId,
+        },
+      )
+      .catch(() => undefined);
 
     const phones = contacts.map((c) => c.phone).filter(Boolean);
     if (phones.length === 0) return;
@@ -185,9 +239,20 @@ export class SafetyService {
     });
     if (!current) throw new NotFoundException("بلاغ السلامة غير موجود");
 
+    // حارس الانتقال: قبل اليوم كان بالإمكان إرجاع بلاغ مُغلق إلى OPEN،
+    // فتُمحى بيانات من عالجه ومتى. لا انتقال إلى نفس الحالة ولا تراجع بعد الإغلاق.
+    if (current.status !== dto.status) {
+      const allowed = ALLOWED_TRANSITIONS[current.status] ?? [];
+      if (!allowed.includes(dto.status)) {
+        throw new BadRequestException(
+          `لا يمكن نقل البلاغ من ${current.status} إلى ${dto.status}`,
+        );
+      }
+    }
+
     const now = new Date();
     const resolving = ["RESOLVED", "FALSE_ALARM"].includes(dto.status);
-    return this.prisma.safetyIncident.update({
+    const updated = await this.prisma.safetyIncident.update({
       where: { id },
       data: {
         status: dto.status,
@@ -202,6 +267,24 @@ export class SafetyService {
       },
       include: this.incidentInclude(),
     });
+
+    // سجل التدقيق: من غيّر الحالة، من أي حالة إلى أي حالة، ومتى.
+    void this.audit
+      .record({
+        actorId: staffId,
+        action: "safety.incident.status",
+        entity: "SafetyIncident",
+        entityId: id,
+        meta: {
+          from: current.status,
+          to: dto.status,
+          reporterId: current.userId,
+          tripId: current.tripId ?? null,
+        },
+      })
+      .catch(() => undefined);
+
+    return updated;
   }
 
   private incidentInclude() {

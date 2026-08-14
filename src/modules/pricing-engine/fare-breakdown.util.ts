@@ -104,7 +104,19 @@ export function computeWaitingCharge(
   return round2(Math.max(charge, 0));
 }
 
-/** رسوم الإلغاء حسب مرحلة الرحلة ونافذة السماح. */
+/**
+ * @deprecated LEGACY / UNREFERENCED — إغلاق المرحلة 10 (قرار D-4).
+ *
+ * رسوم الإلغاء حسب مرحلة الرحلة ونافدة السماح.
+ *
+ * أُلغيت غرامة إلغاء الراكب نهائيًا، فلم يبقَ لهذه الدالة أي مستدعٍ في
+ * مسارات الإلغاء أو التسوية (المستدعي الوحيد هو
+ * PricingEngineService.cancellationFee() الموسومة هي نفسها كغير مستخدمة).
+ *
+ * تُرك كما هي بقرار مالك المشروع لعدم كسر عقد /pricing/fees، ولا يجوز
+ * ربطها بأي مسار يخصم من الراكب. أي إعادة تفعيل تحتاج قرارًا صريحًا
+ * وتدقيقًا مستقلاً.
+ */
 export function computeCancellationFee(
   stage: CancellationStage,
   policy: CancellationPolicy,

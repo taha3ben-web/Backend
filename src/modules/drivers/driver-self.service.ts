@@ -12,6 +12,8 @@ import {
   STORED_MEDIA_READ_TTL_MINUTES,
 } from "../storage/storage.service";
 import { DriverSanctionsService } from "./driver-sanctions.service";
+import { ArrivalGuardService } from "../trips/arrival-guard.service";
+import { ProfileLevelsService } from "../profile-levels/profile-levels.service";
 import { PaginationDto } from "../../common/dto/pagination.dto";
 import { round2 } from "../../common/money.util";
 import { identityChanged } from "./vehicle-verification.util";
@@ -48,6 +50,10 @@ export class DriverSelfService {
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
     private readonly sanctions: DriverSanctionsService,
+    // D-6: حراسة وقت الانتطار — نفس الخدمة المستخدمة في TripsService.
+    private readonly arrivalGuard: ArrivalGuardService,
+    // المرحلة 11: مستوى السائق ومستوى الراكب من مصدر واحد.
+    private readonly profileLevels: ProfileLevelsService,
   ) {}
 
   /** حالة عقوبات الإلغاء للسائق الحالي (مشتقة من userId الجلسة). */
@@ -100,6 +106,8 @@ export class DriverSelfService {
       )) ??
       documents.find((d) => d.type === "PROFILE_PHOTO")?.url ??
       null;
+    // المرحلة 11 — عدّاد السائق مستقل تمامًا عن عدّاد الراكب.
+    const level = await this.profileLevels.forDriver(driver.id);
     return {
       id: driver.id,
       userId: driver.userId,
@@ -112,6 +120,13 @@ export class DriverSelfService {
       availability: driver.availability,
       rating: Number(driver.rating),
       totalTrips: driver.totalTrips,
+      // المرحلة 11: العدد المشتق من الرحلات المكتملة فعليًا + المستوى + رابط الإطار.
+      completedTripsCount: level.completedTripsCount,
+      profileLevel: level.profileLevel,
+      profileFrameUrl: level.profileFrameUrl,
+      nextLevel: level.nextLevel,
+      nextLevelAt: level.nextLevelAt,
+      tripsToNextLevel: level.tripsToNextLevel,
       cityId: driver.cityId ?? null,
       city: driver.city?.name ?? null,
       vehicle: vehicle
@@ -290,14 +305,29 @@ export class DriverSelfService {
 
 
   async trip(userId: string, tripId: string) {
-    const trip = await this.prisma.trip.findUnique({ where: { id: tripId }, include: { passenger: { select: { name: true, phone: true } } } });
+    const trip = await this.prisma.trip.findUnique({ where: { id: tripId }, include: { passenger: { select: { name: true, phone: true, avatarUrl: true } } } });
     const driver = await this.requireDriver(userId);
     if (!trip || trip.driverId !== driver.id) throw new NotFoundException("الرحلة غير موجودة");
     // السائق لا يرى رقم الراكب الحقيقي أبدًا.
+    // المرحلة 11: مستوى الراكب وإطاره يأتيان جاهزين من الخادم لعرضهما في
+    // بطاقة الرحلة دون أي حساب داخل تطبيق السائق.
+    const passengerLevel = await this.profileLevels.forPassenger(
+      trip.passengerId,
+    );
     return {
       ...trip,
       passenger: trip.passenger
-        ? { ...trip.passenger, phone: maskPhone(trip.passenger.phone) }
+        ? {
+            ...trip.passenger,
+            phone: maskPhone(trip.passenger.phone),
+            avatarUrl: await this.storage.resolveStoredUrl(
+              trip.passenger.avatarUrl,
+              STORED_MEDIA_READ_TTL_MINUTES,
+            ),
+            completedTripsCount: passengerLevel.completedTripsCount,
+            profileLevel: passengerLevel.profileLevel,
+            profileFrameUrl: passengerLevel.profileFrameUrl,
+          }
         : trip.passenger,
     };
   }
@@ -307,8 +337,23 @@ export class DriverSelfService {
     if (!trip || trip.driverId !== driver.id) throw new NotFoundException("الرحلة غير موجودة");
     const allowed = (trip.status === "ACCEPTED" && status === "ARRIVING") || (trip.status === "ARRIVING" && status === "IN_PROGRESS") || (trip.status === "IN_PROGRESS" && status === "COMPLETED");
     if (!allowed) throw new BadRequestException(`Invalid transition ${trip.status} -> ${status}`);
+    // D-6 — لا يُسمح بتسجيل الوصول إلا داخل نصف القطر (موقع الخادم، fail-closed).
+    if (status === "ARRIVING") {
+      await this.arrivalGuard.assertCanMarkArriving({
+        tripId,
+        driverUserId: userId,
+        pickupLat: trip.pickupLat,
+        pickupLng: trip.pickupLng,
+      });
+    }
     const changed = await this.prisma.trip.updateMany({ where: { id: tripId, status: trip.status }, data: { status, startedAt: status === "IN_PROGRESS" ? new Date() : undefined, completedAt: status === "COMPLETED" ? new Date() : undefined, cancelReason: reason } });
     if (changed.count !== 1) throw new BadRequestException("Trip state changed concurrently");
+    // المرحلة 11 — مسار إكمال قائم ثانٍ (PATCH /driver/me/trips/:id/status).
+    // الحارس updateMany أعلاه يضمن أن الانتقال حدث مرة واحدة، والحساب
+    // مشتق من عدّ الرحلات فلا يمكن احتساب الإكمال مرتين أصلًا.
+    if (status === "COMPLETED") {
+      void this.profileLevels.onTripCompleted(tripId).catch(() => undefined);
+    }
     return this.prisma.trip.findUnique({ where: { id: tripId } });
   }
 

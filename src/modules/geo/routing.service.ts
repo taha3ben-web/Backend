@@ -100,35 +100,21 @@ export class RoutingService {
 
   /**
    * مدد الوصول من عدة سائقين إلى نقطة الانطلاق — تُستخدم في ترتيب المرشحين.
-   * مع OSRM تُحسب كلها في استدعاء واحد (`/table`)، وإلا بتوازٍ محدود، وعند
-   * الفشل تُقدّر محليًا فيبقى الإسناد عاملًا دائمًا.
+   *
+   * المرحلة 7: حُذف مسار OSRM السريع (`/table`) لأن OSRM لم يعد يُختار
+   * كمزوّد أبدًا (قرار المالك). الحساب الآن بتوازٍ محدود عبر route()
+   * (أي Google Routes مع كاش Redis)، وعند الفشل تُقدّر محليًا فيبقى
+   * الإسناد عاملًا دائمًا.
+   *
+   * ملاحظة تكلفة: كل مرشّح = استدعاء Routes واحد (ما لم يصبه الكاش)،
+   * والكاش مدوّر إلى شبكة ≈11م مما يرفع نسبة الإصابة في المدن المزدحمة.
    */
   async etaFromMany(
     sources: GeoLatLng[],
     destination: GeoLatLng,
   ): Promise<EtaResult[]> {
     if (!sources.length) return [];
-    const { provider, ctx } = await this.providers.resolve();
-
-    if (provider.name === this.osrm.name) {
-      try {
-        const table = await this.osrm.durationsTo(sources, destination, ctx);
-        return table.map((entry, i) =>
-          entry
-            ? { ...entry, approximate: false }
-            : this.approximateEta(sources[i], destination, ctx.averageSpeedKmh),
-        );
-      } catch (error) {
-        this.logger.warn(
-          `فشل OSRM /table: ${
-            error instanceof Error ? error.message : "unknown"
-          } — تقدير تقريبي`,
-        );
-        return sources.map((s) =>
-          this.approximateEta(s, destination, ctx.averageSpeedKmh),
-        );
-      }
-    }
+    const { ctx } = await this.providers.resolve();
 
     const results: EtaResult[] = [];
     for (let i = 0; i < sources.length; i += ETA_CONCURRENCY) {

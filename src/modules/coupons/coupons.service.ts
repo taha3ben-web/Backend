@@ -18,6 +18,15 @@ export interface CouponResult {
   platformShare: number;
 }
 
+/**
+ * سياق الرحلة اللازم لتقييدات الكوبون (الفئة/المدينة).
+ * يأتي دائمًا من الخادم (من عرض السعر المحسوب)، لا من جسم الطلب مباشرة.
+ */
+export interface CouponContext {
+  rideClass?: string | null;
+  cityId?: string | null;
+}
+
 /** مفتاح الإعداد العام لسياسة تمويل الكوبونات (يُدار من لوحة التحكم). */
 export const COUPON_FUNDING_SETTING_KEY = "coupons.funding";
 const DEFAULT_COUPON_FUNDING: {
@@ -43,8 +52,13 @@ export class CouponsService {
         type: dto.type ?? "PERCENT",
         value: dto.value,
         maxUses: dto.maxUses,
+        perUserLimit: dto.perUserLimit,
         firstRideOnly: dto.firstRideOnly ?? false,
         userId: dto.userId,
+        minFare: dto.minFare,
+        maxDiscount: dto.maxDiscount,
+        rideClasses: dto.rideClasses ?? [],
+        cityId: dto.cityId,
         expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : null,
         isActive: dto.isActive ?? true,
         fundingSource: dto.fundingSource ?? null,
@@ -83,8 +97,13 @@ export class CouponsService {
         type: dto.type,
         value: dto.value,
         maxUses: dto.maxUses,
+        perUserLimit: dto.perUserLimit,
         firstRideOnly: dto.firstRideOnly,
         userId: dto.userId,
+        minFare: dto.minFare,
+        maxDiscount: dto.maxDiscount,
+        rideClasses: dto.rideClasses,
+        cityId: dto.cityId,
         expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : undefined,
         isActive: dto.isActive,
         fundingSource: dto.fundingSource,
@@ -110,6 +129,7 @@ export class CouponsService {
     code: string,
     userId: string,
     fare: number,
+    ctx?: CouponContext,
   ): Promise<CouponResult> {
     const coupon = await this.prisma.coupon.findUnique({
       where: { code: code.toUpperCase() },
@@ -125,6 +145,32 @@ export class CouponsService {
     if (coupon.userId && coupon.userId !== userId) {
       throw new BadRequestException("الكوبون غير مخصص لك");
     }
+    // الحد الأدنى يُقاس على الأجرة قبل الخصم.
+    // fare = 0 يعني معاينة بلا رحلة، فلا نرفض الكوبون لأجل حد أدنى لم يُقاس بعد.
+    if (fare > 0 && coupon.minFare != null && fare < Number(coupon.minFare)) {
+      throw new BadRequestException(
+        `الكوبون يتطلب أجرة لا تقل عن ${Number(coupon.minFare)}`,
+      );
+    }
+    // تقييد فئة الرحلة: مصفوفة فارغة تعني كل الفئات.
+    if (coupon.rideClasses.length > 0) {
+      if (!ctx?.rideClass || !coupon.rideClasses.includes(ctx.rideClass)) {
+        throw new BadRequestException("الكوبون غير صالح لهذه الفئة");
+      }
+    }
+    // تقييد المدينة: null يعني كل المدن.
+    if (coupon.cityId && coupon.cityId !== ctx?.cityId) {
+      throw new BadRequestException("الكوبون غير صالح في هذه المدينة");
+    }
+    // حد الاستخدام لكل مستخدم يُحسب من سجل الاسترداد الفعلي لا من عدّاد عام.
+    if (coupon.perUserLimit != null) {
+      const usedByUser = await this.prisma.couponRedemption.count({
+        where: { couponId: coupon.id, userId },
+      });
+      if (usedByUser >= coupon.perUserLimit) {
+        throw new BadRequestException("استنفدت حدّك من هذا الكوبون");
+      }
+    }
     if (coupon.firstRideOnly) {
       const completed = await this.prisma.trip.count({
         where: { passengerId: userId, status: "COMPLETED" },
@@ -138,6 +184,7 @@ export class CouponsService {
       Number(coupon.value),
       coupon.type,
       fare,
+      coupon.maxDiscount != null ? Number(coupon.maxDiscount) : null,
     );
     const finalFare = round2(fare - discount);
     // سياسة التمويل المؤثّرة: تجاوز الكوبون إن وُجد، وإلا الإعداد
@@ -155,11 +202,31 @@ export class CouponsService {
     return { coupon, discount, finalFare, fundingSource, platformShare };
   }
 
-  /** زيادة عدّاد الاستخدام ذريًا (مع حماية maxUses) */
-  async redeem(couponId: string, tx?: Prisma.TransactionClient): Promise<void> {
+  /**
+   * تسجيل استخدام الكوبون: يزيد العدّاد العام ذريًا ويكتب صفًا في سجل
+   * الاسترداد كي يصبح حدّ المستخدم قابلًا للفرض والتكرار قابلًا للكشف.
+   * يجب استدعاؤه داخل نفس معاملة إنشاء الرحلة كي لا يُحرق الكوبون بلا رحلة.
+   */
+  async redeem(
+    couponId: string,
+    userId: string,
+    tripId: string | null,
+    tx?: Prisma.TransactionClient,
+  ): Promise<void> {
     const client = tx ?? this.prisma;
     const coupon = await client.coupon.findUnique({ where: { id: couponId } });
     if (!coupon) return;
+
+    // إعادة فحص حد المستخدم عند الحجز: التحقق السابق قد يسبق هذه اللحظة
+    // بما يكفي لطلبين متوازيين من نفس الراكب.
+    if (coupon.perUserLimit != null) {
+      const usedByUser = await client.couponRedemption.count({
+        where: { couponId, userId },
+      });
+      if (usedByUser >= coupon.perUserLimit) {
+        throw new BadRequestException("استنفدت حدّك من هذا الكوبون");
+      }
+    }
 
     if (coupon.maxUses != null) {
       // زيادة ذرية مشروطة: لا تنجح إلا إن بقي usedCount < maxUses.
@@ -171,22 +238,35 @@ export class CouponsService {
       if (claim.count === 0) {
         throw new BadRequestException("استنفد الكوبون");
       }
-      return;
+    } else {
+      // بلا حد أقصى: زيادة مباشرة.
+      await client.coupon.update({
+        where: { id: couponId },
+        data: { usedCount: { increment: 1 } },
+      });
     }
 
-    // بلا حد أقصى: زيادة مباشرة.
-    await client.coupon.update({
-      where: { id: couponId },
-      data: { usedCount: { increment: 1 } },
+    // tripId فريد في المخطط، فإعادة المحاولة لنفس الرحلة تفشل بدل أن تُحتسب مرتين.
+    await client.couponRedemption.create({
+      data: { couponId, userId, tripId },
     });
   }
 
   /** إرجاع استخدام (عند إلغاء رحلة طُبّق عليها كوبون) */
   async release(
     couponId: string,
+    tripId?: string | null,
     tx?: Prisma.TransactionClient,
   ): Promise<void> {
     const client = tx ?? this.prisma;
+    // سجل الاسترداد هو مصدر الحقيقة: إن لم يوجد صف لهذه الرحلة فلا شيء نرجعه.
+    // هذا يجعل الإرجاع idempotent فلا ينقص العدّاد مرتين عند إلغاءين متتاليين.
+    if (tripId) {
+      const deleted = await client.couponRedemption.deleteMany({
+        where: { couponId, tripId },
+      });
+      if (deleted.count === 0) return;
+    }
     const coupon = await client.coupon.findUnique({ where: { id: couponId } });
     if (!coupon || coupon.usedCount <= 0) return;
     await client.coupon.update({
@@ -199,9 +279,11 @@ export class CouponsService {
     value: number,
     type: "PERCENT" | "FIXED",
     fare: number,
+    maxDiscount: number | null,
   ): number {
     const raw = type === "PERCENT" ? (fare * value) / 100 : value;
-    // الخصم لا يتجاوز قيمة الرحلة
-    return round2(Math.min(raw, fare));
+    // سقف الكوبون أولًا، ثم سقف مطلق: الخصم لا يتجاوز قيمة الرحلة.
+    const capped = maxDiscount != null ? Math.min(raw, maxDiscount) : raw;
+    return round2(Math.min(capped, fare));
   }
 }

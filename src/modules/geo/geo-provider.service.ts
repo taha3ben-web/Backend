@@ -15,11 +15,32 @@ export const MAPS_SETTING_KEYS = {
   clientApiKey: "maps.clientApiKey",
   defaultCountry: "maps.defaultCountry",
   averageSpeedKmh: "maps.averageSpeedKmh",
-  /** عنوان خدمة OSRM المستضافة ذاتيًا، مثال: http://osrm:5000 */
+  /**
+   * عنوان خدمة OSRM المستضافة ذاتيًا، مثال: http://osrm:5000
+   * @deprecated المرحلة 7: OSRM لن يُستخدم في الإنتاج. المفتاح يبقى لعدم كسر
+   * الإعدادات المخزّنة، ولكن لا يُختار OSRM تلقائيًا أبدًا (انظر select).
+   */
   osrmBaseUrl: "maps.osrmBaseUrl",
 } as const;
 
-export const DEFAULT_MAPS_PROVIDER = "internal";
+/**
+ * المزوّد الافتراضي للمسافة والمدة والمسار.
+ *
+ * المرحلة 7: المالك اعتمد **Google Routes API** رسميًا وألغى OSRM نهائيًا،
+ * لذلك الافتراضي أصبح "google" بدل "internal".
+ *
+ * ملاحظة مهمة: هذا لا يخترع مفتاحًا. ما دام maps.serverApiKey فارغًا
+ * يرتد select() تلقائيًا إلى المزوّد الداخلي التقريبي، فيعمل النظام قبل إعداد
+ * Google Cloud ويتحوّل إلى Routes API تلقائيًا لحظة إدخال المفتاح من اللوحة.
+ */
+export const DEFAULT_MAPS_PROVIDER = "google";
+
+/**
+ * مزوّدون متروكون (legacy): موجودون في الكود ولا تُحذف ملفاتهم،
+ * لكن لا يُختارون في تشغيل الإنتاج.
+ */
+export const DEPRECATED_MAPS_PROVIDERS = ["osrm"] as const;
+
 export const DEFAULT_AVERAGE_SPEED_KMH = 30;
 
 export interface ResolvedGeoConfig {
@@ -32,10 +53,14 @@ export interface ResolvedGeoConfig {
 }
 
 /**
- * يحلّ مزوّد الخرائط الفعّال ومفاتيحه من اللوحة (Settings)،
- * ويختار التنفيذ المناسب. الافتراضي الآمن: internal (offline).
+ * يحلّ مزوّد الخرائط الفعّال ومفاتيحه من اللوحة (Settings)، ويختار التنفيذ المناسب.
  *
- * المزوّدون المدعومون: internal | osrm | google.
+ * المرحلة 7 — سياسة المزوّد:
+ * - المعتمد: google (Routes API v2 للمسافة/المدة/المسار).
+ * - internal: ارتداد تقريبي فقط قبل إدخال مفتاح Google، أو عند فشل المزوّد.
+ * - osrm: **متروك نهائيًا**. لا يُختار حتى لو كان maps.osrmBaseUrl مضبوطًا في
+ *   قاعدة البيانات من إعداد قديم؛ يُتجاهل ويُرتد إلى الداخلي. ملفات OsrmGeoProvider
+ *   تبقى موجودة دون حذف كما هي سياسة المشروع (لا حذف أنظمة قابلة للإحياء).
  */
 @Injectable()
 export class GeoProviderService {
@@ -104,7 +129,13 @@ export class GeoProviderService {
     };
   }
 
-  /** يختار تنفيذ المزوّد. يرجع للداخلي إذا غاب المفتاح أو العنوان. */
+  /**
+   * يختار تنفيذ المزوّد. يرجع للداخلي إذا غاب مفتاح Google.
+   *
+   * OSRM مستبعد صراحة (المرحلة 7): حتى لو كان provider === "osrm"
+   * مخزّنًا من إعداد قديم، لا نستخدمه. هذا يمنع عودة النظام خلسةً إلى
+   * مصدر مسافة/مدة ألغاه المالك.
+   */
   select(config: ResolvedGeoConfig): {
     provider: GeoProvider;
     ctx: GeoProviderContext;
@@ -112,8 +143,6 @@ export class GeoProviderService {
     let provider: GeoProvider = this.internalProvider;
     if (config.provider === "google" && config.serverApiKey) {
       provider = this.googleProvider;
-    } else if (config.provider === "osrm" && config.osrmBaseUrl) {
-      provider = this.osrmProvider;
     }
     return {
       provider,

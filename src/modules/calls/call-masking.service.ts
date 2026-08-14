@@ -21,17 +21,18 @@ import {
   type MaskedCallResult,
   type ProxyNumberAllocator,
 } from "./call-masking.adapter";
+import { LIVE_TRIP_STATUSES } from "../trips/trip-transitions";
 
 /** مدّة صلاحية ربط المكالمة بالدقائق. */
 export const CALL_LINK_TTL_MIN = 60;
-/** الحالات التي يُسمح فيها الاتصال بين الطرفين. */
-export const CALLABLE_TRIP_STATUSES = [
-  "ACCEPTED",
-  "ARRIVED",
-  "ARRIVING",
-  "ONGOING",
-  "IN_PROGRESS",
-] as const;
+/**
+ * الحالات التي يُسمح فيها الاتصال بين الطرفين.
+ *
+ * المرحلة 9: كانت تحتوي "ARRIVED" و"ONGOING" وهما اسمان ميتان لا يوجدان في
+ * enum TripStatus. لم يكن لهما أثر وظيفي هنا (لأن الحالات الثلاث الصحيحة كانت
+ * موجودة، بخلاف trip-share)، لكنّ توحيد المصدر يمنع تكرار نفس العيب.
+ */
+export const CALLABLE_TRIP_STATUSES = LIVE_TRIP_STATUSES;
 
 export interface InboundRouting {
   sessionId: string;

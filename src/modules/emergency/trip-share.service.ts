@@ -5,6 +5,7 @@ import {
 } from "@nestjs/common";
 import { createHash, randomBytes } from "node:crypto";
 import { PrismaService } from "../../prisma/prisma.service";
+import { SHAREABLE_TRIP_STATUSES } from "../trips/trip-transitions";
 
 /**
  * مشاركة الرحلة (Share my trip) — ميزة سلامة أساسية في Uber/Bolt/Heetch:
@@ -21,13 +22,17 @@ import { PrismaService } from "../../prisma/prisma.service";
 export const SHARE_DEFAULT_TTL_MIN = 240;
 export const SHARE_MAX_TTL_MIN = 720;
 
-/** حالات الرحلة التي تسمح بإنشاء رابط متابعة. */
-export const SHAREABLE_TRIP_STATUSES = [
-  "SEARCHING",
-  "ACCEPTED",
-  "ARRIVED",
-  "ONGOING",
-] as const;
+/**
+ * حالات الرحلة التي تسمح بإنشاء رابط متابعة.
+ *
+ * إصلاح المرحلة 9 (عيب سلامة حقيقي): كانت القائمة مكتوبة نصًّا هنا وتحوي
+ * "ARRIVED" و"ONGOING" وهما غير موجودين في enum TripStatus، بينما سقطت
+ * الحالتان الحقيقيتان ARRIVING وIN_PROGRESS. النتيجة: كان الراكب يُمنع من
+ * مشاركة رحلته في اللحظة التي يحتاجها فعلًا — أثناء وصول السائق وأثناء سير
+ * الرحلة — مع رسالة مضلّلة "لا يمكن مشاركة رحلة منتهية".
+ * المصدر الآن موحَّد في trip-transitions ومُقيَّد بالنوع TripStatus[].
+ */
+export { SHAREABLE_TRIP_STATUSES };
 
 /** يجزئ الرمز (دالة نقية قابلة للاختبار). */
 export function hashShareToken(token: string): string {

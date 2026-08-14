@@ -14,6 +14,9 @@ import { InvoicesModule } from "../invoices/invoices.module";
 import { LoyaltyModule } from "../loyalty/loyalty.module";
 import { ReferralModule } from "../referral/referral.module";
 import { TransactionalEmailModule } from "../notifications/transactional-email.module";
+import { CallsModule } from "../calls/calls.module";
+import { TripGuardsModule } from "./trip-guards.module";
+import { ProfileLevelsModule } from "../profile-levels/profile-levels.module";
 
 @Module({
   imports: [
@@ -27,6 +30,13 @@ import { TransactionalEmailModule } from "../notifications/transactional-email.m
     LoyaltyModule,
     ReferralModule,
     TransactionalEmailModule,
+    // إبطال جلسات الاتصال عند إنهاء/إلغاء الرحلة. CallsModule لا يستورد TripsModule
+    // فلا حلقة دائرية هنا — لا حاجة لـ forwardRef.
+    CallsModule,
+    // حراسات إغلاق المرحلة 10 (مصدر واحد لسياسة الإلغاء وحراسة الوصول).
+    TripGuardsModule,
+    // المرحلة 11: إعادة حساب مستوى الملف الشخصي عند اكتمال الرحلة.
+    ProfileLevelsModule,
   ],
   providers: [
     TripsService,

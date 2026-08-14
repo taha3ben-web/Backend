@@ -8,7 +8,15 @@ import {
 } from "./geo-provider.service";
 import { UpdateGeoProviderConfigDto } from "./dto/geo.dto";
 
+/**
+ * المزوّدون المقبولون في التخزين.
+ * "osrm" يبقى مقبولًا للتوافق مع إعدادات قديمة مخزّنة، لكنه متروك ولا
+ * يُستخدم فعليًا (GeoProviderService.select يتجاهله ويرتد إلى الداخلي).
+ */
 const SUPPORTED_PROVIDERS = ["internal", "osrm", "google"] as const;
+
+/** المزوّدون المعروضون للاختيار في اللوحة (المرحلة 7: بلا OSRM). */
+const SELECTABLE_PROVIDERS = ["google", "internal"] as const;
 
 /**
  * إدارة إعدادات مزوّد الخرائط (STAFF).
@@ -27,7 +35,14 @@ export class GeoAdminService {
     const config = await this.providers.resolveConfig();
     return {
       provider: config.provider,
-      supportedProviders: [...SUPPORTED_PROVIDERS],
+      supportedProviders: [...SELECTABLE_PROVIDERS],
+      /** مزوّدون متروكون: تعرضهم اللوحة كتحذير فقط إن كانت القيمة الحالية منهم. */
+      deprecatedProviders: ["osrm"],
+      /** مصدر المسافة والمدة المعتمد رسميًا في التسعير. */
+      routingApi: "google-routes-v2",
+      /** هل التوجيه الحقيقي فعّال الآن؟ (google + مفتاح خادم موجود) */
+      routingActive:
+        config.provider === "google" && Boolean(config.serverApiKey),
       defaultCountry: config.defaultCountry ?? "",
       averageSpeedKmh: config.averageSpeedKmh,
       osrmBaseUrl: config.osrmBaseUrl ?? "",

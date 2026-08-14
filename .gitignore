@@ -1,16 +1,45 @@
-node_modules/
-dist/
-coverage/
+# ---------------------------------------------------------------------------
+# المرحلة 10 — إصلاح أمني: لم يكن لهذا المستودع ملف .gitignore إطلاقًا.
+# أي `git add .` كان سيرفع .env (DATABASE_URL، JWT_SECRET، Redis، Twilio،
+# Firebase، ومفتاح Google لاحقًا) إلى تاريخ Git بشكل دائم.
+# لا يوجد حاليًا أي ملف .env في شجرة الملفات، فهذا إجراء وقائي لا علاجي.
+# ---------------------------------------------------------------------------
+
+# الأسرار والبيئة
 .env
 .env.*
 !.env.example
-*.log
-.DS_Store
-prisma/*.db
-
-# Secrets and certificates
 *.pem
 *.key
+*.p8
 *.p12
-service-account*.json
+*-service-account.json
 firebase-adminsdk*.json
+google-credentials*.json
+
+# الاعتماديات والبناء
+ode_modules/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# Prisma
+prisma/*.db
+prisma/*.db-journal
+
+# السجلات والمؤقتات
+logs/
+*.log
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+tmp/
+.cache/
+
+# محررات ونظام التشغيل
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json

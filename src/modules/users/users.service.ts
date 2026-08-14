@@ -15,6 +15,7 @@ import {
 } from "./dto/passenger-self.dto";
 import { FinancialService } from "../financial/financial.service";
 import { SettingsService } from "../settings/settings.service";
+import { ProfileLevelsService } from "../profile-levels/profile-levels.service";
 
 /** مقدّمة مفاتيح صور الركّاب في التخزين. */
 const AVATAR_PREFIX = "passenger-profiles/";
@@ -28,6 +29,8 @@ export class UsersService {
     private readonly storage: StorageService,
     private readonly financial: FinancialService,
     private readonly settings: SettingsService,
+    // المرحلة 11: مصدر واحد لحساب المستوى ومفتاح الإطار.
+    private readonly profileLevels: ProfileLevelsService,
   ) {}
 
   async findAll(q: PaginationDto, type?: UserType) {
@@ -232,9 +235,19 @@ export class UsersService {
     ]);
 
     const ledgerBalance = await this.financial.getUserBalance(id);
+    // المرحلة 11: المستوى يُحسب في الخادم من نفس نقطة الحقيقة التي يراها
+    // الراكب في تطبيقه، فلا توجد قيمة ثانية للمستوى في لوحة الإدارة.
+    // للقراءة فقط: لا يوجد مسار إداري لتعديل المستوى يدويًا.
+    const level = await this.profileLevels.forPassenger(id);
 
     return {
-      profile: { ...user, ledgerBalance },
+      profile: {
+        ...user,
+        ledgerBalance,
+        completedTripsCount: level.completedTripsCount,
+        profileLevel: level.profileLevel,
+        profileFrameUrl: level.profileFrameUrl,
+      },
       trips: {
         total: totalTrips,
         completed: completedTrips,
@@ -292,10 +305,21 @@ export class UsersService {
       },
     });
     if (!user) throw new NotFoundException("Passenger profile not found");
+    // المرحلة 11 — المستوى والإطار من الخادم وحده (مشتقّان من الرحلات المكتملة).
+    // لا يقبل PATCH /passenger/me أي من هذه الحقول؛ فهي للقراءة فقط.
+    const level = await this.profileLevels.forPassenger(userId);
     return {
       ...user,
       avatarUrl: await this.resolveAvatarUrl(user.avatarUrl),
       profileComplete: user.onboardingCompletedAt !== null,
+      completedTripsCount: level.completedTripsCount,
+      // الحقل القديم الذي تقرأه واجهة الراكب، مربوط بنفس المصدر حتى لا يتعارضا.
+      tripCount: level.completedTripsCount,
+      profileLevel: level.profileLevel,
+      profileFrameUrl: level.profileFrameUrl,
+      nextLevel: level.nextLevel,
+      nextLevelAt: level.nextLevelAt,
+      tripsToNextLevel: level.tripsToNextLevel,
     };
   }
 
@@ -426,7 +450,67 @@ export class UsersService {
     });
   }
 
-  setStatus(id: string, status: UserStatus) {
-    return this.prisma.user.update({ where: { id }, data: { status } });
+  /**
+   * تغيير حالة الحساب من لوحة التحكم فقط (D-4).
+   *
+   *   - فك التجميد (ACTIVE) غير متاح من PassengerApp أو DriverApp إطلاقًا:
+   *     المسار الوحيد هو PATCH /passengers/:id/activate محميًا بـ
+   *     STAFF + passengers.manage.
+   *   - كل تغيير يُسجّل في AuditLog مع الموطف والسبب والحالة قبل/بعد.
+   *   - عند التنشيط يُغلق أي RiskHold نشط ناتج عن التجميد التلقائي.
+   */
+  async setStatus(
+    id: string,
+    status: UserStatus,
+    actor?: { userId?: string; reason?: string },
+  ) {
+    const before = await this.prisma.user.findUnique({
+      where: { id },
+      select: { status: true },
+    });
+    if (!before) throw new NotFoundException("User not found");
+
+    const updated = await this.prisma.user.update({
+      where: { id },
+      data: { status },
+    });
+
+    if (status === "ACTIVE") {
+      await this.prisma.riskHold
+        .updateMany({
+          where: { subjectKind: "USER", subjectId: id, active: true },
+          data: {
+            active: false,
+            releasedBy: actor?.userId ?? "DASHBOARD",
+            releasedAt: new Date(),
+          },
+        })
+        .catch(() => undefined);
+    }
+
+    const action =
+      status === "ACTIVE"
+        ? "passenger.unfreeze"
+        : status === "BANNED"
+          ? "passenger.ban"
+          : "passenger.freeze";
+    await this.prisma.auditLog
+      .create({
+        data: {
+          actorId: actor?.userId ?? null,
+          action,
+          entity: "User",
+          entityId: id,
+          meta: {
+            from: before.status,
+            to: status,
+            reason: actor?.reason ?? null,
+            source: "dashboard",
+          },
+        },
+      })
+      .catch(() => undefined);
+
+    return updated;
   }
 }
