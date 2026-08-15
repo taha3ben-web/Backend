@@ -26,6 +26,19 @@ import { formatEmailAmount } from "../notifications/transactional-email.util";
 import { ArrivalGuardService } from "./arrival-guard.service";
 import { ProfileLevelsService } from "../profile-levels/profile-levels.service";
 
+/**
+ * نافذة رصد ما بعد الإلغاء (المرحلة 10) — علامة رصد فقط.
+ *
+ * تُفتح عند إلغاء رحلة **بعد** تعيين سائق، وهي الحالة الوحيدة ذات
+ * المعنى التجاري (احتمال رحلة خارج المنصّة). لا تفرض رسومًا ولا تُغير
+ * دلالات الإلغاء: إلغاء الراكب يبقى بلا رسم (D-4)، وغرامة السائق تبقى
+ * حيث هي في settleCancellationFinancials.
+ */
+export const POST_CANCELLATION_WATCH_EVENT = "trip:post_cancellation_watch";
+
+/** مدة بقاء علامة الرصد في Redis (رصد فقط، لا أثر مالي). */
+export const POST_CANCELLATION_WATCH_TTL_SECONDS = 15 * 60;
+
 @Injectable()
 export class TripsService {
   private readonly logger = new Logger(TripsService.name);
@@ -232,6 +245,19 @@ export class TripsService {
       // قبلها كانت settleDriverCancellationPenalty موجودة بلا مستدعٍ إطلاقًا
       // (ما عدا مهمة إعادة المحاولة)، ورسم إلغاء الراكب لم يكن يُحسم أبدًا.
       await this.settleCancellationFinancials(id, actor);
+      // نفس الدالة التي يستدعيها مسار WebSocket، حتى تُفتح النافذة تلقائيًا
+      // لكل إلغاء بعد تعيين سائق مهما كان المسار (لا تكرار للمنطق).
+      if (trip.driverId) {
+        const driver = await this.prisma.driver
+          .findUnique({
+            where: { id: trip.driverId },
+            select: { userId: true },
+          })
+          .catch(() => null);
+        if (driver) {
+          void this.openPostCancellationWatch(id, driver.userId);
+        }
+      }
     }
 
     if (to === "COMPLETED" || to === "CANCELLED") {
@@ -448,6 +474,46 @@ export class TripsService {
     } catch (err) {
       this.logger.warn(
         `تسوية إلغاء الرحلة ${tripId} فشلت: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  /**
+   * فتح نافذة رصد ما بعد الإلغاء — نقطة دخول واحدة يشترك فيها مسار
+   * REST (changeStatus) ومسار WebSocket (MatchingService.passengerCancel)،
+   * فلا يوجد منطق مكرر ولا نطاق إلغاء ثانٍ.
+   *
+   * تستخدم البنية القائمة فقط: سجل TripEvent (أثر دائم للتحقيق) ومفتاح
+   * Redis بمدة محدودة على نمط مفاتيح السائق القائمة. لا تمسّ الماليات
+   * ولا سياسة المخاطر ولا حالة الرحلة.
+   *
+   * أفضل-جهد: لا ترمي أبدًا، ففشل الرصد لا يجوز أن يكسر الإلغاء.
+   */
+  async openPostCancellationWatch(
+    tripId: string,
+    driverUserId: string,
+  ): Promise<void> {
+    try {
+      await this.prisma.tripEvent.create({
+        data: {
+          tripId,
+          type: POST_CANCELLATION_WATCH_EVENT,
+          actor: "SYSTEM",
+          meta: {
+            driverUserId,
+            windowSeconds: POST_CANCELLATION_WATCH_TTL_SECONDS,
+          },
+        },
+      });
+      await this.redis.client.set(
+        `trip:${tripId}:post_cancel_watch`,
+        driverUserId,
+        "EX",
+        POST_CANCELLATION_WATCH_TTL_SECONDS,
+      );
+    } catch (err) {
+      this.logger.warn(
+        `تعذّر فتح نافذة رصد ما بعد إلغاء الرحلة ${tripId}: ${(err as Error).message}`,
       );
     }
   }

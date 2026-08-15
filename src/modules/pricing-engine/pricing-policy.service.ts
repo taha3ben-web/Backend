@@ -42,6 +42,13 @@ export interface PricingFeesSetting {
     /** نسبة الرسم التي تذهب للسائق كتعويض (0..100). */
     driverCompensationPct: number;
   };
+  /**
+   * حدود التفاوض (المرحلة 7): عرض النطاق حول السعر المقترَح.
+   * 0.2 = ±20٪، 0 = لا تفاوض. نفس دلالة NegotiationDto في لوحة التحكم.
+   */
+  negotiation: {
+    bandPct: number;
+  };
 }
 
 /**
@@ -65,6 +72,14 @@ export const DEFAULT_PRICING_FEES: PricingFeesSetting = {
     feeAfterAccept: 0,
     feeAfterArrival: 0,
     driverCompensationPct: 0,
+  },
+  /**
+   * الافتراضي يطابق السلوك القائم فعليًا في FareQuotesService
+   * (FARE_QUOTE_BAND_PCT وافتراضه 0.2)، فلا يتغير نطاق التفاوض
+   * المعروض للراكب بمجرد إضافة المفتاح للإعدادات.
+   */
+  negotiation: {
+    bandPct: 0.2,
   },
 };
 
@@ -100,44 +115,7 @@ export class PricingPolicyService {
   }
 
   normalize(raw?: Partial<PricingFeesSetting> | null): PricingFeesSetting {
-    const d = DEFAULT_PRICING_FEES;
-    const waiting = raw?.waiting ?? {};
-    const cancellation = raw?.cancellation ?? {};
-    return {
-      serviceFee: num(raw?.serviceFee, d.serviceFee),
-      waiting: {
-        enabled: bool(waiting.enabled, d.waiting.enabled),
-        freeSeconds: Math.round(
-          num(waiting.freeSeconds, d.waiting.freeSeconds),
-        ),
-        perMinute: num(waiting.perMinute, d.waiting.perMinute),
-        maxCharge:
-          waiting.maxCharge == null
-            ? null
-            : num(waiting.maxCharge, 0) || null,
-      },
-      cancellation: {
-        enabled: bool(cancellation.enabled, d.cancellation.enabled),
-        graceSeconds: Math.round(
-          num(cancellation.graceSeconds, d.cancellation.graceSeconds),
-        ),
-        feeAfterAccept: num(
-          cancellation.feeAfterAccept,
-          d.cancellation.feeAfterAccept,
-        ),
-        feeAfterArrival: num(
-          cancellation.feeAfterArrival,
-          d.cancellation.feeAfterArrival,
-        ),
-        driverCompensationPct: Math.min(
-          100,
-          num(
-            cancellation.driverCompensationPct,
-            d.cancellation.driverCompensationPct,
-          ),
-        ),
-      },
-    };
+    return normalizePricingFees(raw);
   }
 
   /** رسوم الخدمة الفعّالة (0 = معطّلة). */
@@ -151,13 +129,7 @@ export class PricingPolicyService {
    * فلا تُحتسب أي رسوم انتظار إطلاقًا.
    */
   async waitingPolicy(): Promise<WaitingPolicy | null> {
-    const { waiting } = await this.fees();
-    if (!waiting.enabled || waiting.perMinute <= 0) return null;
-    return {
-      freeSeconds: waiting.freeSeconds,
-      perMinute: waiting.perMinute,
-      maxCharge: waiting.maxCharge,
-    };
+    return waitingPolicyFrom(await this.fees());
   }
 
   /**
@@ -165,19 +137,100 @@ export class PricingPolicyService {
    * تُرجع null عندما تكون معطّلة، فيكون رسم الإلغاء صفرًا دائمًا.
    */
   async cancellationPolicy(): Promise<CancellationPolicy | null> {
-    const { cancellation } = await this.fees();
-    if (!cancellation.enabled) return null;
-    if (
-      cancellation.feeAfterAccept <= 0 &&
-      cancellation.feeAfterArrival <= 0
-    ) {
-      return null;
-    }
-    return {
-      graceSeconds: cancellation.graceSeconds,
-      feeAfterAccept: cancellation.feeAfterAccept,
-      feeAfterArrival: cancellation.feeAfterArrival,
-      driverCompensationPct: cancellation.driverCompensationPct,
-    };
+    return cancellationPolicyFrom(await this.fees());
   }
+}
+
+/**
+ * التطبيع كدالة نقية (بلا DI ولا قاعدة بيانات) ليمكن للوحدة المالية
+ * استعمال **نفس** منطق التطبيع الذي يستعمله محرك التسعير دون تكرار
+ * ودون اعتماد دائري بين الوحدتين. PricingPolicyService.normalize() يفوّض إليها.
+ */
+export function normalizePricingFees(
+  raw?: Partial<PricingFeesSetting> | null,
+): PricingFeesSetting {
+  const d = DEFAULT_PRICING_FEES;
+  // التصريح بالنوع ضروري: بدونه يُستنتج نوع `?? {}` كـ `{}` فتضيع
+  // أسماء الحقول (enabled/freeSeconds/...) من النوع الناتج.
+  const waiting: Partial<PricingFeesSetting["waiting"]> = raw?.waiting ?? {};
+  const cancellation: Partial<PricingFeesSetting["cancellation"]> =
+    raw?.cancellation ?? {};
+  const negotiation: Partial<PricingFeesSetting["negotiation"]> =
+    raw?.negotiation ?? {};
+  return {
+    serviceFee: num(raw?.serviceFee, d.serviceFee),
+    waiting: {
+      enabled: bool(waiting.enabled, d.waiting.enabled),
+      freeSeconds: Math.round(num(waiting.freeSeconds, d.waiting.freeSeconds)),
+      perMinute: num(waiting.perMinute, d.waiting.perMinute),
+      maxCharge:
+        waiting.maxCharge == null ? null : num(waiting.maxCharge, 0) || null,
+    },
+    cancellation: {
+      enabled: bool(cancellation.enabled, d.cancellation.enabled),
+      graceSeconds: Math.round(
+        num(cancellation.graceSeconds, d.cancellation.graceSeconds),
+      ),
+      feeAfterAccept: num(
+        cancellation.feeAfterAccept,
+        d.cancellation.feeAfterAccept,
+      ),
+      feeAfterArrival: num(
+        cancellation.feeAfterArrival,
+        d.cancellation.feeAfterArrival,
+      ),
+      driverCompensationPct: Math.min(
+        100,
+        num(
+          cancellation.driverCompensationPct,
+          d.cancellation.driverCompensationPct,
+        ),
+      ),
+    },
+    negotiation: {
+      // نفس حدّ NegotiationDto في اللوحة (0..0.9) فلا يوجد مصدر حقيقة ثانٍ.
+      bandPct: Math.min(0.9, num(negotiation.bandPct, d.negotiation.bandPct)),
+    },
+  };
+}
+
+/**
+ * سياسة الانتظار كدالة نقية بالشكل الذي تتوقّعه computeWaitingCharge.
+ *
+ * تُرجع null عندما تكون الميزة معطّلة أو سعر الدقيقة صفرًا، فلا تُحتسب أي
+ * رسوم انتظار إطلاقًا. هذا هو نفس المنطق الذي كان داخل
+ * PricingPolicyService.waitingPolicy() (الذي يفوّض إليها الآن)، فلا يوجد
+ * منطق مكرر ولا يحتاج المستدعي (FinancialService) إلى حاقن DI لقراءته.
+ */
+export function waitingPolicyFrom(
+  fees: PricingFeesSetting,
+): WaitingPolicy | null {
+  const { waiting } = fees;
+  if (!waiting.enabled || waiting.perMinute <= 0) return null;
+  return {
+    freeSeconds: waiting.freeSeconds,
+    perMinute: waiting.perMinute,
+    maxCharge: waiting.maxCharge,
+  };
+}
+
+/**
+ * سياسة الإلغاء كدالة نقية بالشكل الذي تتوقّعه computeCancellationFee.
+ * تُرجع null عندما تكون معطّلة، فيكون رسم الإلغاء صفرًا دائمًا
+ * (سلوك المرحلة 10 كما هو: لا رسم على الراكب افتراضيًا).
+ */
+export function cancellationPolicyFrom(
+  fees: PricingFeesSetting,
+): CancellationPolicy | null {
+  const { cancellation } = fees;
+  if (!cancellation.enabled) return null;
+  if (cancellation.feeAfterAccept <= 0 && cancellation.feeAfterArrival <= 0) {
+    return null;
+  }
+  return {
+    graceSeconds: cancellation.graceSeconds,
+    feeAfterAccept: cancellation.feeAfterAccept,
+    feeAfterArrival: cancellation.feeAfterArrival,
+    driverCompensationPct: cancellation.driverCompensationPct,
+  };
 }

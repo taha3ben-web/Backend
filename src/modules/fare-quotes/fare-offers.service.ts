@@ -3,6 +3,7 @@ import { Cron, CronExpression } from "@nestjs/schedule";
 import { FareOffer, FareQuote, Prisma } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import { AppException } from "../../common/api/app.exception";
+import { round2 } from "../../common/money.util";
 import { RealtimeGateway } from "../realtime/realtime.gateway";
 import { NotificationsService } from "../notifications/notifications.service";
 import {

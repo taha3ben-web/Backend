@@ -9,10 +9,7 @@ import { Cron, CronExpression } from "@nestjs/schedule";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import type { PostingLine } from "./financial.types";
-import {
-  deriveTripEarnings,
-  splitCouponFunding,
-} from "../trips/settlement.util";
+import { deriveTripEarnings } from "../trips/settlement.util";
 import type { CouponFundingSource } from "../trips/settlement.util";
 import { buildFareBreakdown } from "../pricing-engine/fare-breakdown.util";
 import {
@@ -385,8 +382,6 @@ export class FinancialService {
             });
             const waitingCharge = breakdown.components.waitingCharge;
             const riderPays = breakdown.riderPays;
-            const grossFare = breakdown.grossFare;
-            const commissionGross = breakdown.commission;
             if (waitingCharge > 0) {
               // تثبيت المبلغ النهائي على الرحلة حتى لا يختلف ما يراه الراكب
               // في الفاتورة عمّا دخل دفتر الأستاذ.
@@ -407,7 +402,8 @@ export class FinancialService {
             // بالكامل من لوحة التحكم (إعداد عام coupons.funding + تجاوز لكل
             // كوبون): PLATFORM=الشركة تتحمّل كامل الخصم، DRIVER=السائق،
             // SHARED=يُقسّم بحصة platformShare. لا شيء مبرمَج ثابتًا هنا.
-            const { driverFunded } = breakdown.coupon;
+            // حصة السائق من تمويل الخصم (breakdown.coupon.driverFunded) محسومة أصلاً
+            // داخل breakdown.driverNet في buildFareBreakdown، فلا تُقرأ هنا مرة ثانية.
             // صافي السائق المستحق = أرباحه الكاملة ناقص ما يتحمّله من الخصم.
             const driverNet = breakdown.driverNet;
             // السائق يسحب كامل ما دفعه الراكب (بحدّ أقصى إجماليه المستحق)؛

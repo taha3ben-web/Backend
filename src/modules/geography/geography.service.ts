@@ -39,31 +39,38 @@ export class GeographyService {
     operationalOnly?: boolean;
     withCities?: boolean;
   }) {
-    return this.prisma.wilaya.findMany({
-      where: {
-        ...(opts.activeOnly ? { isActive: true } : {}),
-        ...(opts.operationalOnly ? { isOperational: true } : {}),
-      },
-      orderBy: { number: "asc" },
-      ...(opts.withCities
-        ? {
-            include: {
-              cities: {
-                where: opts.activeOnly ? { isActive: true } : undefined,
-                orderBy: { name: "asc" },
-                select: {
-                  id: true,
-                  name: true,
-                  isActive: true,
-                  centerLat: true,
-                  centerLng: true,
-                },
-              },
+    // نفس المرشّح ونفس الترتيب في الحالتين (لا تغير في النتيجة).
+    const where = {
+      ...(opts.activeOnly ? { isActive: true } : {}),
+      ...(opts.operationalOnly ? { isOperational: true } : {}),
+    };
+    const orderBy = { number: "asc" } as const;
+    // استدعاءان منفصلان بدل نشر include مشروط: Prisma يولّد نوع نتيجة
+    // مختلفًا لكل شكل include، واتحاد الشكلين داخل وسيط واحد لا يمكن حلّه
+    // ستاتيكيًا (من هنا خطأ _count/cities). المخرج JSON نفسه دون تغيير عقد API.
+    if (opts.withCities) {
+      return this.prisma.wilaya.findMany({
+        where,
+        orderBy,
+        include: {
+          cities: {
+            where: opts.activeOnly ? { isActive: true } : undefined,
+            orderBy: { name: "asc" },
+            select: {
+              id: true,
+              name: true,
+              isActive: true,
+              centerLat: true,
+              centerLng: true,
             },
-          }
-        : {
-            include: { _count: { select: { cities: true } } },
-          }),
+          },
+        },
+      });
+    }
+    return this.prisma.wilaya.findMany({
+      where,
+      orderBy,
+      include: { _count: { select: { cities: true } } },
     });
   }
 

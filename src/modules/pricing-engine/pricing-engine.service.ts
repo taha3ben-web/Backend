@@ -45,6 +45,17 @@ export interface PricingContext {
   at?: Date;
   distanceKm?: number;
   durationSec?: number;
+  /**
+   * المرحلة 7 — يضبطه **الخادم فقط** (محاكاة اللوحة/STAFF) للسماح باستخدام
+   * distanceKm/durationSec الواردين بدل استدعاء محرك التوجيه. لا يُقبل
+   * إطلاقًا من تطبيق الراكب أو السائق (انظر resolveRoute و FareQuotesService).
+   */
+  trustClientMetrics?: boolean;
+  /**
+   * ثوانِ الانتظار المحتسبة **خادميًا** (من طوابع أحداث الرحلة)، تُستخدم
+   * لاحتساب رسم الانتظار وفق سياسة اللوحة. لا يرسلها العميل.
+   */
+  waitingSeconds?: number;
   pickupLat?: number;
   pickupLng?: number;
   destLat?: number;
@@ -70,6 +81,17 @@ export interface PricingResult {
   durationSec: number;
   ruleUsed: PricingRuleUsed;
   experimentVariant: string | null;
+  /**
+   * المرحلة 7 — الرسوم المضافة قبل الضريبة (رسوم الخدمة والانتظار من
+   * إعدادات اللوحة) مع الأجرة قبل إضافتها، لعرضها في المحاكاة والفاتورة
+   * دون إعادة حسابها في أي مكان آخر.
+   */
+  extras: {
+    serviceFee: number;
+    waitingCharge: number;
+    waitingSeconds: number;
+    fareBeforeExtras: number;
+  };
   /**
    * معلومات المسار الفعلي عند حساب المسافة من محرك التوجيه.
    * `approximate: true` تعني أن المسافة تقديرية (خط مستقيم) وليست طرقًا حقيقية.

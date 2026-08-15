@@ -1,4 +1,5 @@
 import { ForbiddenException, Injectable, Logger } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import { RedisService } from "../redis/redis.service";
 import { haversineMeters } from "../geo/geo.util";
@@ -58,10 +59,15 @@ export class ArrivalGuardService {
     }
   }
 
+  /**
+   * نوع meta هو Prisma.InputJsonObject وليس Record<string, unknown>: حقل
+   * TripEvent.meta في المخطّط من نوع Json?، ومدخل Prisma لا يقبل unknown.
+   * هذا هو النوع الصحيح فعليًا (قيم JSON فقط)، وليس تمويهًا للمدقق.
+   */
   private async logEvent(
     tripId: string,
     type: string,
-    meta: Record<string, unknown>,
+    meta: Prisma.InputJsonObject,
   ): Promise<void> {
     await this.prisma.tripEvent
       .create({ data: { tripId, type, actor: "SYSTEM", meta } })
