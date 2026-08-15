@@ -1,45 +1,47 @@
-# ---------------------------------------------------------------------------
-# المرحلة 10 — إصلاح أمني: لم يكن لهذا المستودع ملف .gitignore إطلاقًا.
-# أي `git add .` كان سيرفع .env (DATABASE_URL، JWT_SECRET، Redis، Twilio،
-# Firebase، ومفتاح Google لاحقًا) إلى تاريخ Git بشكل دائم.
-# لا يوجد حاليًا أي ملف .env في شجرة الملفات، فهذا إجراء وقائي لا علاجي.
-# ---------------------------------------------------------------------------
+# Dependencies (must never be tracked — Prisma query engines are
+# platform/OpenSSL specific and break Render when committed from Termux)
+node_modules/
+.pnp
+.pnp.js
 
-# الأسرار والبيئة
+# Prisma generated client / engines
+.prisma/
+prisma/generated/
+*.so.node
+*.dll.node
+*.dylib.node
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Env & secrets
 .env
 .env.*
 !.env.example
 *.pem
-*.key
-*.p8
-*.p12
-*-service-account.json
-firebase-adminsdk*.json
-google-credentials*.json
+service-account*.json
+gcp-key*.json
 
-# الاعتماديات والبناء
-ode_modules/
-dist/
-build/
-coverage/
-*.tsbuildinfo
-
-# Prisma
-prisma/*.db
-prisma/*.db-journal
-
-# السجلات والمؤقتات
+# Logs
 logs/
 *.log
 npm-debug.log*
+yarn-debug.log*
 yarn-error.log*
-pnpm-debug.log*
-tmp/
-.cache/
 
-# محررات ونظام التشغيل
+# Test / coverage
+coverage/
+.nyc_output/
+
+# OS / editor
 .DS_Store
 Thumbs.db
 .idea/
-.vscode/*
-!.vscode/extensions.json
+.vscode/
+*.swp
+
+# Temp
+tmp/
+temp/

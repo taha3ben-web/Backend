@@ -1,4 +1,4 @@
-import { Module } from "@nestjs/common";
+import { Module, forwardRef } from "@nestjs/common";
 import { RealtimeModule } from "../realtime/realtime.module";
 import { AuthModule } from "../auth/auth.module";
 import { NotificationsService } from "./notifications.service";
@@ -11,8 +11,15 @@ import { SmsProvider } from "./providers/sms.provider";
 import { EmailProvider } from "./providers/email.provider";
 
 @Module({
-  // AuthModule يُصدّر FirebaseAdminService المستخدم لإرسال FCM (HTTP v1).
-  imports: [RealtimeModule, AuthModule],
+  // تبعية دائرية حقيقية: NotificationsModule → RealtimeModule → (Matching|Trips)Module
+  // → NotificationsModule. كل أطراف الحلقة الأخرى تستخدم forwardRef أصلاً،
+  // وهذا الطرف وحده كان مرجعًا مباشرًا، فإن دُخلت الحلقة من مسار يمرّ
+  // بـ RealtimeModule أولاً (AppModule → UsersModule → ProfileLevelsModule →
+  // RealtimeModule → MatchingModule → NotificationsModule) يكون تصدير
+  // realtime.module تحت التنفيذ وقيمته undefined لحظة تقييم هذا المزين.
+  // AuthModule يُصدّر FirebaseAdminService المستخدم لإرسال FCM (HTTP v1)،
+  // ولا يستورد NotificationsModule فلا حلقة عليه — يبقى مرجعًا مباشرًا.
+  imports: [forwardRef(() => RealtimeModule), AuthModule],
   providers: [
     NotificationsService,
     NotificationDispatcher,
