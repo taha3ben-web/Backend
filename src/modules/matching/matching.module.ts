@@ -25,7 +25,7 @@ import { ProfileLevelsModule } from "../profile-levels/profile-levels.module";
     // تسجيل مخاطر إلغاء الراكب + معاينة قرار الخادم قبل الإلغاء.
     TripGuardsModule,
     // المرحلة 11: مستوى السائق المعروض للراكب أثناء الرحلة.
-    ProfileLevelsModule,
+    forwardRef(() => ProfileLevelsModule),
   ],
   providers: [MatchingService, PricingService],
   controllers: [MatchingController],
