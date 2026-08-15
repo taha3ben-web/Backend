@@ -36,7 +36,7 @@ import { ProfileLevelsModule } from "../profile-levels/profile-levels.module";
     // حراسات إغلاق المرحلة 10 (مصدر واحد لسياسة الإلغاء وحراسة الوصول).
     TripGuardsModule,
     // المرحلة 11: إعادة حساب مستوى الملف الشخصي عند اكتمال الرحلة.
-    ProfileLevelsModule,
+    forwardRef(() => ProfileLevelsModule),
   ],
   providers: [
     TripsService,
