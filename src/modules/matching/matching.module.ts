@@ -10,10 +10,12 @@ import { CityScalingModule } from "../city-scaling/city-scaling.module";
 import { NotificationsModule } from "../notifications/notifications.module";
 import { TripGuardsModule } from "../trips/trip-guards.module";
 import { ProfileLevelsModule } from "../profile-levels/profile-levels.module";
+import { TripsModule } from "../trips/trips.module";
 
 @Module({
   imports: [
     forwardRef(() => RealtimeModule),
+    forwardRef(() => TripsModule),
     // RealtimeModule يستخدم forwardRef أصلاً للعودة إلى MatchingModule؛
     // المرور عبر NotificationsModule -> RealtimeModule يصل لنفس الحلقة،
     // فهذا الاستيراد يحتاج نفس المعاملة.

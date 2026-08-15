@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import {
+  Injectable,
+  NotFoundException,
+  Inject,
+  forwardRef,
+} from "@nestjs/common";
 import { DriverStatus, Prisma } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import { RedisService } from "../redis/redis.service";
@@ -16,6 +21,7 @@ export class DriversService {
     private readonly redis: RedisService,
     private readonly storage: StorageService,
     // المرحلة 11: نفس نقطة حساب المستوى المستخدمة في تطبيق السائق.
+    @Inject(forwardRef(() => ProfileLevelsService))
     private readonly profileLevels: ProfileLevelsService,
   ) {}
 

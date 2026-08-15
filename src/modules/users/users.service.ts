@@ -3,6 +3,8 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  Inject,
+  forwardRef,
 } from "@nestjs/common";
 import * as bcrypt from "bcryptjs";
 import { Prisma, UserStatus, UserType } from "@prisma/client";
@@ -30,6 +32,7 @@ export class UsersService {
     private readonly financial: FinancialService,
     private readonly settings: SettingsService,
     // المرحلة 11: مصدر واحد لحساب المستوى ومفتاح الإطار.
+    @Inject(forwardRef(() => ProfileLevelsService))
     private readonly profileLevels: ProfileLevelsService,
   ) {}
 

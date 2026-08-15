@@ -17,10 +17,12 @@ import { TransactionalEmailModule } from "../notifications/transactional-email.m
 import { CallsModule } from "../calls/calls.module";
 import { TripGuardsModule } from "./trip-guards.module";
 import { ProfileLevelsModule } from "../profile-levels/profile-levels.module";
+import { MatchingModule } from "../matching/matching.module";
 
 @Module({
   imports: [
     forwardRef(() => RealtimeModule),
+    forwardRef(() => MatchingModule),
     FinancialModule,
     // تبعية دائرية: TripsModule → NotificationsModule → RealtimeModule → TripsModule.
     // نؤجّل تقييم NotificationsModule بـ forwardRef حتى لا يُقرأ undefined وقت التحميل.

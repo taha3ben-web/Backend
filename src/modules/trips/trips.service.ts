@@ -61,6 +61,7 @@ export class TripsService {
     // D-6: منع تسجيل الوصول قبل الاقتراب الفعلي من الراكب.
     private readonly arrivalGuard: ArrivalGuardService,
     // المرحلة 11: إعادة حساب مستوى الطرفين بعد اكتمال الرحلة.
+    @Inject(forwardRef(() => ProfileLevelsService))
     private readonly profileLevels: ProfileLevelsService,
   ) {}
 

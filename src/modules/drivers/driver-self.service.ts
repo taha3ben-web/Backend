@@ -3,6 +3,8 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Inject,
+  forwardRef,
 } from "@nestjs/common";
 import { DriverAvailability, Prisma } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
@@ -53,6 +55,7 @@ export class DriverSelfService {
     // D-6: حراسة وقت الانتطار — نفس الخدمة المستخدمة في TripsService.
     private readonly arrivalGuard: ArrivalGuardService,
     // المرحلة 11: مستوى السائق ومستوى الراكب من مصدر واحد.
+    @Inject(forwardRef(() => ProfileLevelsService))
     private readonly profileLevels: ProfileLevelsService,
   ) {}
 

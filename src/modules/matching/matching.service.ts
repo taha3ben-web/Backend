@@ -100,6 +100,9 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
     // D-4: تسجيل إلغاءات الراكب والتحدير/التجميد (بلا أي أثر مالي).
     private readonly cancellationRisk: PassengerCancellationRiskService,
     // المرحلة 11: مستوى السائق وإطاره من نفس نقطة الحساب.
+    // forwardRef مطلوب هنا أيضًا بسبب الحلقة:
+    // MatchingModule → ProfileLevelsModule → RealtimeModule → MatchingModule.
+    @Inject(forwardRef(() => ProfileLevelsService))
     private readonly profileLevels: ProfileLevelsService,
     @Optional() private readonly tracer?: TracerService,
   ) {}
