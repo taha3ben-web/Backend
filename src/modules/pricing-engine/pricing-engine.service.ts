@@ -412,6 +412,14 @@ export class PricingEngineService {
    */
   async resolve(ctx: PricingContext): Promise<ResolvedPricing> {
     const now = ctx.at ?? new Date();
+    // المرحلة 8 كانت تشتق الولاية خادميًا من المدينة لكن لم تصل الدالة أبدًا،
+    // فكان ctx.wilayaId يبقى undefined دائمًا ولا تُطابق أي قاعدة تسعير
+    // مربوطة بولاية. لا نقبل wilayaId من العميل إطلاقًا (منع ادّعاء ولاية أرخص).
+    const derivedWilayaId = ctx.wilayaId ?? (await this.resolveWilayaId(ctx));
+    const scoped: PricingContext =
+      derivedWilayaId === ctx.wilayaId
+        ? ctx
+        : { ...ctx, wilayaId: derivedWilayaId };
 
     if (ctx.vehicleTypeId) {
       const rules = await this.prisma.vehiclePricingRule.findMany({
@@ -422,7 +430,7 @@ export class PricingEngineService {
         },
         orderBy: [{ priority: "desc" }, { createdAt: "asc" }],
       });
-      const best = this.pickBestRule(rules, ctx, now);
+      const best = this.pickBestRule(rules, scoped, now);
       if (best) {
         return {
           baseFare: best.baseFare,
@@ -448,8 +456,9 @@ export class PricingEngineService {
     }
 
     const legacy = await this.resolveLegacy(
-      ctx.rideClass ?? "ECONOMY",
-      ctx.cityId,
+      scoped.rideClass ?? "ECONOMY",
+      scoped.cityId,
+      scoped.wilayaId,
     );
     const peakMultiplier = await this.currentPeakMultiplier(legacy.id, now);
     return {

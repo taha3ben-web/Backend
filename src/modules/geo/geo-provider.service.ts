@@ -2,7 +2,6 @@ import { Injectable } from "@nestjs/common";
 import { SettingsService } from "../settings/settings.service";
 import { InternalGeoProvider } from "./providers/internal-geo.provider";
 import { GoogleGeoProvider } from "./providers/google-geo.provider";
-import { OsrmGeoProvider } from "./providers/osrm-geo.provider";
 import {
   GeoProvider,
   GeoProviderContext,
@@ -68,7 +67,6 @@ export class GeoProviderService {
     private readonly settings: SettingsService,
     private readonly internalProvider: InternalGeoProvider,
     private readonly googleProvider: GoogleGeoProvider,
-    private readonly osrmProvider: OsrmGeoProvider,
   ) {}
 
   async resolveConfig(): Promise<ResolvedGeoConfig> {

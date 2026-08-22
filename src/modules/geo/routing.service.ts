@@ -2,7 +2,6 @@ import { Injectable, Logger } from "@nestjs/common";
 import { RedisService } from "../redis/redis.service";
 import { GeoProviderService } from "./geo-provider.service";
 import { InternalGeoProvider } from "./providers/internal-geo.provider";
-import { OsrmGeoProvider } from "./providers/osrm-geo.provider";
 import {
   GeoDirectionsResult,
   GeoLatLng,
@@ -51,7 +50,6 @@ export class RoutingService {
     private readonly providers: GeoProviderService,
     private readonly redis: RedisService,
     private readonly internal: InternalGeoProvider,
-    private readonly osrm: OsrmGeoProvider,
   ) {}
 
   /** مسار حقيقي بين نقطتين (مع نقاط وسطية اختيارية). */
