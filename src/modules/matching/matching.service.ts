@@ -560,6 +560,55 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
       this.storage,
     );
 
+    // ===== المرحلة أ (تطبيق السائق): معطيات التفاوض مع العرض =====
+    // تطبيق السائق يعرض لوحة "اقترح سعرًا" على بطاقة العرض الواردة، لكن
+    // POST /driver/fare-offers مبني على fareQuoteId، ولم يكن يُرسل مع
+    // ride:offer إطلاقًا. بدونه لا يستطيع السائق التفاوض إلا من قائمة
+    // الطلبات المفتوحة. نرسله الآن مع حدّي التفاوض من نفس قاعدة السعر
+    // التي يتحقق منها الخادم، وعلم allowsNegotiation الخاص بنوع المركبة
+    // (يُدار من لوحة التحكم).
+    //
+    // كل هذا داخل try: فشل قراءة إضافية لا يجوز أن يمنع إرسال عرض رحلة.
+    let fareQuoteId: string | null = null;
+    let negotiable = false;
+    let negotiationMin: number | null = null;
+    let negotiationMax: number | null = null;
+    try {
+      const quote = await this.prisma.fareQuote.findFirst({
+        where: { tripId: trip.id },
+        orderBy: { createdAt: "desc" },
+        select: {
+          id: true,
+          minFare: true,
+          maxFare: true,
+          pricingRuleId: true,
+        },
+      });
+      if (quote) {
+        fareQuoteId = quote.id;
+        const type = trip.vehicleTypeId
+          ? await this.prisma.vehicleType.findUnique({
+              where: { id: trip.vehicleTypeId },
+              select: { allowsNegotiation: true },
+            })
+          : null;
+        negotiable = type?.allowsNegotiation ?? false;
+        const rule = quote.pricingRuleId
+          ? await this.prisma.vehiclePricingRule.findUnique({
+              where: { id: quote.pricingRuleId },
+              select: { negotiationMin: true, negotiationMax: true },
+            })
+          : null;
+        // الحدّان من القاعدة إن وُجدا، وإلا نطاق العرض نفسه — ولا نخترع مدى.
+        negotiationMin = Number(rule?.negotiationMin ?? quote.minFare);
+        negotiationMax = Number(rule?.negotiationMax ?? quote.maxFare);
+      }
+    } catch (error) {
+      this.logger.warn(
+        `تعذّر تحميل معطيات التفاوض للرحلة ${trip.id}: ${String(error)}`,
+      );
+    }
+
     this.realtime.emitToUser(driverUserId, "ride:offer", {
       tripId: trip.id,
       pickupLat: trip.pickupLat,
@@ -577,6 +626,12 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
       currency: trip.currency,
       distanceKm: trip.distanceKm,
       expiresInMs: OFFER_TIMEOUT_MS,
+      // التفاوض: يظهر في التطبيق فقط إذا وُجد fareQuoteId وكان النوع
+      // يسمح بالتفاوض. الحدّان هما نفسهما اللذان يرفض الخادم خارجهما.
+      fareQuoteId,
+      negotiable,
+      negotiationMin,
+      negotiationMax,
       passenger,
     });
 
@@ -723,7 +778,7 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
       this.realtime.emitTripStatus(tripId, "ACCEPTED");
 
       // قناة احتياطية عبر Push للراكب — نظير ما يجري لعرض السائق في
-      // offerToDriver أعلاه. الـ socket هو المسار الأساسي، لكن تطبيق الراكب
+      // offerToDriver أعلاه. الـ socket هو ��لمسار الأساسي، لكن تطبيق الراكب
       // قد يكون في الخلفية أو مغلقًا في أهم لحظة في الرحلة (لحظة القبول).
       // fire-and-forget: الإسناد تمّ داخل المعاملة أعلاه ولا يجوز أن يُبطله
       // فشل إشعار ثانوي.
@@ -926,6 +981,99 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
       trip.status,
       Boolean(trip.driverId),
     );
+  }
+
+  /**
+   * ===== المرحلة ب: ما المتوفر فعلًا حول الراكب الآن؟ =====
+   *
+   * التوجيه أصبح صارمًا حسب نوع المركبة (حُذف التراجع في محرك المطابقة)،
+   * فطلب "دراجة نارية" في منطقة بلا دراجات يفشل بعد انتهاء المهلة دون أي
+   * تفسير. لذلك يسأل تطبيق الراكب أولًا عن المتوفر في موقعه، فيعرض
+   * الأنواع المتوفرة فقط، وإن اختار نوعًا غير متوفر تظهر بطاقة "هذا النوع
+   * غير متوفر في منطقتك" مع زر ينقله للأنواع المتوفرة.
+   *
+   * الحقيقة المعروضة لحظية: سائقون APPROVED + ONLINE داخل نفس نطاق البحث
+   * المستخدم فعليًا في المطابقة (من Redis GEO)، لا تقدير من قاعدة البيانات.
+   * لا يستبعد المشغولين برحلة عمدًا: سائق ينتهي من رحلته بعد دقيقتين يبقى
+   * توفرًا حقيقيًا للنوع، وإخفاء النوع بسببه يقتل الطلب بلا موجب.
+   */
+  async availability(
+    lat: number,
+    lng: number,
+    radiusKm?: number,
+  ): Promise<{
+    radiusKm: number;
+    onlineNearby: number;
+    availableVehicleTypeIds: string[];
+    countByVehicleTypeId: Record<string, number>;
+    countByRideClass: Record<string, number>;
+  }> {
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      throw new BadRequestException("الإحداثيات غير صالحة");
+    }
+    const radius =
+      Number.isFinite(radiusKm) && (radiusKm as number) > 0
+        ? Math.min(Math.max(radiusKm as number, 1), 25)
+        : SEARCH_RADIUS_KM;
+
+    const empty = {
+      radiusKm: radius,
+      onlineNearby: 0,
+      availableVehicleTypeIds: [] as string[],
+      countByVehicleTypeId: {} as Record<string, number>,
+      countByRideClass: {} as Record<string, number>,
+    };
+
+    let nearby: Array<{ driverId: string }> = [];
+    try {
+      nearby = await this.redis.nearbyDriversWithCoords(lat, lng, radius);
+    } catch (error) {
+      // فشل Redis لا يجوز أن يخفي كل الأنواع ويمنع الطلب؛ التطبيق يفسر
+      // القائمة الفارغة ك"غير معروف" ويعرض الكتالوج كاملًا.
+      this.logger.warn(
+        `availability: redis geo failed: ${(error as Error).message}`,
+      );
+      return empty;
+    }
+    const userIds = nearby.map((entry) => entry.driverId);
+    if (userIds.length === 0) return empty;
+
+    const drivers = await this.prisma.driver.findMany({
+      where: {
+        userId: { in: userIds },
+        status: "APPROVED",
+        availability: "ONLINE",
+      },
+      select: {
+        vehicles: {
+          where: { isActive: true },
+          select: { vehicleTypeId: true, rideClass: true },
+        },
+      },
+    });
+
+    const countByVehicleTypeId: Record<string, number> = {};
+    const countByRideClass: Record<string, number> = {};
+    let onlineNearby = 0;
+    for (const driver of drivers) {
+      const vehicle = driver.vehicles[0];
+      if (!vehicle) continue;
+      onlineNearby += 1;
+      if (vehicle.vehicleTypeId) {
+        countByVehicleTypeId[vehicle.vehicleTypeId] =
+          (countByVehicleTypeId[vehicle.vehicleTypeId] ?? 0) + 1;
+      }
+      countByRideClass[vehicle.rideClass] =
+        (countByRideClass[vehicle.rideClass] ?? 0) + 1;
+    }
+
+    return {
+      radiusKm: radius,
+      onlineNearby,
+      availableVehicleTypeIds: Object.keys(countByVehicleTypeId),
+      countByVehicleTypeId,
+      countByRideClass,
+    };
   }
 
   /** سجل رحلات الراكب (رحلاتي) */

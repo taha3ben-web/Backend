@@ -113,6 +113,75 @@ export class GeographyService {
   }
 
   /**
+   * ===== المرحلة ب: الولاية من إحداثيات GPS =====
+   *
+   * شاشة التسجيل فيها زر "تحديد تلقائي"، فتحتاج تحويل الموقع إلى ولاية.
+   *
+   * الترجيح بأقرب مركز ولاية (مسافة هوائية) وليس بحدود حقيقية، لأن
+   * المخطط لا يحمل مضلعات الولايات — فقط centerLat/centerLng. لذلك تُرجع
+   * النتيجة مع distanceKm وconfidence ليقرر التطبيق: تثبيت تلقائي أم اقتراح
+   * يؤكده السائق. لا نخترع دقة غير موجودة.
+   */
+  async resolveWilayaByPoint(lat: number, lng: number) {
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      throw new BadRequestException("الإحداثيات غير صالحة");
+    }
+    const rows = await this.prisma.wilaya.findMany({
+      where: {
+        isActive: true,
+        centerLat: { not: null },
+        centerLng: { not: null },
+      },
+      select: {
+        id: true,
+        number: true,
+        code: true,
+        nameAr: true,
+        nameFr: true,
+        nameEn: true,
+        centerLat: true,
+        centerLng: true,
+        isOperational: true,
+      },
+    });
+    if (rows.length === 0) {
+      return { match: null, distanceKm: null, confidence: "none" as const };
+    }
+
+    const toRad = (value: number) => (value * Math.PI) / 180;
+    const distanceKm = (aLat: number, aLng: number) => {
+      const R = 6371;
+      const dLat = toRad(aLat - lat);
+      const dLng = toRad(aLng - lng);
+      const h =
+        Math.sin(dLat / 2) ** 2 +
+        Math.cos(toRad(lat)) * Math.cos(toRad(aLat)) * Math.sin(dLng / 2) ** 2;
+      return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+    };
+
+    let best = rows[0];
+    let bestDistance = distanceKm(best.centerLat!, best.centerLng!);
+    for (const row of rows.slice(1)) {
+      const d = distanceKm(row.centerLat!, row.centerLng!);
+      if (d < bestDistance) {
+        best = row;
+        bestDistance = d;
+      }
+    }
+
+    // مركز الولاية قد يبعد 100 كم عن أطرافها في الجنوب؛ العتبات تحفظ
+    // التطبيق من تثبيت ولاية خاطئة تلقائيًا.
+    const confidence =
+      bestDistance <= 40 ? "high" : bestDistance <= 120 ? "medium" : "low";
+
+    return {
+      match: best,
+      distanceKm: Math.round(bestDistance * 10) / 10,
+      confidence,
+    };
+  }
+
+  /**
    * مدن التطبيقات. تقبل wilayaId أو wilayaNumber، لأن التطبيق قد يملك الرقم
    * الرسمي فقط (من وثيقة أو إدخال مستخدم) دون uuid.
    */

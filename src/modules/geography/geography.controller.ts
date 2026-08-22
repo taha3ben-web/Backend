@@ -113,6 +113,15 @@ export class GeographyPublicController {
     return this.geography.publicWilayas(all !== "true");
   }
 
+  /**
+   * المرحلة ب: زر "تحديد تلقائي" في شاشة التسجيل.
+   * مثال: /api/geography/public/resolve-wilaya?lat=36.75&lng=3.06
+   */
+  @Get("public/resolve-wilaya")
+  resolveWilaya(@Query("lat") lat: string, @Query("lng") lng: string) {
+    return this.geography.resolveWilayaByPoint(Number(lat), Number(lng));
+  }
+
   @Get("public/cities")
   cities(@Query() query: PublicCitiesQueryDto) {
     return this.geography.publicCities({

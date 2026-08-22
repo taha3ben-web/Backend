@@ -52,6 +52,23 @@ export class DriverSelfController {
     return this.service.setAvailability(user.userId, dto);
   }
 
+  /**
+   * صدارة السائقين: scope=city (الافتراضي) أو scope=country.
+   * مطلوبة لشاشة الطبقات والترقية في تطبيق السائق.
+   */
+  @Get("leaderboard")
+  leaderboard(
+    @CurrentUser() user: AuthUser,
+    @Query("scope") scope?: string,
+    @Query("limit") limit?: string,
+  ) {
+    return this.service.leaderboard(
+      user.userId,
+      scope,
+      limit ? Number(limit) : undefined,
+    );
+  }
+
   @Get("me/earnings")
   earnings(@CurrentUser() user: AuthUser) {
     return this.service.earnings(user.userId);

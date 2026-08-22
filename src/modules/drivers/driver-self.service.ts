@@ -32,6 +32,9 @@ type DriverWithRelations = Prisma.DriverGetPayload<{
     vehicles: true;
     documents: true;
     city: { select: { id: true; name: true } };
+    wilaya: {
+      select: { id: true; number: true; nameAr: true; nameFr: true };
+    };
   };
 }>;
 
@@ -81,6 +84,11 @@ export class DriverSelfService {
         vehicles: { where: { isActive: true }, take: 1 },
         documents: { orderBy: { createdAt: "desc" } },
         city: { select: { id: true, name: true } },
+        // المرحلة ب: الولاية هي ما يختاره السائق عند التسجيل،
+        // فلا يمكن للشاشة أن تعرض اختياره دون إرجاعه هنا.
+        wilaya: {
+          select: { id: true, number: true, nameAr: true, nameFr: true },
+        },
       },
     });
     if (!driver) throw new NotFoundException("ملف السائق غير موجود");
@@ -99,7 +107,17 @@ export class DriverSelfService {
           d.url,
           STORED_MEDIA_READ_TTL_MINUTES,
         ),
-        status: d.status,
+        // المرحلة أ: وثيقة معتمدة انتهت مدتها تُعرض EXPIRED دون تغيير
+        // المخزّن — نفس القاعدة المطبقة في تطبيق السائق.
+        status:
+          d.status === "APPROVED" &&
+          d.expiresAt &&
+          d.expiresAt.getTime() <= Date.now()
+            ? ("EXPIRED" as const)
+            : d.status,
+        issuedAt: d.issuedAt ?? null,
+        expiresAt: d.expiresAt ?? null,
+        note: d.note ?? null,
       })),
     );
     const photoUrl =
@@ -132,6 +150,17 @@ export class DriverSelfService {
       tripsToNextLevel: level.tripsToNextLevel,
       cityId: driver.cityId ?? null,
       city: driver.city?.name ?? null,
+      // المرحلة ب: الولاية (المعتمدة في التسجيل) — الاسم بالعربية
+      // والفرنسية لأن التطبيق أصبح بثلاث لغات.
+      wilayaId: driver.wilayaId ?? null,
+      wilaya: driver.wilaya
+        ? {
+            id: driver.wilaya.id,
+            number: driver.wilaya.number,
+            nameAr: driver.wilaya.nameAr,
+            nameFr: driver.wilaya.nameFr,
+          }
+        : null,
       vehicle: vehicle
         ? {
             id: vehicle.id,
@@ -158,6 +187,35 @@ export class DriverSelfService {
       });
     }
 
+    // ===== المرحلة ب: الصورة الشخصية تتغير فورًا =====
+    // كان تغيير الصورة يمر عبر وثيقة PROFILE_PHOTO فتبقى PENDING حتى
+    // يقبلها إداري، وهذا خاطئ: الأفاتار ليس وثيقة رسمية. يُكتب الآن
+    // مباشرة على User.avatarUrl ويظهر فورًا للراكب والسائق.
+    // مراجعة الهوية والمركبة تبقى كما هي.
+    if (dto.photoUrl !== undefined) {
+      await this.prisma.user.update({
+        where: { id: userId },
+        data: { avatarUrl: dto.photoUrl || null },
+      });
+    }
+
+    // ===== المرحلة ب: الولاية وحدها عند التسجيل =====
+    // المدينة لم تعد تُطلب من السائق (قوائم المدن ناقصة في ولايات كثيرة)،
+    // لكن cityId يبقى مقبولًا للتوافق مع النسخ القديمة من التطبيق.
+    if (dto.wilayaId !== undefined) {
+      if (dto.wilayaId) {
+        const wilaya = await this.prisma.wilaya.findFirst({
+          where: { id: dto.wilayaId, isActive: true },
+          select: { id: true },
+        });
+        if (!wilaya) throw new BadRequestException("الولاية غير متاحة");
+      }
+      await this.prisma.driver.update({
+        where: { id: driver.id },
+        data: { wilayaId: dto.wilayaId || null },
+      });
+    }
+
     if (dto.cityId !== undefined) {
       await this.prisma.driver.update({
         where: { id: driver.id },
@@ -170,7 +228,8 @@ export class DriverSelfService {
       dto.carModel !== undefined ||
       dto.carColor !== undefined ||
       dto.carPlate !== undefined ||
-      dto.carYear !== undefined;
+      dto.carYear !== undefined ||
+      dto.vehicleTypeId !== undefined;
 
     if (touchesVehicle) {
       const active = await this.prisma.vehicle.findFirst({
@@ -181,20 +240,58 @@ export class DriverSelfService {
       if (!model || !plate) {
         throw new BadRequestException("طراز المركبة ولوحة التسجيل مطلوبة");
       }
+      // ===== المرحلة أ: نوع المركبة يختاره السائق قبل الاعتماد فقط =====
+      // شاشة الوثائق في تطبيق السائق تطلب النوع (سيارة/دراجة نارية ثم
+      // اقتصادية/confort/نسائية …) لأن قائمة الوثائق المطلوبة تعتمد عليه.
+      // كان الحقل مرفوضًا بـ 400 (forbidNonWhitelisted) فبقي الاختيار محليًا.
+      //
+      // نقبله الآن بثلاث قيود، فالنوع يحدّد الطلبات التي تصل للسائق:
+      //   1. المركبة المعتمدة لا يمكن إعادة تصنيفها من التطبيق (400).
+      //   2. النوع يجب أن يكون موجودًا ومرئيًا للسائقين في اللوحة.
+      //   3. الفئة (rideClass) تُشتق من النوع نفسه، لا يرسلها التطبيق.
+      let requestedTypeId = active?.vehicleTypeId ?? null;
+      let requestedRideClass = active?.rideClass ?? "ECONOMY";
+      if (dto.vehicleTypeId !== undefined) {
+        const nextTypeId = dto.vehicleTypeId || null;
+        if (
+          nextTypeId !== (active?.vehicleTypeId ?? null) &&
+          active?.verificationStatus === "APPROVED"
+        ) {
+          throw new BadRequestException(
+            "لا يمكن تغيير نوع المركبة بعد اعتمادها — راسل الدعم لإعادة التصنيف",
+          );
+        }
+        if (nextTypeId) {
+          const type = await this.prisma.vehicleType.findFirst({
+            where: { id: nextTypeId, isActive: true, visibleToDrivers: true },
+            select: { id: true, rideClass: true },
+          });
+          if (!type) {
+            throw new BadRequestException("نوع المركبة غير متاح");
+          }
+          requestedTypeId = type.id;
+          requestedRideClass = type.rideClass;
+        } else {
+          requestedTypeId = null;
+        }
+      }
+
       const data = {
         make: dto.carMake ?? active?.make ?? model,
         model,
         color: dto.carColor ?? active?.color ?? null,
         plate,
         year: dto.carYear ?? active?.year ?? null,
-        // الفئة ونوع المركبة لم يعودا يُكتبان من هنا — يضبطهما الإداري فقط عبر
-        // PATCH /vehicles/:id/verify، حتى لا يغيّر السائق فئته بنفسه بلا مراجعة.
-        rideClass: active?.rideClass ?? "ECONOMY",
-        vehicleTypeId: active?.vehicleTypeId ?? null,
+        // الفئة تتبع النوع المختار (أو تبقى كما هي)، والاعتماد النهائي
+        // للإدارة عبر PATCH /vehicles/:id/verify.
+        rideClass: requestedRideClass,
+        vehicleTypeId: requestedTypeId,
       };
+      const typeChanged =
+        (active?.vehicleTypeId ?? null) !== (requestedTypeId ?? null);
       if (active) {
         // عند تغيّر هوية المركبة (الصانع/الطراز/اللوحة/السنة) يُعاد ضبط التحقق للمراجعة.
-        const resetVerification = identityChanged(active, data)
+        const resetVerification = identityChanged(active, data) || typeChanged
           ? {
               verificationStatus: "PENDING" as const,
               verificationNote: null,
@@ -214,6 +311,115 @@ export class DriverSelfService {
     }
 
     return this.getProfile(userId);
+  }
+
+  /**
+   * ===== المرحلة أ: صدارة السائقين (المدينة / الجزائر كاملة) =====
+   *
+   * شاشة الطبقات في تطبيق السائق كانت تعرض حالة فارغة لأن هذه النقطة
+   * لم تكن موجودة إطلاقًا.
+   *
+   * الترتيب مشتق من الرحلات المكتملة فعليًا (COMPLETED) لا من totalTrips
+   * المخزّن، لأن الأخير عدّاد تشغيلي قد يتقدم بلا رحلة مكتملة؛ وهو
+   * نفس المصدر الذي تبنى عليه مستويات الملف (ProfileLevelsService)، فلا يرى
+   * السائق رقمين متعارضين في شاشتين.
+   *
+   * السائقون المعتمدون فقط (APPROVED)، والرتبة تُحسب على القائمة الكاملة
+   * قبل الاقتطاع، حتى يعرف من هو خارج العشرة الأولى مرتبته الحقيقية.
+   * لا أرقام مخترعة ولا مراكز تجريبية.
+   */
+  async leaderboard(userId: string, scopeRaw?: string, limitRaw?: number) {
+    const driver = await this.requireDriver(userId);
+    const scope = scopeRaw === "country" ? "country" : "city";
+    const limit = Math.min(Math.max(Number(limitRaw) || 20, 5), 50);
+
+    // سائق بلا مدينة لا يمكن ترتيبه محليًا: نقول ذلك صراحة بدل قائمة مضلّلة.
+    if (scope === "city" && !driver.cityId) {
+      return {
+        scope,
+        period: "ALL_TIME",
+        available: false,
+        rows: [],
+        me: null,
+      };
+    }
+
+    const peers = await this.prisma.driver.findMany({
+      where: {
+        status: "APPROVED",
+        ...(scope === "city" ? { cityId: driver.cityId } : {}),
+      },
+      select: {
+        id: true,
+        rating: true,
+        city: { select: { name: true } },
+        user: { select: { name: true, avatarUrl: true } },
+      },
+      // حدّ أمان لحجم الاستعلام التالي.
+      take: 1000,
+    });
+
+    if (peers.length === 0) {
+      return { scope, period: "ALL_TIME", available: true, rows: [], me: null };
+    }
+
+    const counts = await this.prisma.trip.groupBy({
+      by: ["driverId"],
+      where: {
+        status: "COMPLETED",
+        driverId: { in: peers.map((p) => p.id) },
+      },
+      _count: { _all: true },
+    });
+    const countBy = new Map<string, number>();
+    for (const row of counts) {
+      if (row.driverId) countBy.set(row.driverId, row._count._all);
+    }
+
+    const ranked = peers
+      .map((p) => ({
+        driverId: p.id,
+        name: p.user?.name ?? null,
+        avatarKey: p.user?.avatarUrl ?? null,
+        cityName: p.city?.name ?? null,
+        rating: Number(p.rating),
+        score: countBy.get(p.id) ?? 0,
+      }))
+      // التعادل يُفصل بالتقييم ثم بالمعرّف لترتيب ثابت لا يرتجف بين الطلبات.
+      .sort(
+        (a, b) =>
+          b.score - a.score ||
+          b.rating - a.rating ||
+          a.driverId.localeCompare(b.driverId),
+      )
+      .map((row, index) => ({ ...row, rank: index + 1 }));
+
+    const mine = ranked.find((row) => row.driverId === driver.id) ?? null;
+    const top = ranked.slice(0, limit);
+
+    const resolve = async (row: (typeof ranked)[number]) => ({
+      rank: row.rank,
+      driverId: row.driverId,
+      name: row.name,
+      photoUrl: await this.storage.resolveStoredUrl(
+        row.avatarKey,
+        STORED_MEDIA_READ_TTL_MINUTES,
+      ),
+      cityName: row.cityName,
+      score: row.score,
+      scoreUnit: "رحلة",
+      rating: row.rating,
+      isMe: row.driverId === driver.id,
+    });
+
+    return {
+      scope,
+      period: "ALL_TIME",
+      available: true,
+      total: ranked.length,
+      rows: await Promise.all(top.map(resolve)),
+      me: mine ? await resolve(mine) : null,
+    };
   }
 
   async setAvailability(userId: string, dto: SetAvailabilityDto) {
@@ -312,7 +518,7 @@ export class DriverSelfService {
     const driver = await this.requireDriver(userId);
     if (!trip || trip.driverId !== driver.id) throw new NotFoundException("الرحلة غير موجودة");
     // السائق لا يرى رقم الراكب الحقيقي أبدًا.
-    // المرحلة 11: مستوى الراكب وإطاره يأتيان جاهزين من الخادم لعرضهما في
+    // المرحلة 11: مستوى الراكب وإطاره يأتيان جاهزين من الخادم لعرضهما ف��
     // بطاقة الرحلة دون أي حساب داخل تطبيق السائق.
     const passengerLevel = await this.profileLevels.forPassenger(
       trip.passengerId,
@@ -353,7 +559,7 @@ export class DriverSelfService {
     if (changed.count !== 1) throw new BadRequestException("Trip state changed concurrently");
     // المرحلة 11 — مسار إكمال قائم ثانٍ (PATCH /driver/me/trips/:id/status).
     // الحارس updateMany أعلاه يضمن أن الانتقال حدث مرة واحدة، والحساب
-    // مشتق من عدّ الرحلات فلا يمكن احتساب الإكمال مرتين أصلًا.
+    // مشتق من عدّ الرحلات فل�� يمكن احتساب الإكمال مرتين أصلًا.
     if (status === "COMPLETED") {
       void this.profileLevels.onTripCompleted(tripId).catch(() => undefined);
     }
@@ -370,6 +576,10 @@ export class DriverSelfService {
         type: dto.type,
         url: this.storage.toObjectPath(dto.url),
         status: "PENDING",
+        // المرحلة أ: تاريخا الوثيقة كما أدخلهما السائق. كانا يُرسلان من
+        // التطبيق ويُتجاهلان هنا، فلم تكن اللوحة تعرف متى تنتهي الوثيقة.
+        issuedAt: dto.issuedAt ? new Date(dto.issuedAt) : null,
+        expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : null,
       },
     });
     return {

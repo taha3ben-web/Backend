@@ -75,12 +75,22 @@ enum DocumentType {
   INSURANCE
   REGISTRATION
   PROFILE_PHOTO
+  // المرحلة أ: تطبيق السائق يرفع البطاقة الرمادية والفحص التقني
+  // كوثيقتين مستقلتين. REGISTRATION هو الاسم القديم للبطاقة الرمادية
+  // ويُحتفظ به للسجلات القديمة فقط.
+  CARTE_GRISE
+  TECHNICAL_INSPECTION
+  // المرحلة ب: صورة أمامية للمركبة تظهر فيها لوحة الترقيم،
+  // بدل رخصة النقل VTC التي أُزيلت من شاشة الوثائق.
+  VEHICLE_FRONT_PHOTO
 }
 
 enum DocumentStatus {
   PENDING
   APPROVED
   REJECTED
+  // المرحلة أ: وثيقة معتمدة انتهت صلاحيتها — تحجب العمل وتُطلب من جديد.
+  EXPIRED
 }
 
 enum TripStatus {
@@ -376,6 +386,11 @@ model Driver {
   totalTrips   Int                @default(0)
   cityId       String?
   city         City?              @relation(fields: [cityId], references: [id])
+  // المرحلة ب: السائق يختار الولاية فقط عند التسجيل (لا المدينة)،
+  // لأن قائمة المدن ناقصة في كثير من الولايات. cityId يبقى للتوافق
+  // وللتسعير المديني، ويُملأ من اللوحة عند الحاجة.
+  wilayaId     String?
+  wilaya       Wilaya?            @relation(fields: [wilayaId], references: [id], onDelete: SetNull)
   currentLat   Float?
   currentLng   Float?
   lastSeenAt   DateTime?
@@ -405,6 +420,7 @@ model Driver {
   @@index([availability])
   @@index([availability, status])
   @@index([cityId])
+  @@index([wilayaId])
 }
 
 // Stage 65: سجل عقوبات إلغاء السائق (تحذير/تعليق/حظر) للمراجعة والتدقيق.
@@ -478,6 +494,9 @@ model DriverDocument {
   reviewedById String?
   reviewedBy   User?          @relation("DocumentReviewer", fields: [reviewedById], references: [id])
   note         String?
+  // المرحلة أ: تاريخ الإصدار مطلوب للرخصة والتأمين والفحص التقني
+  // والبطاقة الرمادية — يرسله التطبيق مع الوثيقة.
+  issuedAt     DateTime?
   expiresAt    DateTime?
   createdAt    DateTime       @default(now())
 
@@ -1232,6 +1251,7 @@ model Wilaya {
   updatedAt DateTime @updatedAt @default(now())
 
   cities             City[]
+  drivers            Driver[]
   pricingRules       PricingRule[]
   vehiclePricingRules VehiclePricingRule[]
 
@@ -1820,7 +1840,7 @@ model ServiceArea {
 }
 
 // نظام تسعير مرن: عدة قواعد سعر لكل نوع مركبة، تختلف حسب المنطقة/المدينة/الولاية/الدولة/
-// الوقت/الذروة/المناسبات/نوع العميل/العروض/الكوبونات. يُختار أنسبها حسب الأولوية والتطابق.
+// الوقت/الذروة/المناسبات/نوع العميل/العروض/الكوبونات. يُختار أنسبها حسب الأولوية وال��طابق.
 model VehiclePricingRule {
   id            String       @id @default(uuid())
   vehicleTypeId String
@@ -1901,7 +1921,7 @@ model VehicleTypeField {
   @@index([vehicleTypeId])
 }
 
-/// الإعلانات/البانرات المعروضة في تطبيقي الراكب والسائق
+/// ا��إعلانات/البانرات المعروضة في تطبيقي الراكب والسائق
 model Advertisement {
   id        String      @id @default(uuid())
   title     String

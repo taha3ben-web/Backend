@@ -99,7 +99,7 @@ export class MatchingEngineService {
     const vehicleFilter = ctx.vehicleTypeId
       ? { isActive: true, vehicleTypeId: ctx.vehicleTypeId }
       : { isActive: true, rideClass: ctx.rideClass };
-    let eligible = await this.prisma.driver.findMany({
+    const eligible = await this.prisma.driver.findMany({
       where: {
         userId: { in: userIds },
         status: "APPROVED",
@@ -108,20 +108,15 @@ export class MatchingEngineService {
       },
       select: { userId: true, rating: true },
     });
-    // تراجع لمطابقة rideClass إن لم يوجد أي سائق مطابق تمامًا لـ vehicleTypeId.
-    // سائق مركبته لم تُربط بعد بنوع محدد من الكتالوج (vehicleTypeId فارغ) يبقى
-    // ظاهرًا للمطابقة طالما فئة مركبته (rideClass) صحيحة - بدل أن يختفي تمامًا.
-    if (ctx.vehicleTypeId && eligible.length === 0) {
-      eligible = await this.prisma.driver.findMany({
-        where: {
-          userId: { in: userIds },
-          status: "APPROVED",
-          availability: "ONLINE",
-          vehicles: { some: { isActive: true, rideClass: ctx.rideClass } },
-        },
-        select: { userId: true, rating: true },
-      });
-    }
+    // ===== المرحلة ب: توجيه صارم حسب النوع (حُذف الاحتياط) =====
+    // كان هنا تراجع يعيد الاستعلام بـ rideClass وحده إن لم يوجد سائق
+    // مطابق للنوع، فكان طلب "دراجة نارية" يصل لسيارة عادية، وطلب
+    // "نسائية" يصل لسائق لا ينتمي لهذا النوع. أُزيل نهائيًا:
+    // عدم التوفر يُعالج في التطبيق ببطاقة "النوع غير متوفر في منطقتك" مع اقتراح
+    // الأنواع المتوفرة فعلًا (GET /api/rides/availability)، لا بإرسال مركبة خاطئة.
+    //
+    // ملاحزة تشغيلية: سائق مركبته بلا vehicleTypeId لن يرى أي طلب موجّه
+    // لنوع محدد؛ ربط المركبات القديمة بأنواع الكتالوج من لوحة التحكم إلزامي.
     const ratingByUser = new Map<string, number | null>(
       eligible.map((d) => [d.userId, d.rating ?? null]),
     );

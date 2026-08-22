@@ -66,6 +66,24 @@ export class MatchingController {
     return this.matching.passengerCancel(user.userId, id);
   }
 
+  /**
+   * المرحلة ب: أنواع المركبات المتوفرة فعلًا حول الراكب.
+   * يُستدعى قبل عرض قائمة الأنواع، فلا يُعرض نوع لا وجود له في المنطقة.
+   * مثال: /api/rides/availability?lat=36.75&lng=3.06&radiusKm=5
+   */
+  @Get("availability")
+  availability(
+    @Query("lat") lat: string,
+    @Query("lng") lng: string,
+    @Query("radiusKm") radiusKm?: string,
+  ) {
+    return this.matching.availability(
+      Number(lat),
+      Number(lng),
+      radiusKm ? Number(radiusKm) : undefined,
+    );
+  }
+
   /** سجل رحلات الراكب (رحلاتي) */
   @Get("mine")
   myTrips(@CurrentUser() user: AuthUser, @Query() q: PaginationDto) {
