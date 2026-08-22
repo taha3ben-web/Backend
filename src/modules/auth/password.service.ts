@@ -27,6 +27,16 @@ export class PasswordService {
       throw new UnauthorizedException("Account is not active");
     }
 
+    // المرحلة ج جعلت currentPassword اختياريًا في ChangePasswordDto لأجل سائقي Firebase
+    // الذين لا يملكون كلمة مرور حقيقية بعد. هذه الخدمة غير مستخدمة
+    // حاليًا (المسار الحيّ هو AuthService.changePassword)، ولا تدعم منطق
+    // السنتينل، فترفض الطلب صراحةً بدل تمرير undefined إلى bcrypt.
+    if (!dto.currentPassword) {
+      throw new AppException("VALIDATION_ERROR", {
+        details: { currentPassword: "required" },
+      });
+    }
+
     const currentMatches = await bcrypt.compare(
       dto.currentPassword,
       user.passwordHash,
