@@ -7,6 +7,7 @@ import {
   forwardRef,
 } from "@nestjs/common";
 import { DriverAvailability, Prisma } from "@prisma/client";
+import * as bcrypt from "bcryptjs";
 import { PrismaService } from "../../prisma/prisma.service";
 import { maskPhone } from "../calls/call-masking.adapter";
 import {
@@ -16,11 +17,19 @@ import {
 import { DriverSanctionsService } from "./driver-sanctions.service";
 import { ArrivalGuardService } from "../trips/arrival-guard.service";
 import { ProfileLevelsService } from "../profile-levels/profile-levels.service";
+import {
+  PROFILE_LEVEL_COMMON_BENEFITS,
+  profileLevelLadder,
+  profileLevelProgressPercent,
+} from "../profile-levels/profile-level.util";
 import { PaginationDto } from "../../common/dto/pagination.dto";
 import { round2 } from "../../common/money.util";
+import { RequirementsService } from "../vehicle-types/requirements.service";
 import { identityChanged } from "./vehicle-verification.util";
 import {
   AddDocumentDto,
+  DOC_TYPES,
+  REQUIRED_DRIVER_DOC_TYPES,
   SetAvailabilityDto,
   UpdateDriverProfileDto,
   UploadUrlDto,
@@ -28,12 +37,39 @@ import {
 
 type DriverWithRelations = Prisma.DriverGetPayload<{
   include: {
-    user: { select: { name: true; phone: true; email: true; avatarUrl: true } };
-    vehicles: true;
+    user: {
+      select: {
+        name: true;
+        phone: true;
+        email: true;
+        avatarUrl: true;
+        // المرحلة ج: لازمان لحساب hasPassword دون عمود جديد.
+        firebaseUid: true;
+        passwordHash: true;
+      };
+    };
+    vehicles: {
+      include: {
+        vehicleType: {
+          select: {
+            id: true;
+            name: true;
+            nameI18n: true;
+            requiredDocuments: true;
+          };
+        };
+      };
+    };
     documents: true;
     city: { select: { id: true; name: true } };
     wilaya: {
-      select: { id: true; number: true; nameAr: true; nameFr: true };
+      select: {
+        id: true;
+        number: true;
+        nameAr: true;
+        nameFr: true;
+        nameEn: true;
+      };
     };
   };
 }>;
@@ -60,6 +96,8 @@ export class DriverSelfService {
     // المرحلة 11: مستوى السائق ومستوى الراكب من مصدر واحد.
     @Inject(forwardRef(() => ProfileLevelsService))
     private readonly profileLevels: ProfileLevelsService,
+    // المرحلة و: إعادة استعمال خدمة المتطلبات القائمة بدل بناء نظام فحص ثانٍ.
+    private readonly requirements: RequirementsService,
   ) {}
 
   /** حالة عقوبات الإلغاء للسائق الحالي (مشتقة من userId الجلسة). */
@@ -79,15 +117,46 @@ export class DriverSelfService {
       where: { userId },
       include: {
         user: {
-          select: { name: true, phone: true, email: true, avatarUrl: true },
+          select: {
+            name: true,
+            phone: true,
+            email: true,
+            avatarUrl: true,
+            // المرحلة ج: hasPassword يُحسب من هذين الحقلين، بلا عمود جديد
+            // وبلا ترحيل. لا يُرجَع أي منهما للتطبيق أبدًا.
+            firebaseUid: true,
+            passwordHash: true,
+          },
         },
-        vehicles: { where: { isActive: true }, take: 1 },
+        // المرحلة ج: نوع المركبة المختار يحدّد الوثائق الإلزامية، فلا يجوز
+        // أن يحسبها التطبيق من قائمة ثابتة عنده.
+        vehicles: {
+          where: { isActive: true },
+          take: 1,
+          include: {
+            vehicleType: {
+              select: {
+                id: true,
+                name: true,
+                nameI18n: true,
+                requiredDocuments: true,
+              },
+            },
+          },
+        },
         documents: { orderBy: { createdAt: "desc" } },
         city: { select: { id: true, name: true } },
         // المرحلة ب: الولاية هي ما يختاره السائق عند التسجيل،
         // فلا يمكن للشاشة أن تعرض اختياره دون إرجاعه هنا.
+        // المرحلة ج: nameEn أُضيف لأن التطبيق بثلاث لغات.
         wilaya: {
-          select: { id: true, number: true, nameAr: true, nameFr: true },
+          select: {
+            id: true,
+            number: true,
+            nameAr: true,
+            nameFr: true,
+            nameEn: true,
+          },
         },
       },
     });
@@ -129,6 +198,30 @@ export class DriverSelfService {
       null;
     // المرحلة 11 — عدّاد السائق مستقل تمامًا عن عدّاد الراكب.
     const level = await this.profileLevels.forDriver(driver.id);
+
+    // ===== المرحلة ج (1): هل للحساب كلمة مرور فعلًا؟ =====
+    // حارس التسجيل في التطبيق لم يكن يقدر على فحص خطوة كلمة المرور،
+    // فكان إما يتجاوزها دائمًا أو يُرجع السائق للنموذج عند كل فتح.
+    //
+    // لا عمود جديد ولا ترحيل: دخول Firebase يكتب بصمة معروفة
+    // (bcrypt لـ "firebase:<uid>") في AuthService، فمطابقتها تعني أن الحساب
+    // بلا كلمة مرور حقيقية. والفشل يُقرأ "لديه كلمة مرور" (fail-closed)
+    // لأن الأسوأ هو إعادة سائق مكتمل الملف إلى نموذج لا يخرج منه.
+    const hasPassword = await this.computeHasPassword(
+      driver.user?.firebaseUid ?? null,
+      driver.user?.passwordHash ?? null,
+    );
+
+    // ===== المرحلة ج (2): الوثائق الإلزامية يقررها الخادم =====
+    // كان التطبيق يحسب القائمة من ثابت محلي ويفتح زر "متابعة" عليه،
+    // فكان ممكنًا أن يضيف مدير اللوحة وثيقة لنوع مركبة ولا يعلم التطبيق بها.
+    // القاعدة: الأرضية المشتركة (REQUIRED_DRIVER_DOC_TYPES) مع وثائق النوع
+    // المختار (VehicleType.requiredDocuments — تُدار من اللوحة).
+    const documentRequirements = this.buildDocumentRequirements(
+      vehicle?.vehicleType?.requiredDocuments ?? [],
+      documents,
+    );
+
     return {
       id: driver.id,
       userId: driver.userId,
@@ -159,6 +252,7 @@ export class DriverSelfService {
             number: driver.wilaya.number,
             nameAr: driver.wilaya.nameAr,
             nameFr: driver.wilaya.nameFr,
+            nameEn: driver.wilaya.nameEn,
           }
         : null,
       vehicle: vehicle
@@ -171,9 +265,104 @@ export class DriverSelfService {
             year: vehicle.year ?? null,
             rideClass: vehicle.rideClass,
             vehicleTypeId: vehicle.vehicleTypeId ?? null,
+            // المرحلة ج: اسم النوع كما في اللوحة (مع ترجماته إن وُجدت)،
+            // حتى تعرض شاشة المركبة نوعها دون استدعاء الكتالوج كله.
+            vehicleTypeName: vehicle.vehicleType?.name ?? null,
+            vehicleTypeNameI18n: vehicle.vehicleType?.nameI18n ?? null,
           }
         : null,
       documents,
+      // المرحلة ج: حقيقتان كان التطبيق يخمّنهما.
+      hasPassword,
+      documentRequirements,
+    };
+  }
+
+  /**
+   * ===== المرحلة ج: هل وُضعت كلمة مرور حقيقية للحساب؟ =====
+   *
+   * دخول Firebase ينشئ المستخدم بـ passwordHash غير قابل للاستخدام قيمته
+   * bcrypt("firebase:<uid>") — انطباقها ليس تخمينًا بل مقارنة مع نفس القيمة
+   * التي يكتبها AuthService.
+   *
+   * لا تُرجع البصمة ولا معرّف Firebase للعميل أبدًا؛ المخرج بوليان واحد.
+   */
+  private async computeHasPassword(
+    firebaseUid: string | null,
+    passwordHash: string | null,
+  ): Promise<boolean> {
+    // لا بصمة أصلًا = لا يمكن الدخول بكلمة مرور.
+    if (!passwordHash) return false;
+    // حساب أُنشئ بالتسجيل العادي (بلا Firebase) له كلمة مرور بالتعريف.
+    if (!firebaseUid) return true;
+    try {
+      const isSentinel = await bcrypt.compare(
+        `firebase:${firebaseUid}`,
+        passwordHash,
+      );
+      return !isSentinel;
+    } catch {
+      // fail-closed: لا نطلب كلمة مرور من سائق ربما وضعها فعلًا.
+      return true;
+    }
+  }
+
+  /**
+   * ===== المرحلة ج: ما يحجب ملف السائق من وثائق =====
+   *
+   * المطلوب = الأرضية المشتركة + وثائق نوع المركبة المختار.
+   * وثائق النوع تُرشّح إلى قيم DocumentType الحقيقية فقط: مدير اللوحة
+   * يكتبها نصًا حرًا (String[])، وقيمة مطبعية لا يجوز أن تحجب سائقًا بوثيقة
+   * لا يملك أصلًا خانة لرفعها. المرفوضة والمنتهية ناقصة، والمعلّقة
+   * (PENDING) ليست ناقصة — طلب رفعها مرة أخرى ينتج نسخًا مكررة فقط.
+   */
+  private buildDocumentRequirements(
+    typeRequiredRaw: string[],
+    documents: Array<{ type: string; status: string }>,
+  ) {
+    const known = new Set<string>(DOC_TYPES as readonly string[]);
+    const base = REQUIRED_DRIVER_DOC_TYPES as readonly string[];
+
+    const fromType: string[] = [];
+    const unsupportedFromType: string[] = [];
+    for (const raw of typeRequiredRaw) {
+      const value = String(raw ?? "").trim();
+      if (!value) continue;
+      if (!known.has(value)) {
+        // قيمة لا يعرفها المخطط: تُعلن للوضوح ولا تحجب.
+        if (!unsupportedFromType.includes(value)) {
+          unsupportedFromType.push(value);
+        }
+        continue;
+      }
+      if (!base.includes(value) && !fromType.includes(value)) {
+        fromType.push(value);
+      }
+    }
+
+    const required = [...base, ...fromType];
+
+    // أحدث حالة لكل نوع: الوثائق مرتّبة تنازليًا بتاريخ الإنشاء.
+    const latestStatus = new Map<string, string>();
+    for (const document of documents) {
+      if (!latestStatus.has(document.type)) {
+        latestStatus.set(document.type, document.status);
+      }
+    }
+
+    const missing = required.filter((type) => {
+      const status = latestStatus.get(type);
+      return !status || status === "REJECTED" || status === "EXPIRED";
+    });
+
+    return {
+      required,
+      // من أين جاء كل شرط، حتى تعرف الواجهة ما أضافه النوع.
+      baseRequired: [...base],
+      typeRequired: fromType,
+      missing,
+      complete: missing.length === 0,
+      unsupportedFromType,
     };
   }
 
@@ -333,10 +522,29 @@ export class DriverSelfService {
     const scope = scopeRaw === "country" ? "country" : "city";
     const limit = Math.min(Math.max(Number(limitRaw) || 20, 5), 50);
 
-    // سائق بلا مدينة لا يمكن ترتيبه محليًا: نقول ذلك صراحة بدل قائمة مضلّلة.
-    if (scope === "city" && !driver.cityId) {
+    // سائق بلا مدينة لا يمكن ترتيبه محليًا: نقول ذل�� صراحة بدل قائمة مضلّلة.
+    // ===== المرحلة ج: "مدينتي" تعمل بالولاية عند غياب المدينة =====
+    // بعد قرار "الولاية فقط عند التسجيل" لم يعد للسائق الجديد cityId،
+    // فكان الشرط أدناه يُرجع available:false للجميع تقريبًا: ميزة مبنية
+    // في الطرفين ولا تعمل. الأساس المحلي الآن: المدينة إن وُجدت، وإلا
+    // الولاية؛ ويُعلن الأساس في الرد (localBasis) لأن عنوان التبويب يختلف
+    // بين "مدينتي" و"ولايتي"، ولا يجوز للتطبيق أن يخمنه.
+    const localFilter: Prisma.DriverWhereInput | null = driver.cityId
+      ? { cityId: driver.cityId }
+      : driver.wilayaId
+        ? { wilayaId: driver.wilayaId }
+        : null;
+    const localBasis: "city" | "wilaya" | null = driver.cityId
+      ? "city"
+      : driver.wilayaId
+        ? "wilaya"
+        : null;
+
+    // من لا مدينة له ولا ولاية لا يمكن ترتيبه محليًا: نقول ذلك صراحة.
+    if (scope === "city" && !localFilter) {
       return {
         scope,
+        localBasis,
         period: "ALL_TIME",
         available: false,
         rows: [],
@@ -347,12 +555,14 @@ export class DriverSelfService {
     const peers = await this.prisma.driver.findMany({
       where: {
         status: "APPROVED",
-        ...(scope === "city" ? { cityId: driver.cityId } : {}),
+        ...(scope === "city" && localFilter ? localFilter : {}),
       },
       select: {
         id: true,
         rating: true,
         city: { select: { name: true } },
+        // المرحلة ج: من لا مدينة له يُعرف بولايته، لا بفراغ.
+        wilaya: { select: { nameAr: true, nameFr: true, nameEn: true } },
         user: { select: { name: true, avatarUrl: true } },
       },
       // حدّ أمان لحجم الاستعلام التالي.
@@ -360,7 +570,14 @@ export class DriverSelfService {
     });
 
     if (peers.length === 0) {
-      return { scope, period: "ALL_TIME", available: true, rows: [], me: null };
+      return {
+        scope,
+        localBasis,
+        period: "ALL_TIME",
+        available: true,
+        rows: [],
+        me: null,
+      };
     }
 
     const counts = await this.prisma.trip.groupBy({
@@ -381,7 +598,8 @@ export class DriverSelfService {
         driverId: p.id,
         name: p.user?.name ?? null,
         avatarKey: p.user?.avatarUrl ?? null,
-        cityName: p.city?.name ?? null,
+        // المرحلة ج: المدينة إن وُجدت، وإلا اسم الولاية.
+        cityName: p.city?.name ?? p.wilaya?.nameAr ?? null,
         rating: Number(p.rating),
         score: countBy.get(p.id) ?? 0,
       }))
@@ -419,6 +637,152 @@ export class DriverSelfService {
       total: ranked.length,
       rows: await Promise.all(top.map(resolve)),
       me: mine ? await resolve(mine) : null,
+    };
+  }
+
+  /**
+   * المرحلة د — شاشة الطبقات والترقية ("GET /api/driver/me/tier").
+   *
+   * كان مستوى السائق يُرجَع داخل "GET /driver/me" وحده: الطبقة الحالية فقط،
+   * بلا سلّم ولا عتبات ولا مزايا. فكانت الشاشة غير قابلة للبناء إلا بكتابة
+   * العتبات داخل التطبيق، وهو ما يخالف شرط "الطبقات من الخادم لا أرقام وهمية".
+   *
+   * الحساب كله يعيد استخدام ProfileLevelsService و profile-level.util الموجودين:
+   * لا نظام طبقات ثانٍ ولا عتبات مكرّرة.
+   *
+   * الترتيب (rank) مقصود ألّا يكون هنا: "GET /driver/leaderboard" يُرجعه أصلًا
+   * في me.rank، وتكراره يعني استعلام 1000 سائق مرتين لنفس الشاشة.
+   *
+   * system يُعلَن صراحةً لأن في الخادم نظامَين مختلفين تتشابه أسماء درجاتهما:
+   * هذا (رحلات مكتملة) و"/api/loyalty/me" (نقاط، وفيه PLATINUM لا DIAMOND).
+   * توكن السائق يستطيع الوصول إليهما معًا، فوجب تمييز المصدر لا دمجهما.
+   */
+  async tier(userId: string) {
+    const driver = await this.requireDriver(userId);
+    const level = await this.profileLevels.forDriver(driver.id);
+    const ladder = profileLevelLadder(level.completedTripsCount);
+
+    // روابط الإطارات تُولَّد في الخدمة عبر StorageService، لأن util نقيّ
+    // ولا يعرف R2 ولا مدة صلاحية الرابط.
+    const steps = await Promise.all(
+      ladder.map(async (step) => ({
+        level: step.level,
+        minCompletedTrips: step.minCompletedTrips,
+        frameUrl: await this.storage.resolveStoredUrl(
+          step.frameKey,
+          STORED_MEDIA_READ_TTL_MINUTES,
+        ),
+        benefits: step.benefits,
+        isCurrent: step.isCurrent,
+        isReached: step.isReached,
+        tripsRemaining: step.tripsRemaining,
+      })),
+    );
+
+    return {
+      system: "PROFILE_LEVELS",
+      completedTripsCount: level.completedTripsCount,
+      profileLevel: level.profileLevel,
+      profileFrameUrl: level.profileFrameUrl,
+      nextLevel: level.nextLevel,
+      nextLevelAt: level.nextLevelAt,
+      tripsToNextLevel: level.tripsToNextLevel,
+      progressPercent: profileLevelProgressPercent(level.completedTripsCount),
+      commonBenefits: PROFILE_LEVEL_COMMON_BENEFITS,
+      ladder: steps,
+    };
+  }
+
+  /**
+   * ===== المرحلة و: أهلية السائق لنوع مركبة =====
+   *
+   * `RequirementsService.verify()` موجود وسليم ويفحص التقييم والرحلات وسنة
+   * الصنع والرخصة والمستندات والصور الإلزامية، لكنه كان متاحًا عبر مسار واحد:
+   * `GET /api/vehicle-types/:id/verify/:driverId` وهو **للموظفين فقط**
+   * (`@Roles("STAFF")` + `pricing.manage`/`settings.manage`).
+   *
+   * أي أن السائق نفسه لم يكن يستطيع معرفة سبب عدم أهليته: يختار النوع،
+   * ويرفع الوثائق، وينتظر، ثم يُرفض من اللوحة بلا سبب مفهوم. و`PATCH /driver/me`
+   * يتحقق من وجود النوع وظهوره للسائقين فقط، ولا يفحص المتطلبات إطلاقًا.
+   *
+   * **لماذا لا يمنع الاختيار:** فحوص المستندات في `verify()` تشترط `APPROVED`،
+   * ولا وثيقة واحدة تكون `APPROVED` قبل مراجعة اللوحة. فلو ربطنا اختيار النوع
+   * بـ `eligible === true` لاستحال التسجيل على كل سائق جديد: يحتاج النوع ليعرف الوثائق
+   * المطلوبة، ويحتاج الوثائق معتمدة ليأخذ النوع. دورة مغلقة. لذلك تفصل هذه
+   * الدالة الفحوص إلى مجموعات: موضوعية مانعة (تقييم/رحلات/سنة صنع) — وهي لا تعتمد
+   * على موافقة أحد — ومجموعات مستندية تُعرض كخطوات لا كرفض.
+   *
+   * والبوّابة الحقيقية تبقى كما هي: `setAvailability(ONLINE)` يشترط `APPROVED`،
+   * والاعتماد النهائي للوحة عبر `PATCH /vehicles/:id/verify`. لم يُمسّ أي منهما.
+   */
+  async vehicleTypeEligibility(userId: string, vehicleTypeId: string) {
+    const driver = await this.requireDriver(userId);
+    // السائق يُسأل عن الأنواع المرئية له وحدها، فلا يستكشف أنواعًا مخفية في اللوحة.
+    const type = await this.prisma.vehicleType.findFirst({
+      where: { id: vehicleTypeId, isActive: true, visibleToDrivers: true },
+      select: { id: true, name: true, nameI18n: true, rideClass: true },
+    });
+    if (!type) throw new BadRequestException("نوع المركبة غير متاح");
+
+    const report = await this.requirements.verify(type.id, driver.id);
+
+    // حالات الوثائق الفعلية للتمييز بين "لم تُرفع" و"مرفوعة وتنتظر المراجعة"
+    // و"مرفوضة/منتهية تحتاج إعادة رفع". `verify()` يعرف APPROVED وحدها.
+    const docs = await this.prisma.driverDocument.findMany({
+      where: { driverId: driver.id },
+      select: { type: true, status: true },
+    });
+    const statusesByType = new Map<string, string[]>();
+    for (const doc of docs) {
+      const key = String(doc.type);
+      const list = statusesByType.get(key);
+      if (list) list.push(String(doc.status));
+      else statusesByType.set(key, [String(doc.status)]);
+    }
+
+    const OBJECTIVE_KEYS = new Set([
+      "minDriverRating",
+      "minDriverTrips",
+      "minVehicleYear",
+    ]);
+
+    const blocking: typeof report.checks = [];
+    const awaitingApproval: string[] = [];
+    const actionRequired: string[] = [];
+    const missingDocuments: string[] = [];
+
+    for (const check of report.checks) {
+      if (check.ok) continue;
+      if (OBJECTIVE_KEYS.has(check.key)) {
+        blocking.push(check);
+        continue;
+      }
+      // فحوص مستندية: document:*، photo:*، requiredLicenseType
+      const docType =
+        check.key === "requiredLicenseType"
+          ? "LICENSE"
+          : String(check.required);
+      const statuses = statusesByType.get(docType) ?? [];
+      if (statuses.length === 0) missingDocuments.push(docType);
+      else if (statuses.includes("PENDING")) awaitingApproval.push(docType);
+      else actionRequired.push(docType);
+    }
+
+    return {
+      vehicleTypeId: type.id,
+      vehicleTypeName: type.name,
+      vehicleTypeNameI18n: type.nameI18n,
+      rideClass: type.rideClass,
+      // مطابق تمامًا لما تراه اللوحة عبر مسار الموظفين، من نفس الخدمة.
+      eligible: report.eligible,
+      // هل يجوز للسائق اختيار هذا النوع الآن؟ المستندات تُراجع لاحقًا،
+      // أما الفحوص الموضوعية فلا يغيرها أي رفع وثائق.
+      selectable: blocking.length === 0,
+      checks: report.checks,
+      blocking,
+      awaitingApproval,
+      actionRequired,
+      missingDocuments,
     };
   }
 

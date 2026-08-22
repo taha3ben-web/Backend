@@ -34,11 +34,14 @@ export class LegalController {
   // ----- مستخدم التطبيق (الموافقة) -----
 
   @Get("pending")
-  pending(@CurrentUser() user: AuthUser) {
-    return this.legal.pendingForUser({
-      userId: user.userId,
-      role: user.role,
-    });
+  pending(@CurrentUser() user: AuthUser, @Query("locale") locale?: string) {
+    return this.legal.pendingForUser(
+      {
+        userId: user.userId,
+        role: user.role,
+      },
+      locale,
+    );
   }
 
   @Post(":id/accept")

@@ -69,6 +69,28 @@ export class DriverSelfController {
     );
   }
 
+  /**
+   * المرحلة د — شاشة الطبقات: السلّم والعتبات والمزايا من الخادم.
+   * الترتيب لا يُعاد هنا: "/driver/leaderboard" يُرجع me.rank أصلًا.
+   */
+  @Get("me/tier")
+  tier(@CurrentUser() user: AuthUser) {
+    return this.service.tier(user.userId);
+  }
+
+  /**
+   * المرحلة و — أهلية السائق لنوع مركبة قبل اختياره.
+   * نفس الخدمة التي تستعملها اللوحة، لكن محصورة بملف السائق نفسه:
+   * معرف السائق يُشتق من التوكن ولا يأتي من المسار، فلا يمكن فحص سائق آخر.
+   */
+  @Get("me/vehicle-types/:vehicleTypeId/eligibility")
+  vehicleTypeEligibility(
+    @CurrentUser() user: AuthUser,
+    @Param("vehicleTypeId") vehicleTypeId: string,
+  ) {
+    return this.service.vehicleTypeEligibility(user.userId, vehicleTypeId);
+  }
+
   @Get("me/earnings")
   earnings(@CurrentUser() user: AuthUser) {
     return this.service.earnings(user.userId);

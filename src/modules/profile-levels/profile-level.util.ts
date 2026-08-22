@@ -96,3 +96,143 @@ export function describeProfileLevel(
     tripsToNextLevel: nextLevelAt === null ? null : Math.max(0, nextLevelAt - count),
   };
 }
+
+/**
+ * المرحلة د — سلّم الطبقات ومزاياها (Tier Ladder & Benefits).
+ *
+ * سبب وجود هذا القسم: شاشة الطبقات في تطبيق السائق تحتاج أن تعرض السلّم كاملًا
+ * (كل طبقة وعتبتها) لا الطبقة الحالية وحدها. وبدون كشفه من الخادم كان التطبيق
+ * سيُضطر لكتابة الأرقام 0/10/50/100/500 داخله، وهو ما يخالف صراحةً التحذير
+ * المكتوب في أعلى هذا الملف: لا تُنسخ العتبات إلى DriverApp إطلاقًا.
+ *
+ * المزايا نصوص باللغات الثلاث لأن التطبيق ممنوع من كتابة نصوص ثابتة داخله.
+ *
+ * قرار مقصود — لا نعِد السائق بما لا ينفّذه الخادم:
+ *   محرّك التوزيع (matching-engine) يوزّع بنوع المركبة والمسافة فقط، ولا يمنح
+ *   أي أولوية للطبقة، ولا توجد أي حسومات عمولة مرتبطة بالطبقات في الكود. لذلك
+ *   المزايا المذكورة هنا محصورة فيما هو قائم فعلًا (الإطار المرئي للراكب،
+ *   ودخول الصدارة). أي ميزة تجارية (أولوية طلبات، حسم عمولة، مكافأة) يجب أن
+ *   تُنفَّذ في الخادم أولًا ثم تُضاف هنا، ولا تُعرض للسائق قبل ذلك.
+ */
+
+export interface ProfileLevelBenefit {
+  /** مفتاح ثابت للتطبيق (أيقونة/تتبّع)، لا يُترجم ولا يُعرض. */
+  key: string;
+  ar: string;
+  fr: string;
+  en: string;
+}
+
+/** مزايا مشتركة لكل الطبقات (تُعرض مرة واحدة، لا تُكرَّر في كل درجة). */
+export const PROFILE_LEVEL_COMMON_BENEFITS: ProfileLevelBenefit[] = [
+  {
+    key: "leaderboard",
+    ar: "ظهورك في صدارة السائقين في ولايتك وفي الجزائر كاملة",
+    fr: "Votre place dans le classement des chauffeurs de votre wilaya et de toute l'Algérie",
+    en: "Your place in the driver leaderboard for your wilaya and all of Algeria",
+  },
+];
+
+/** مزايا كل طبقة على حدة. الإطار حقيقي: الراكب يراه في بطاقة الرحلة. */
+export const PROFILE_LEVEL_BENEFITS: Record<
+  ProfileLevel,
+  ProfileLevelBenefit[]
+> = {
+  BRONZE: [
+    {
+      key: "frame",
+      ar: "إطار برونزي حول صورتك يظهر للراكب",
+      fr: "Cadre bronze autour de votre photo, visible par le passager",
+      en: "Bronze frame around your photo, visible to the passenger",
+    },
+  ],
+  SILVER: [
+    {
+      key: "frame",
+      ar: "إطار فضي حول صورتك يظهر للراكب",
+      fr: "Cadre argent autour de votre photo, visible par le passager",
+      en: "Silver frame around your photo, visible to the passenger",
+    },
+  ],
+  GOLD: [
+    {
+      key: "frame",
+      ar: "إطار ذهبي حول صورتك يظهر للراكب",
+      fr: "Cadre or autour de votre photo, visible par le passager",
+      en: "Gold frame around your photo, visible to the passenger",
+    },
+  ],
+  DIAMOND: [
+    {
+      key: "frame",
+      ar: "إطار ألماسي حول صورتك يظهر للراكب",
+      fr: "Cadre diamant autour de votre photo, visible par le passager",
+      en: "Diamond frame around your photo, visible to the passenger",
+    },
+  ],
+  LEGENDARY: [
+    {
+      key: "frame",
+      ar: "إطار أسطوري حول صورتك يظهر للراكب",
+      fr: "Cadre légendaire autour de votre photo, visible par le passager",
+      en: "Legendary frame around your photo, visible to the passenger",
+    },
+  ],
+};
+
+export interface ProfileLevelLadderStep {
+  level: ProfileLevel;
+  /** أدنى عدد رحلات مكتملة للوصول إلى هذه الدرجة. */
+  minCompletedTrips: number;
+  /** مفتاح الإطار؛ الرابط يُولَّد في الخدمة، لا هنا. */
+  frameKey: string;
+  benefits: ProfileLevelBenefit[];
+  /** درجة السائق الحالية. */
+  isCurrent: boolean;
+  /** بلغها السائق (الحالية وما تحتها). */
+  isReached: boolean;
+  /** رحلات ناقصة للوصول إليها، و0 لما بلغه. */
+  tripsRemaining: number;
+}
+
+/** السلّم كاملًا موصوفًا بالنسبة لعدد رحلات السائق. */
+export function profileLevelLadder(
+  completedTripsCount: number,
+): ProfileLevelLadderStep[] {
+  const count = normalizeCount(completedTripsCount);
+  const current = getProfileLevel(count);
+  return PROFILE_LEVELS.map((level) => {
+    const min = PROFILE_LEVEL_THRESHOLDS[level];
+    return {
+      level,
+      minCompletedTrips: min,
+      frameKey: profileFrameObjectKey(level),
+      benefits: PROFILE_LEVEL_BENEFITS[level],
+      isCurrent: level === current,
+      isReached: count >= min,
+      tripsRemaining: Math.max(0, min - count),
+    };
+  });
+}
+
+/**
+ * نسبة التقدّم داخل الطبقة الحالية (0–100).
+ *
+ * تُحسب هنا لا في التطبيق، لأن حسابها يحتاج عتبة الطبقة الحالية وعتبة التالية،
+ * وكلتاهما ممنوعتان من النسخ إلى التطبيق. وتُرجع 100 عند أعلى طبقة لأنه لا يوجد
+ * ما بعدها، فشريط التقدّم يكون مكتملًا لا فارغًا.
+ */
+export function profileLevelProgressPercent(
+  completedTripsCount: number,
+): number {
+  const count = normalizeCount(completedTripsCount);
+  const level = getProfileLevel(count);
+  const next = nextProfileLevel(level);
+  if (next === null) return 100;
+  const from = PROFILE_LEVEL_THRESHOLDS[level];
+  const to = PROFILE_LEVEL_THRESHOLDS[next];
+  const span = to - from;
+  if (span <= 0) return 100;
+  const pct = ((count - from) / span) * 100;
+  return Math.min(100, Math.max(0, Math.round(pct)));
+}

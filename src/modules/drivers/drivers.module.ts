@@ -3,6 +3,9 @@ import { RbacModule } from "../rbac/rbac.module";
 import { NotificationsModule } from "../notifications/notifications.module";
 import { TripGuardsModule } from "../trips/trip-guards.module";
 import { ProfileLevelsModule } from "../profile-levels/profile-levels.module";
+// المرحلة و: لحقن RequirementsService المُصدَّر من وحدة الكتالوج.
+// لا خطر استيراد دائري: VehicleTypesModule لا يستورد DriversModule.
+import { VehicleTypesModule } from "../vehicle-types/vehicle-types.module";
 import { DriversService } from "./drivers.service";
 import { DriverSanctionsService } from "./driver-sanctions.service";
 import { DriversController } from "./drivers.controller";
@@ -22,6 +25,7 @@ import { DriverQrPublicController } from "./driver-qr-public.controller";
     NotificationsModule,
     TripGuardsModule,
     ProfileLevelsModule,
+    VehicleTypesModule,
   ],
   providers: [
     DriversService,

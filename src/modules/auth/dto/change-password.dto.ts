@@ -16,8 +16,20 @@ import {
  * زاد عن 72 بايت.
  */
 export class ChangePasswordDto {
+  /**
+   * المرحلة ج: أصبحت اختيارية على مستوى النقل فقط.
+   *
+   * سائق دخل بـ Firebase لا يملك كلمة مرور بعد، فـ @IsString() الإلزامي
+   * كان يجعل خطوة "أكمل معلوماتك" تفشل دائمًا (400 من التحقق، أو
+   * INVALID_CREDENTIALS لو أُرسلت قيمة وهمية) — أي أن التسجيل لم يكن
+   * يكتمل أبدًا من التطبيق.
+   *
+   * الإلزام لم يُلغَِ، بل انتقل إلى الخادم حيث تُعرف الحقيقة: من لديه
+   * كلمة مرور حقيقية يُرفض بدونها. انظر AuthService.changePassword.
+   */
+  @IsOptional()
   @IsString()
-  currentPassword!: string;
+  currentPassword?: string;
 
   @IsString()
   @MinLength(6)

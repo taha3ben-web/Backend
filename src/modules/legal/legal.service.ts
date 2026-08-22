@@ -13,6 +13,15 @@ import {
 type ConsentActor = { userId: string; role?: string };
 
 /**
+ * المرحلة هـ — لغة الاحتياط للمستندات القانونية.
+ *
+ * المستندات مفصولة باللغة (@@unique([type, audience, locale]))، واللوحة لا تضمن
+ * ترجمة كل مستند إلى اللغات الثلاث. العربية هي اللغة الافتراضية في
+ * schema.prisma (locale String @default("ar"))، فهي لغة الاحتياط هنا أيضًا.
+ */
+const LEGAL_FALLBACK_LOCALE = "ar";
+
+/**
  * إدارة المستندات القانونية (الخصوصية/الشروط) وموافقة المستخدمين عليها.
  * تُدار المستندات ونشرها بالكامل من لوحة التحكم، وتستهلكها التطبيقات
  * عبر مسار عام + مسار موافقة موثّق لكل مستخدم.
@@ -142,22 +151,43 @@ export class LegalService {
 
   // ------------------------------ عام (تطبيقات) ------------------------------
 
+  /**
+   * المرحلة هـ — كان ترشيح اللغة هنا يكسر شاشة الشروط في حالتين:
+   *
+   *   1) مع locale=fr واللوحة أضافت العربية وحدها → ترشيح صارم يُرجع [] والشاشة
+   *      تظهر **فارغة**، مع أن المستند منشور فعلًا.
+   *   2) بلا locale واللوحة أضافت ar وfr وen → تُرجَع ثلاث نسخ من نفس المستند
+   *      والتطبيق يعرض الشروط **مكررة ثلاث مرات** بلا أي معيار لاختيار واحدة.
+   *
+   * أي أن الحالتين الممكنتين لتطبيق بثلاث لغات كانتا معطوبتين. الحل: الترشيح
+   * يجري في الذاكرة باختيار صف واحد لكل (type, audience): اللغة المطلوبة إن
+   * وُجدت، وإلا العربية، وإلا أول متاح. ويُعلَن في الرد أي لغة وُصلِعًا بها
+   * (resolvedLocale / isFallbackLocale) حتى يستطيع التطبيق إشعار السائق أن النص
+   * معروض بلغة أخرى، ولا يعرض نصًا عربيًا داخل واجهة فرنسية بلا تفسير.
+   *
+   * لم يُمسّ مسار اللوحة ولا النشر ولا الإصدارات: كلها تعمل أصلًا.
+   */
   async publicList(audience?: string, locale?: string) {
     const audiences = this.audienceFilter(audience);
+    const requestedLocale = locale ? locale.trim().toLowerCase() : null;
     const rows = await this.prisma.legalDocument.findMany({
       where: {
         status: "PUBLISHED",
         isActive: true,
         ...(audiences ? { audience: { in: audiences as never } } : {}),
-        ...(locale ? { locale: locale.trim().toLowerCase() } : {}),
       },
-      orderBy: [{ type: "asc" }],
+      orderBy: [{ type: "asc" }, { locale: "asc" }],
     });
-    return rows.map((r) => ({
+    const picked = this.pickOnePerDocument(rows, requestedLocale);
+    return picked.map((r) => ({
       id: r.id,
       type: r.type,
       audience: r.audience,
       locale: r.locale,
+      requestedLocale,
+      resolvedLocale: r.locale,
+      isFallbackLocale:
+        requestedLocale !== null && r.locale.toLowerCase() !== requestedLocale,
       title: r.publishedTitle ?? r.title,
       body: r.publishedBody ?? r.body,
       summary: r.summary,
@@ -170,17 +200,27 @@ export class LegalService {
 
   // --------------------------- موافقة المستخدم ---------------------------
 
-  async pendingForUser(actor: ConsentActor) {
+  /**
+   * المرحلة هـ — كانت هذه الدالة تجمع المستندات بكل اللغات، فلو أضافت اللوحة
+   * الشروط بـ ar وfr وen لطولب السائق بالموافقة على **نفس المستند ثلاث مرات**
+   * قبل أن يدخل التطبيق. الموافقة حقها أن تكون واحدة لكل مستند، لا واحدة
+   * لكل ترجمة.
+   */
+  async pendingForUser(actor: ConsentActor, locale?: string) {
     const audiences = this.roleAudiences(actor.role);
-    const docs = await this.prisma.legalDocument.findMany({
+    const allDocs = await this.prisma.legalDocument.findMany({
       where: {
         status: "PUBLISHED",
         isActive: true,
         requiresAcceptance: true,
         audience: { in: audiences as never },
       },
-      orderBy: [{ type: "asc" }],
+      orderBy: [{ type: "asc" }, { locale: "asc" }],
     });
+    const docs = this.pickOnePerDocument(
+      allDocs,
+      locale ? locale.trim().toLowerCase() : null,
+    );
     if (docs.length === 0) return { pending: [], accepted: [] };
     const consents = await this.prisma.userConsent.findMany({
       where: {
@@ -260,6 +300,38 @@ export class LegalService {
   }
 
   // ------------------------------ مساعدات ------------------------------
+
+  /**
+   * المرحلة هـ — صف واحد لكل مستند (type + audience) بحسب اللغة.
+   *
+   * الأفضلية: اللغة المطلوبة → العربية (الافتراضية) → أول متاح.
+   * الترتيب ثابت لأن الاستعلام مرتّب بـ type ثم locale، فلا يختلف الردّ بين طلبين.
+   */
+  private pickOnePerDocument<T extends { locale: string }>(
+    rows: T[],
+    requestedLocale: string | null,
+  ): T[] {
+    const groups = new Map<string, T[]>();
+    for (const row of rows) {
+      const r = row as unknown as { type: unknown; audience: unknown };
+      const key = `${String(r.type)}:${String(r.audience)}`;
+      const bucket = groups.get(key);
+      if (bucket) bucket.push(row);
+      else groups.set(key, [row]);
+    }
+    const out: T[] = [];
+    for (const bucket of groups.values()) {
+      const exact = requestedLocale
+        ? bucket.find((r) => r.locale.toLowerCase() === requestedLocale)
+        : undefined;
+      const fallback = bucket.find(
+        (r) => r.locale.toLowerCase() === LEGAL_FALLBACK_LOCALE,
+      );
+      const chosen = exact ?? fallback ?? bucket[0];
+      if (chosen) out.push(chosen);
+    }
+    return out;
+  }
 
   private roleAudiences(role?: string) {
     if (role === "DRIVER") return ["ALL", "DRIVER"];

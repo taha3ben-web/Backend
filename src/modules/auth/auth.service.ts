@@ -361,13 +361,50 @@ export class AuthService {
   ): Promise<{ ok: boolean; otherSessionsRevoked: boolean }> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, status: true, passwordHash: true },
+      // المرحلة ج: firebaseUid لازم لمعرفة هل البصمة المحفوظة
+      // هي كلمة مرور حقيقية أم بصمة Firebase غير قابلة للاستخدام.
+      select: {
+        id: true,
+        status: true,
+        passwordHash: true,
+        firebaseUid: true,
+      },
     });
     if (!user) throw new UnauthorizedException("User no longer exists");
     if (user.status !== "ACTIVE") throw new AppException("ACCOUNT_INACTIVE");
 
-    const valid = await bcrypt.compare(dto.currentPassword, user.passwordHash);
-    if (!valid) throw new AppException("INVALID_CREDENTIALS");
+    // ===== المرحلة ج: أول ضبط لكلمة المرور بعد دخول Firebase =====
+    //
+    // الحالة المكسورة سابقًا: الدخول الوحيد العامل هو Firebase، وهو يكتب
+    // passwordHash غير قابل للاستخدام قيمته bcrypt("firebase:<uid>").
+    // لذلك كان طلب currentPassword يعني أن السائق لا يستطيع وضع كلمة
+    // مرور أبدًا: لا يعرف القيمة السرية، ولا أحد يعرفها.
+    //
+    // لا توسيع للصلاحيات: المستخدم مُصادَق عليه بجلسة صالحة، ومن لديه
+    // كلمة مرور حقيقية يبقى ملزمًا بإدخالها تمامًا كالسابق.
+    let hasUsablePassword = true;
+    if (user.firebaseUid) {
+      try {
+        const isSentinel = await bcrypt.compare(
+          `firebase:${user.firebaseUid}`,
+          user.passwordHash,
+        );
+        hasUsablePassword = !isSentinel;
+      } catch {
+        // fail-closed: الشك يُفسر لمصلحة التحقق، لا لتجاوزه.
+        hasUsablePassword = true;
+      }
+    }
+
+    if (hasUsablePassword) {
+      if (!dto.currentPassword) {
+        throw new AppException("VALIDATION_ERROR", {
+          details: { currentPassword: "required" },
+        });
+      }
+      const valid = await bcrypt.compare(dto.currentPassword, user.passwordHash);
+      if (!valid) throw new AppException("INVALID_CREDENTIALS");
+    }
 
     const same = await bcrypt.compare(dto.newPassword, user.passwordHash);
     if (same) {
