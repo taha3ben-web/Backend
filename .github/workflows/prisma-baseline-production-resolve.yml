@@ -1,0 +1,145 @@
+name: Prisma Baseline - Production Resolve (manual only)
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: prisma-baseline-production-resolve
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DATABASE_URL: ${{ secrets.NEON_PRODUCTION_DATABASE_URL }}
+      REPORT_ISSUE_NUMBER: 18
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: READ-ONLY pre-check
+        id: pre
+        run: |
+          set -euo pipefail
+          RESULT=$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atq -F',' -c "
+            SELECT
+              (SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE'),
+              (SELECT count(*) FROM information_schema.columns WHERE table_schema='public'),
+              (SELECT count(*) FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace WHERE n.nspname='public' AND t.typtype='e'),
+              (SELECT count(*) FROM pg_indexes WHERE schemaname='public'),
+              (SELECT count(*) FROM information_schema.table_constraints WHERE table_schema='public' AND constraint_type='FOREIGN KEY'),
+              (CASE WHEN to_regclass('public._prisma_migrations') IS NULL THEN 'ABSENT' ELSE 'PRESENT' END)
+          ")
+          echo "pre_result=$RESULT" >> "$GITHUB_OUTPUT"
+          echo "Pre-check (tables,columns,enums,indexes,fks,_prisma_migrations): $RESULT"
+          IFS=',' read -r TBL COL ENM IDX FK PM <<< "$RESULT"
+          if [ "$TBL" != "104" ] || [ "$COL" != "1217" ] || [ "$ENM" != "70" ] || [ "$IDX" != "374" ] || [ "$FK" != "114" ] || [ "$PM" != "ABSENT" ]; then
+            echo "MISMATCH detected vs expected baseline (104,1217,70,374,114,ABSENT). Stopping without running migrate resolve."
+            exit 1
+          fi
+          echo "Pre-check MATCHES expected baseline. Proceeding."
+
+      - name: Prisma migrate resolve --applied 0_init
+        id: resolve
+        run: |
+          set -euo pipefail
+          npx prisma migrate resolve --applied 0_init 2>&1 | tee resolve_output.txt
+          {
+            echo 'resolve_output<<EOF'
+            cat resolve_output.txt
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Prisma migrate status
+        id: status
+        if: always()
+        run: |
+          set -euo pipefail
+          npx prisma migrate status 2>&1 | tee status_output.txt || true
+          {
+            echo 'status_output<<EOF'
+            cat status_output.txt
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+
+      - name: READ-ONLY post-check
+        id: post
+        if: always()
+        run: |
+          set -euo pipefail
+          RESULT=$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atq -F',' -c "
+            SELECT
+              (SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE'),
+              (SELECT count(*) FROM information_schema.columns WHERE table_schema='public'),
+              (SELECT count(*) FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace WHERE n.nspname='public' AND t.typtype='e'),
+              (SELECT count(*) FROM pg_indexes WHERE schemaname='public'),
+              (SELECT count(*) FROM information_schema.table_constraints WHERE table_schema='public' AND constraint_type='FOREIGN KEY'),
+              (CASE WHEN to_regclass('public._prisma_migrations') IS NULL THEN 'ABSENT' ELSE 'PRESENT' END)
+          ")
+          echo "post_result=$RESULT" >> "$GITHUB_OUTPUT"
+          echo "Post-check (tables,columns,enums,indexes,fks,_prisma_migrations): $RESULT"
+          MIG_ROW=$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atq -F'|' -c "SELECT migration_name, checksum, started_at, finished_at, applied_steps_count, rolled_back_at FROM public._prisma_migrations ORDER BY started_at")
+          echo "migrations_table<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$MIG_ROW" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+          echo "Migrations table rows: $MIG_ROW"
+          ROW_COUNTS=$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atq -F',' -c "SELECT (SELECT count(*) FROM \"Driver\"), (SELECT count(*) FROM \"Trip\"), (SELECT count(*) FROM \"User\")")
+          echo "row_counts=$ROW_COUNTS" >> "$GITHUB_OUTPUT"
+          echo "Driver/Trip/User row counts: $ROW_COUNTS"
+
+      - name: Post report comment (no credentials)
+        if: always()
+        env:
+          PRE: ${{ steps.pre.outputs.pre_result }}
+          POST: ${{ steps.post.outputs.post_result }}
+          MIGROWS: ${{ steps.post.outputs.migrations_table }}
+          ROWCOUNTS: ${{ steps.post.outputs.row_counts }}
+          RESOLVE_OUT: ${{ steps.resolve.outputs.resolve_output }}
+          STATUS_OUT: ${{ steps.status.outputs.status_output }}
+          RESOLVE_OUTCOME: ${{ steps.resolve.outcome }}
+          PRE_OUTCOME: ${{ steps.pre.outcome }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### Prisma Baseline - Production Resolve run"
+            echo "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo "Commit: $GITHUB_SHA"
+            echo ""
+            echo "**Pre-check outcome:** $PRE_OUTCOME"
+            echo "**Pre-check (tables,columns,enums,indexes,fks,_prisma_migrations):** \`$PRE\`"
+            echo ""
+            echo "**migrate resolve outcome:** $RESOLVE_OUTCOME"
+            echo '```'
+            echo "$RESOLVE_OUT"
+            echo '```'
+            echo ""
+            echo "**migrate status output:**"
+            echo '```'
+            echo "$STATUS_OUT"
+            echo '```'
+            echo ""
+            echo "**Post-check (tables,columns,enums,indexes,fks,_prisma_migrations):** \`$POST\`"
+            echo "**_prisma_migrations rows (name|checksum|started_at|finished_at|applied_steps_count|rolled_back_at):**"
+            echo '```'
+            echo "$MIGROWS"
+            echo '```'
+            echo "**Driver/Trip/User row counts:** \`$ROWCOUNTS\`"
+          } > report.md
+          gh issue comment "$REPORT_ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file report.md
