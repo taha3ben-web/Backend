@@ -1,0 +1,258 @@
+name: Prisma Baseline
+
+# يولّد migration الأساس (0_init) ويتحقّق منه داخل Linux x64، لأن Termux لا
+# يستطيع تشغيل schema-engine الخاص بـPrisma.
+#
+# لا يلمس هذا الـworkflow قاعدة الإنتاج (Neon) إطلاقًا: كل عمليات SQL تجري على
+# حاوية Postgres مؤقتة تُدمَّر بانتهاء التشغيل. لا migrate resolve، ولا
+# migrate dev، ولا db push، ولا reset، ولا أي SQL مدمّر.
+on:
+  push:
+    branches: [chore/prisma-baseline-v2]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: prisma-baseline-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  baseline:
+    name: Generate & Verify Prisma Baseline
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: baseline
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:5432/baseline?schema=public"
+      DIRECT_URL: "postgresql://postgres:postgres@127.0.0.1:5432/baseline?schema=public"
+      SHADOW_DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:5432/baseline_shadow?schema=public"
+      NODE_ENV: test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Prisma generate and schema validation
+        run: |
+          npx prisma generate
+          npm run prisma:validate
+
+      - name: Record the state before any change
+        run: |
+          echo '### State before the change' >> "$GITHUB_STEP_SUMMARY"
+          echo '' >> "$GITHUB_STEP_SUMMARY"
+          before=$(ls -1d prisma/migrations/*/ 2>/dev/null | wc -l)
+          echo "migration directories in prisma/migrations: $before" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "archive present: $([ -d prisma/migrations_archive ] && echo yes || echo no)" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo '' >> "$GITHUB_STEP_SUMMARY"
+          ls -1 prisma/migrations
+
+      - name: Generate the baseline SQL from schema.prisma
+        run: |
+          npx prisma migrate diff \
+            --from-empty \
+            --to-schema-datamodel prisma/schema.prisma \
+            --script \
+            -o /tmp/0_init.sql
+          wc -c /tmp/0_init.sql
+          test -s /tmp/0_init.sql
+
+      - name: Verify the baseline SQL (blocking)
+        run: node .github/scripts/verify-baseline-sql.js /tmp/0_init.sql baseline
+
+      - name: Archive the legacy migrations and install the baseline
+        run: |
+          mkdir -p prisma/migrations_archive
+          moved=0
+          for dir in prisma/migrations/*/ ; do
+            name=$(basename "${dir%/}")
+            if [ "$name" = "0_init" ]; then continue; fi
+            git mv "prisma/migrations/$name" "prisma/migrations_archive/$name"
+            moved=$((moved + 1))
+          done
+          echo "archived=$moved"
+          test "$moved" -gt 0
+          mkdir -p prisma/migrations/0_init
+          cp /tmp/0_init.sql prisma/migrations/0_init/migration.sql
+          test -s prisma/migrations/0_init/migration.sql
+          test -f prisma/migrations/migration_lock.toml
+          echo "archived legacy migrations: $moved" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Apply the baseline to the ephemeral database
+        run: npx prisma migrate deploy
+
+      - name: Migration status on the ephemeral database
+        run: npx prisma migrate status
+
+      - name: Prove the baseline reproduces schema.prisma exactly (blocking)
+        run: |
+          npx prisma migrate diff \
+            --from-url "$DATABASE_URL" \
+            --to-schema-datamodel prisma/schema.prisma \
+            --script \
+            -o /tmp/drift.sql
+          cat /tmp/drift.sql
+          node .github/scripts/verify-baseline-sql.js /tmp/drift.sql drift
+
+      - name: Re-applying the baseline must be a no-op
+        run: |
+          npx prisma migrate deploy
+          npx prisma migrate status
+
+      - name: Build
+        run: npm run build
+
+      - name: Unit tests
+        run: npm run test:ci
+
+      - name: Lint
+        run: npm run lint:check
+
+      - name: Strict typecheck
+        run: npm run typecheck:strict
+
+      - name: Refuse to commit anything outside prisma/migrations*
+        run: |
+          git status --porcelain | tee /tmp/status.txt
+          outside=$(grep -v 'prisma/migrations' /tmp/status.txt || true)
+          if [ -n "$outside" ]; then
+            echo 'unexpected changes outside the migrations tree:'
+            echo "$outside"
+            exit 1
+          fi
+
+      - name: Upload the generated SQL
+        uses: actions/upload-artifact@v4
+        with:
+          name: prisma-baseline
+          path: |
+            /tmp/0_init.sql
+            /tmp/drift.sql
+          if-no-files-found: error
+
+      - name: Commit the verified baseline
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A prisma/migrations prisma/migrations_archive
+          if git diff --cached --quiet; then
+            echo 'nothing to commit'
+            exit 0
+          fi
+          git commit -m 'chore(prisma): add the verified 0_init baseline and archive the legacy migrations' -m 'Generated by .github/workflows/prisma-baseline.yml with prisma migrate diff --from-empty. Proven on an ephemeral Postgres: migrate deploy succeeded, migrate status is up to date, and migrate diff --from-url against schema.prisma returned an empty script. Build, unit tests, lint and strict typecheck passed before this commit. The legacy migrations are archived under prisma/migrations_archive and none was deleted or edited.'
+          git push origin HEAD:${{ github.ref_name }}
+
+  legacy-replay-report:
+    name: Legacy Migrations Replay (report only)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: replay
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:5433/replay?schema=public"
+      DIRECT_URL: "postgresql://postgres:postgres@127.0.0.1:5433/replay?schema=public"
+      PSQL_URL: "postgresql://postgres:postgres@127.0.0.1:5433/replay"
+      NODE_ENV: test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Prisma generate
+        run: npx prisma generate
+
+      - name: Replay every legacy migration in filename order
+        run: |
+          set +e
+          failed=0
+          applied=0
+          for dir in $(ls -1d prisma/migrations/*/ 2>/dev/null | sort); do
+            name=$(basename "${dir%/}")
+            file="${dir}migration.sql"
+            if [ ! -f "$file" ]; then continue; fi
+            psql "$PSQL_URL" -v ON_ERROR_STOP=1 -q -f "$file" > /tmp/psql.log 2>&1
+            if [ $? -ne 0 ]; then
+              failed=$((failed + 1))
+              echo "FAILED: $name"
+              tail -n 5 /tmp/psql.log
+            else
+              applied=$((applied + 1))
+            fi
+          done
+          echo "applied=$applied failed=$failed"
+          {
+            echo '### Legacy replay'
+            echo ''
+            echo "applied: $applied - failed: $failed"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Compare the replayed database with schema.prisma (report only)
+        run: |
+          npx prisma migrate diff \
+            --from-url "$DATABASE_URL" \
+            --to-schema-datamodel prisma/schema.prisma \
+            --script \
+            -o /tmp/legacy-drift.sql || true
+          lines=$(grep -vE '^[[:space:]]*(--|$)' /tmp/legacy-drift.sql 2>/dev/null | wc -l)
+          {
+            echo ''
+            echo "statement lines still required to reach schema.prisma after replaying the legacy migrations: $lines"
+            echo ''
+            echo 'This number is the measured cost of the historical drift, and the reason a baseline is needed. It is informational and does not block.'
+          } >> "$GITHUB_STEP_SUMMARY"
+          head -n 80 /tmp/legacy-drift.sql || true
+
+      - name: Upload the legacy drift script
+        uses: actions/upload-artifact@v4
+        with:
+          name: legacy-drift
+          path: /tmp/legacy-drift.sql
+          if-no-files-found: warn
