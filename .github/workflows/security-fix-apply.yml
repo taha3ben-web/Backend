@@ -1,0 +1,74 @@
+name: Security Fix Apply
+
+# أداة إعادة تحقّق يدوية فقط (workflow_dispatch).
+#
+# النسخة الأولى من هذا الملف كانت تملك `contents: write` وترفع الـlockfile
+# إلى الفرع بنفسها، لأن ذلك كان السبيل الوحيد لتوليد package-lock.json
+# داخل بيئة حقيقية بدل تخمينه. بعد نجاح المهمة (commit 55cda346) أُلغيت تلك
+# الصلاحية وأُلغي مُشغّل `push`، فلم يبق في المستودع أي workflow يملك حق
+# الكتابة على الفروع.
+#
+# ما يفعله الآن: يثبّت من الـlockfile، يتحقّق من السجل، ويشغّل audit + build +
+# tests + lint + strict typecheck. لا يُعدّل أي ملف ولا يرفع أي commit.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: security-fix-apply-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Re-verify Security State
+    runs-on: ubuntu-latest
+
+    env:
+      # قيم وهمية فقط: prisma generate لا يفتح أي اتصال بقاعدة البيانات.
+      DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci?schema=public"
+      DIRECT_URL: "postgresql://ci:ci@localhost:5432/ci?schema=public"
+      SHADOW_DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci?schema=public"
+      NODE_ENV: test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install exactly what the lockfile pins
+        run: npm ci --ignore-scripts
+
+      - name: Confirm the resolved versions of the fixed packages
+        run: |
+          npm ls --omit=dev --all multer js-yaml lodash socket.io-parser fast-xml-parser brace-expansion glob tmp || true
+
+      - name: Re-check that every planned override is still published
+        run: node .github/scripts/resolve-safe-versions.js
+
+      - name: Generate Prisma client (no DB connection, no schema change)
+        run: npx prisma generate
+
+      - name: Production audit
+        run: |
+          npm audit --omit=dev --json > /tmp/audit-after.json || true
+          npm audit --omit=dev --audit-level=high
+
+      - name: Build
+        run: npm run build
+
+      - name: Tests
+        run: npm run test:ci
+
+      - name: Lint
+        run: npm run lint:check
+
+      - name: Strict typecheck
+        run: npm run typecheck:strict
