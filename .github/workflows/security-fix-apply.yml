@@ -1,0 +1,202 @@
+name: Security Fix Apply
+
+# ينفّذ الإصلاح الأمني بالكامل داخل GitHub Actions:
+#   التحقق من السجل → إصلاح lockfile داخل المدى → overrides مثبتة →
+#   تركيب نطيف → build/test/lint/typecheck → إعادة الـlockfile إلى الفرع.
+# لا يُستخدم `npm audit fix --force` إطلاقًا، ولا تُرقّى أي حزمة Major.
+on:
+  workflow_dispatch:
+  push:
+    branches: ["fix/dependency-audit-safe"]
+    paths:
+      - ".github/security-fix-plan.json"
+      - ".github/scripts/resolve-safe-versions.js"
+      - ".github/scripts/apply-overrides.js"
+      - ".github/scripts/fix-report.js"
+      - ".github/workflows/security-fix-apply.yml"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: security-fix-apply-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    name: Apply Safe Security Fixes
+    runs-on: ubuntu-latest
+
+    env:
+      # قيم وهمية فقط: prisma generate لا يفتح أي اتصال بقاعدة البيانات.
+      DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci?schema=public"
+      DIRECT_URL: "postgresql://ci:ci@localhost:5432/ci?schema=public"
+      SHADOW_DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci?schema=public"
+      NODE_ENV: test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Baseline install (exactly what the lockfile pins)
+        run: npm ci --ignore-scripts
+
+      - name: Baseline production audit
+        run: |
+          npm audit --omit=dev --json > /tmp/audit-before.json || true
+          node -e "const a=require('/tmp/audit-before.json');const m=a.metadata.vulnerabilities;console.log('BEFORE high='+m.high+' critical='+m.critical+' total='+m.total)"
+
+      - name: Real dependency tree before the fix
+        run: |
+          npm ls --omit=dev --all multer js-yaml lodash socket.io-parser fast-xml-parser brace-expansion glob tmp || true
+
+      - name: Resolve safe versions against the npm registry
+        run: node .github/scripts/resolve-safe-versions.js
+
+      # الخطوة أ: إصلاحات lockfile داخل المدى المسموح فقط (بدون --force).
+      # يخرج بقيمة غير صفرية إن بقيت ثغرات لا يملك إصلاحها وحده، وهو متوقع.
+      # الحكم النهائي يأتي من خطوة Verify الإلزامية لا من هنا.
+      - name: "Fix step A - in-range lockfile updates"
+        run: npm audit fix --omit=dev --ignore-scripts || true
+
+      - name: "Fix step B - apply proven overrides"
+        run: node .github/scripts/apply-overrides.js
+
+      - name: Refresh lockfile for the overrides
+        run: npm install --ignore-scripts
+
+      - name: Clean reinstall from the updated lockfile
+        run: |
+          rm -rf node_modules
+          npm ci --ignore-scripts
+
+      - name: Resolved dependency tree after the fix
+        run: |
+          npm ls --omit=dev --all multer js-yaml lodash socket.io-parser fast-xml-parser brace-expansion glob tmp || true
+
+      - name: Generate Prisma client (no DB connection, no schema change)
+        run: npx prisma generate
+
+      - name: Verify
+        id: verify
+        run: |
+          set +e
+          npm audit --omit=dev --json > /tmp/audit-after.json
+          npm audit --omit=dev --audit-level=high > /tmp/audit.log 2>&1
+          echo "audit=$?" >> "$GITHUB_OUTPUT"
+          npm run build > /tmp/build.log 2>&1
+          echo "build=$?" >> "$GITHUB_OUTPUT"
+          npm run test:ci > /tmp/test.log 2>&1
+          echo "test=$?" >> "$GITHUB_OUTPUT"
+          npm run lint:check > /tmp/lint.log 2>&1
+          echo "lint=$?" >> "$GITHUB_OUTPUT"
+          npm run typecheck:strict > /tmp/tsc.log 2>&1
+          echo "tsc=$?" >> "$GITHUB_OUTPUT"
+          for f in audit build test lint tsc; do
+            echo "::group::$f"
+            tail -n 80 "/tmp/$f.log"
+            echo "::endgroup::"
+          done
+          exit 0
+
+      - name: Guard the diff (nothing outside package files may change)
+        run: |
+          git --no-pager diff --stat > /tmp/diff.txt
+          cat /tmp/diff.txt
+          unexpected=$(git diff --name-only | grep -vE '^(package\.json|package-lock\.json)$' || true)
+          if [ -n "$unexpected" ]; then
+            echo "Unexpected files changed:"
+            echo "$unexpected"
+            exit 1
+          fi
+
+      - name: Build report
+        env:
+          RC_AUDIT: ${{ steps.verify.outputs.audit }}
+          RC_BUILD: ${{ steps.verify.outputs.build }}
+          RC_TEST: ${{ steps.verify.outputs.test }}
+          RC_LINT: ${{ steps.verify.outputs.lint }}
+          RC_TSC: ${{ steps.verify.outputs.tsc }}
+        run: node .github/scripts/fix-report.js
+
+      - name: Upload audit JSON and logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-fix-run
+          path: |
+            /tmp/audit-before.json
+            /tmp/audit-after.json
+            /tmp/resolved.json
+            /tmp/report.md
+            /tmp/audit.log
+            /tmp/build.log
+            /tmp/test.log
+            /tmp/lint.log
+            /tmp/tsc.log
+          if-no-files-found: warn
+
+      # لا يُرفع أي تغيير إلا إذا نجح البناء والاختبارات وlint وtypecheck.
+      - name: Commit the updated lockfile
+        if: >
+          steps.verify.outputs.build == '0' &&
+          steps.verify.outputs.test == '0' &&
+          steps.verify.outputs.lint == '0' &&
+          steps.verify.outputs.tsc == '0'
+        run: |
+          if [ -z "$(git status --porcelain package.json package-lock.json)" ]; then
+            echo "nothing to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json
+          git commit -m "fix(security): update vulnerable transitive deps within the same major" -m "Applied by .github/workflows/security-fix-apply.yml. No --force, no Major upgrade, no Prisma or source change. Build, tests, lint and strict typecheck all passed on the runner before this commit."
+          git push origin "HEAD:${{ github.ref_name }}"
+
+      - name: Publish the report on the open pull request
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let body = fs.readFileSync('/tmp/report.md', 'utf8');
+            if (body.length > 60000) {
+              body = body.slice(0, 60000) + '\n\n<!-- truncated; see the run log and artifact -->';
+            }
+            const branch = context.ref.replace('refs/heads/', '');
+            const prs = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              head: `${context.repo.owner}:${branch}`,
+            });
+            if (prs.data.length === 0) {
+              core.info('no open PR for this branch; report is in the log and artifact');
+              return;
+            }
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prs.data[0].number,
+              body,
+            });
+
+      # الحكم النهائي: أي فشل حقيقي يُسقط الـrun. لا إخفاء ولا continue-on-error.
+      - name: Final verdict
+        run: |
+          echo "audit=${{ steps.verify.outputs.audit }} build=${{ steps.verify.outputs.build }} test=${{ steps.verify.outputs.test }} lint=${{ steps.verify.outputs.lint }} tsc=${{ steps.verify.outputs.tsc }}"
+          fail=0
+          [ "${{ steps.verify.outputs.build }}" = "0" ] || { echo "build failed"; fail=1; }
+          [ "${{ steps.verify.outputs.test }}" = "0" ] || { echo "tests failed"; fail=1; }
+          [ "${{ steps.verify.outputs.lint }}" = "0" ] || { echo "lint failed"; fail=1; }
+          [ "${{ steps.verify.outputs.tsc }}" = "0" ] || { echo "strict typecheck failed"; fail=1; }
+          [ "${{ steps.verify.outputs.audit }}" = "0" ] || { echo "production audit still reports HIGH/CRITICAL"; fail=1; }
+          exit $fail

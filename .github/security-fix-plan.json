@@ -1,0 +1,84 @@
+{
+  "_note": "خطة الإصلاح الأمني. كل إصلاح مقيّد بنفس الـmajor المثبت حاليًا. لا ترقيات NestJS/Swagger/Socket.IO.",
+  "_rules": [
+    "لا يُكتب override لإصدار لم يُثبت أنه منشور فعليًا في سجل npm.",
+    "الإصدار المختار هو أدنى إصدار مستقر يحقق minSafe داخل allowedMajor (أقل قفزة ممكنة).",
+    "إن لم يوجد مرشّح مطابق، تُوصف الثغرة بأنها غير قابلة للإصلاح أمنًا ولا يُكتب override."
+  ],
+  "overrides": [
+    {
+      "package": "js-yaml",
+      "installed": "4.1.0",
+      "allowedMajor": 4,
+      "minSafe": "4.3.1",
+      "severity": "high",
+      "ghsa": [
+        "GHSA-5p4m-2wfm-xmqj (<4.3.1, quadratic CPU in !!omap)",
+        "GHSA-52cp-r559-cp3m (<4.3.0, merge-key chains)",
+        "GHSA-mh29-5h37-fv8m",
+        "GHSA-h67p-54hq-rp68"
+      ],
+      "chain": "ROOT > @nestjs/swagger@7.4.2 > js-yaml (pinned exactly to 4.1.0)",
+      "runtime": true,
+      "whyOverride": "الأب يثبّت النسخة بدقة فلا يمكن إصلاحها بتحديث lockfile. واجهة js-yaml 4.x (load/dump) مستقرة، وشجرة التطوير في هذا المستودع تشغّل 4.3.0 فعلًا بلا مشاكل."
+    },
+    {
+      "package": "multer",
+      "installed": "2.0.2",
+      "allowedMajor": 2,
+      "minSafe": "2.2.0",
+      "severity": "high",
+      "ghsa": [
+        "GHSA-72gw-mp4g-v24j (<2.2.0, deeply nested field names)",
+        "GHSA-3p4h-7m6x-2hcm (<2.2.0, incomplete cleanup of aborted uploads)",
+        "GHSA-5528-5vmv-3xc2 (<2.1.1)",
+        "GHSA-xf7r-hgr6-v32p (<2.1.0)",
+        "GHSA-v52c-386h-88mc (<2.1.0)"
+      ],
+      "chain": "ROOT > @nestjs/platform-express@10.4.22 > multer (pinned exactly to 2.0.2)",
+      "runtime": true,
+      "whyOverride": "النسخة الآمنة 2.2.0 داخل major 2 نفسه، فلا حاجة لـNestJS 11. إصلاحها يُسقط أيضًا تصنيف HIGH عن @nestjs/platform-express لأن multer هي الوحيدة عالية الخطورة في via الخاصة به."
+    },
+    {
+      "package": "lodash",
+      "installed": "4.17.21",
+      "allowedMajor": 4,
+      "minSafe": "4.17.24",
+      "severity": "high",
+      "ghsa": [
+        "GHSA-r5fr-rjxr-66jc (<=4.17.23, code injection via _.template)",
+        "GHSA-f23m-r3pf-42rh",
+        "GHSA-xxjr-mmjv-4gpg"
+      ],
+      "chain": "ROOT > @nestjs/config@3.3.0 > lodash (pinned 4.17.21) ; ROOT > @nestjs/swagger@7.4.2 > lodash (pinned 4.17.21)",
+      "runtime": true,
+      "whyOverride": "إن كان إصدار مصحّح منشورًا داخل major 4 فهو أقل تغيير ممكن. إن لم يكن منشورًا فلن يُكتب override وتُوثّق الثغرة كمتبقية."
+    }
+  ],
+  "inRangeLockfileOnly": [
+    {
+      "package": "socket.io-parser",
+      "installed": "4.2.6",
+      "minSafe": "4.2.7",
+      "ghsa": ["GHSA-2m8v-j782-fhvr (<4.2.7)"],
+      "chain": "ROOT > socket.io@4.8.3 (requires ~4.2.4) > socket.io-parser",
+      "why": "4.2.7 داخل ~4.2.4 فلا يحتاج override ولا ترقية Socket.IO."
+    },
+    {
+      "package": "fast-xml-parser",
+      "installed": "5.9.3",
+      "minSafe": "5.10.1",
+      "ghsa": ["GHSA-8r6m-32jq-jx6q (>=5.9.3 <5.10.1)"],
+      "chain": "ROOT > @google-cloud/storage@7.21.0 (requires ^5.3.4) > fast-xml-parser",
+      "why": "5.10.1 داخل ^5.3.4 فلا حاجة لتغيير الأب."
+    },
+    {
+      "package": "brace-expansion",
+      "installed": "1.1.16 + 2.1.2",
+      "minSafe": "1.1.18 / 2.1.4",
+      "ghsa": ["GHSA-mh99-v99m-4gvg", "GHSA-rgw5-rvv9-x895"],
+      "chain": "minimatch@3.1.5 (^1.1.7) > brace-expansion@1.1.16 ; exceljs > archiver > readdir-glob > minimatch@5.1.9 (^2.0.1) > brace-expansion@2.1.2",
+      "why": "المدايان ^1.1.7 و^2.0.1 يسمحان بالمصحّحين. يجب إصلاح النسختين معًا، ولذلك نترك الأمر لـnpm audit fix بدل override موحّد يكسر minimatch@3."
+    }
+  ]
+}
