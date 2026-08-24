@@ -34,7 +34,6 @@ jobs:
   audit:
     name: Dependency Audit
     runs-on: ubuntu-latest
-    continue-on-error: true
 
     steps:
       - name: Checkout
@@ -46,5 +45,12 @@ jobs:
           node-version: "20"
           cache: npm
 
-      - name: Audit dependencies
-        run: npm audit --audit-level=high
+      # البوابة الحاسمة: اعتماديات الإنتاج فقط.
+      # التبعيات التطويرية (jest, eslint, @nestjs/cli, webpack) لا تُشحن إلى الإنتاج،
+      # ولا يجوز أن تمنع دمج PR أو أن تدفعنا إلى ترقيات Major غير ضرورية.
+      - name: Audit production dependencies (blocking)
+        run: npm audit --omit=dev --audit-level=high
+
+      # تقرير فقط: يبقى مرئيًا في السجل دون أن يُفشل الفحص.
+      - name: Audit all dependencies including dev (report only)
+        run: npm audit --audit-level=high || true

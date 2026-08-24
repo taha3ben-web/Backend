@@ -1,0 +1,85 @@
+name: Dependency Audit Report
+
+# يشغّل npm audit داخل GitHub Actions وينشر النتيجة كتعليق على الـPR،
+# لأن تحليل الثغرات يحتاج شبكة واتصالًا بخدمة advisories.
+# لا يعدّل أي ملف في المستودع، ولا يستخدم `npm audit fix --force` إطلاقًا.
+on:
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: dependency-audit-report-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  report:
+    name: Audit Report
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install exactly what the lockfile pins
+        run: npm ci --ignore-scripts
+
+      - name: Collect audit data
+        run: |
+          npm audit --json > /tmp/full-audit.json || true
+          npm audit --omit=dev --json > /tmp/runtime-audit.json || true
+          npm audit fix --omit=dev --dry-run --json > /tmp/fix-dry-run.json || true
+
+      - name: Human-readable summaries
+        run: |
+          echo '===== npm audit --omit=dev --audit-level=high ====='
+          npm audit --omit=dev --audit-level=high || true
+          echo
+          echo '===== npm ls (runtime advisory candidates) ====='
+          npm ls --omit=dev multer body-parser express qs file-type socket.io-parser lodash js-yaml uuid fast-xml-parser brace-expansion glob tmp --all || true
+          echo
+          echo '===== npm ls (nest packages) ====='
+          npm ls @nestjs/core @nestjs/platform-express @nestjs/platform-socket.io @nestjs/websockets @nestjs/swagger @nestjs/schedule @nestjs/throttler --all || true
+
+      - name: Build report
+        run: node .github/scripts/audit-report.js > /tmp/audit-report.md
+
+      - name: Show report in log
+        run: cat /tmp/audit-report.md
+
+      - name: Upload raw audit JSON
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-audit-json
+          path: |
+            /tmp/full-audit.json
+            /tmp/runtime-audit.json
+            /tmp/fix-dry-run.json
+          if-no-files-found: warn
+
+      - name: Publish report as a PR comment
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let body = fs.readFileSync('/tmp/audit-report.md', 'utf8');
+            if (body.length > 60000) {
+              body = body.slice(0, 60000) + '\n\n<!-- truncated; see workflow log and artifact -->';
+            }
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
