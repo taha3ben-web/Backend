@@ -1,0 +1,227 @@
+name: Prisma Production Deploy (manual only)
+
+# يشغّل npx prisma migrate deploy الحقيقي على Neon Production.
+# يعمل فقط عبر workflow_dispatch اليدوي من تبويب Actions - لا يعمل تلقائيًا
+# عند push أو pull_request. لا يحتوي أي connection string أو credential:
+# يقرأ DATABASE_URL من secrets.NEON_PRODUCTION_DATABASE_URL فقط.
+#
+# لا يستخدم db push، ولا migrate reset، ولا migrate dev، ولا --accept-data-loss،
+# ولا أي SQL يدوي لتنفيذ الـmigration. يطبّق فقط الـmigrations الموجودة في
+# main تحت prisma/migrations/ عبر Prisma CLI الرسمي.
+#
+# قبل التنفيذ ينفّذ فحص READ-ONLY (بدون أي كتابة) على TripTracking والعدادات
+# العامة لقاعدة البيانات، ويتوقف فورًا (exit 1) إذا كانت الحالة غير متوقعة،
+# دون أي محاولة إصلاح تلقائي.
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: prisma-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Prisma Migrate Deploy (Production)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: ${{ secrets.NEON_PRODUCTION_DATABASE_URL }}
+      REPORT_ISSUE_NUMBER: 18
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: READ-ONLY pre-check (TripTracking + database-wide counts)
+        id: pre
+        run: |
+          set -euo pipefail
+          RESULT=$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atq -F',' -c "
+            SELECT
+              (SELECT relkind FROM pg_class WHERE relname = 'TripTracking' AND relnamespace = 'public'::regnamespace),
+              (SELECT count(*) FROM \"TripTracking\"),
+              (SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE'),
+              (SELECT count(*) FROM information_schema.columns WHERE table_schema='public'),
+              (SELECT count(*) FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace WHERE n.nspname='public' AND t.typtype='e'),
+              (SELECT count(*) FROM pg_indexes WHERE schemaname='public'),
+              (SELECT count(*) FROM information_schema.table_constraints WHERE table_schema='public' AND constraint_type='FOREIGN KEY')
+          ")
+          echo "pre_result=$RESULT" >> "$GITHUB_OUTPUT"
+          echo "Pre-check (TripTracking relkind, TripTracking rows, tables, columns, enums, indexes, fks): $RESULT"
+          IFS=',' read -r RK TT TBL COL ENM IDX FK <<< "$RESULT"
+          if [ "$RK" != "r" ] || [ "$TT" != "51" ]; then
+            echo "MISMATCH detected: expected TripTracking relkind=r and row count=51 before migration. Stopping without running migrate deploy."
+            exit 1
+          fi
+          echo "Pre-check MATCHES expected state. Proceeding."
+
+      - name: Record pre-migration ids and min/max recordedAt (read-only)
+        id: pre_ids
+        run: |
+          set -euo pipefail
+          MINMAX=$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atq -F',' -c "SELECT min(\"recordedAt\"), max(\"recordedAt\") FROM \"TripTracking\"")
+          echo "pre_minmax=$MINMAX" >> "$GITHUB_OUTPUT"
+          echo "Pre-migration min/max recordedAt: $MINMAX"
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atq -c "SELECT id FROM \"TripTracking\" ORDER BY id" > /tmp/pre_ids.txt
+          echo "Recorded $(wc -l < /tmp/pre_ids.txt) TripTracking ids to /tmp/pre_ids.txt"
+
+      - name: Prisma migrate deploy (real CLI)
+        id: deploy
+        run: |
+          set -euo pipefail
+          npx prisma migrate deploy 2>&1 | tee deploy_output.txt
+          {
+            echo 'deploy_output<<EOF'
+            cat deploy_output.txt
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Prisma migrate status
+        id: status
+        if: always()
+        run: |
+          set -euo pipefail
+          npx prisma migrate status 2>&1 | tee status_output.txt || true
+          {
+            echo 'status_output<<EOF'
+            cat status_output.txt
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+
+      - name: READ-ONLY post-check (TripTracking + database-wide counts)
+        id: post
+        if: always()
+        run: |
+          set -euo pipefail
+          RESULT=$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atq -F',' -c "
+            SELECT
+              (SELECT relkind FROM pg_class WHERE relname = 'TripTracking' AND relnamespace = 'public'::regnamespace),
+              (SELECT count(*) FROM \"TripTracking\"),
+              (SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE'),
+              (SELECT count(*) FROM information_schema.columns WHERE table_schema='public'),
+              (SELECT count(*) FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace WHERE n.nspname='public' AND t.typtype='e'),
+              (SELECT count(*) FROM pg_indexes WHERE schemaname='public'),
+              (SELECT count(*) FROM information_schema.table_constraints WHERE table_schema='public' AND constraint_type='FOREIGN KEY')
+          ")
+          echo "post_result=$RESULT" >> "$GITHUB_OUTPUT"
+          echo "Post-check (TripTracking relkind, TripTracking rows, tables, columns, enums, indexes, fks): $RESULT"
+          MINMAX=$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atq -F',' -c "SELECT min(\"recordedAt\"), max(\"recordedAt\") FROM \"TripTracking\"")
+          echo "post_minmax=$MINMAX" >> "$GITHUB_OUTPUT"
+          echo "Post-migration min/max recordedAt: $MINMAX"
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atq -c "SELECT id FROM \"TripTracking\" ORDER BY id" > /tmp/post_ids.txt
+          if cmp -s /tmp/pre_ids.txt /tmp/post_ids.txt; then
+            echo "ids_match=IDENTICAL" >> "$GITHUB_OUTPUT"
+            echo "TripTracking id set is IDENTICAL before/after."
+          else
+            echo "ids_match=DIFFERENT" >> "$GITHUB_OUTPUT"
+            echo "WARNING: TripTracking id set DIFFERS before/after."
+          fi
+          PARTS=$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atq -c "SELECT inhrelid::regclass FROM pg_inherits WHERE inhparent = '\"TripTracking\"'::regclass ORDER BY 1")
+          echo "partitions<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$PARTS" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+          echo "Partitions: $PARTS"
+          FUNC=$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atq -c "SELECT count(*) FROM pg_proc WHERE proname = 'flamingo_ensure_tracking_partition'")
+          echo "function_exists=$FUNC" >> "$GITHUB_OUTPUT"
+          echo "flamingo_ensure_tracking_partition present count: $FUNC"
+          PKFK=$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atq -F'|' -c "
+            SELECT conname, contype FROM pg_constraint
+            WHERE conrelid = '\"TripTracking\"'::regclass
+            ORDER BY conname
+          ")
+          echo "pk_fk<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$PKFK" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+          echo "PK/FK constraints: $PKFK"
+          IDXLIST=$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atq -c "SELECT indexname FROM pg_indexes WHERE tablename = 'TripTracking' ORDER BY indexname")
+          echo "indexes<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$IDXLIST" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+          echo "Indexes: $IDXLIST"
+          MIG_ROW=$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atq -F'|' -c "SELECT migration_name, checksum, started_at, finished_at, applied_steps_count, rolled_back_at FROM public._prisma_migrations WHERE migration_name = '20260825122500_trip_tracking_partitioning'")
+          echo "migration_row<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$MIG_ROW" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+          echo "_prisma_migrations row for this migration: $MIG_ROW"
+          ROW_COUNTS=$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atq -F',' -c "SELECT (SELECT count(*) FROM \"Driver\"), (SELECT count(*) FROM \"Trip\"), (SELECT count(*) FROM \"User\")")
+          echo "row_counts=$ROW_COUNTS" >> "$GITHUB_OUTPUT"
+          echo "Driver/Trip/User row counts: $ROW_COUNTS"
+
+      - name: Post report comment (no credentials)
+        if: always()
+        env:
+          PRE: ${{ steps.pre.outputs.pre_result }}
+          PRE_MINMAX: ${{ steps.pre_ids.outputs.pre_minmax }}
+          POST: ${{ steps.post.outputs.post_result }}
+          POST_MINMAX: ${{ steps.post.outputs.post_minmax }}
+          IDS_MATCH: ${{ steps.post.outputs.ids_match }}
+          PARTITIONS: ${{ steps.post.outputs.partitions }}
+          FUNC_EXISTS: ${{ steps.post.outputs.function_exists }}
+          PKFK: ${{ steps.post.outputs.pk_fk }}
+          INDEXES: ${{ steps.post.outputs.indexes }}
+          MIGROW: ${{ steps.post.outputs.migration_row }}
+          ROWCOUNTS: ${{ steps.post.outputs.row_counts }}
+          DEPLOY_OUT: ${{ steps.deploy.outputs.deploy_output }}
+          STATUS_OUT: ${{ steps.status.outputs.status_output }}
+          DEPLOY_OUTCOME: ${{ steps.deploy.outcome }}
+          PRE_OUTCOME: ${{ steps.pre.outcome }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### Prisma Production Deploy run"
+            echo "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo "Commit: $GITHUB_SHA"
+            echo ""
+            echo "**Pre-check outcome:** $PRE_OUTCOME"
+            echo "**Pre-check (relkind,rows,tables,columns,enums,indexes,fks):** \`$PRE\`"
+            echo "**Pre min/max recordedAt:** \`$PRE_MINMAX\`"
+            echo ""
+            echo "**migrate deploy outcome:** $DEPLOY_OUTCOME"
+            echo '```'
+            echo "$DEPLOY_OUT"
+            echo '```'
+            echo ""
+            echo "**migrate status output:**"
+            echo '```'
+            echo "$STATUS_OUT"
+            echo '```'
+            echo ""
+            echo "**Post-check (relkind,rows,tables,columns,enums,indexes,fks):** \`$POST\`"
+            echo "**Post min/max recordedAt:** \`$POST_MINMAX\`"
+            echo "**IDs match before/after:** \`$IDS_MATCH\`"
+            echo "**Partitions:**"
+            echo '```'
+            echo "$PARTITIONS"
+            echo '```'
+            echo "**flamingo_ensure_tracking_partition exists (count):** \`$FUNC_EXISTS\`"
+            echo "**PK/FK on TripTracking:**"
+            echo '```'
+            echo "$PKFK"
+            echo '```'
+            echo "**Indexes on TripTracking:**"
+            echo '```'
+            echo "$INDEXES"
+            echo '```'
+            echo "**_prisma_migrations row for 20260825122500_trip_tracking_partitioning:**"
+            echo '```'
+            echo "$MIGROW"
+            echo '```'
+            echo "**Driver/Trip/User row counts:** \`$ROWCOUNTS\`"
+          } > report.md
+          gh issue comment "$REPORT_ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file report.md
