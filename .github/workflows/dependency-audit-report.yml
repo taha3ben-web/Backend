@@ -58,7 +58,7 @@ jobs:
         run: cat /tmp/audit-report.md
 
       - name: Upload raw audit JSON
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dependency-audit-json
           path: |

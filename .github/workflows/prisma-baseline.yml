@@ -145,7 +145,7 @@ jobs:
           fi
 
       - name: Upload the generated SQL
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: prisma-baseline
           path: |
@@ -237,7 +237,7 @@ jobs:
           head -n 80 /tmp/legacy-drift.sql || true
 
       - name: Upload the legacy drift script
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: legacy-drift
           path: /tmp/legacy-drift.sql
