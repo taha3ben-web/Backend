@@ -13,7 +13,6 @@ import {
   LEADERBOARD_SETTING_GROUP,
   LEADERBOARD_SETTING_KEY,
   computeScore,
-  normalizeLeaderboardConfig,
   resolveCoefficients,
   resolvePeriodWindow,
   resolveScoreUnitKey,
