@@ -17,6 +17,7 @@ import {
 } from "../../common/decorators/current-user.decorator";
 import { PaginationDto } from "../../common/dto/pagination.dto";
 import { DriverSelfService } from "./driver-self.service";
+import { LeaderboardService } from "./leaderboard.service";
 import {
   AddDocumentDto,
   SetAvailabilityDto,
@@ -32,7 +33,10 @@ import {
 @Roles("DRIVER")
 @Controller("driver")
 export class DriverSelfController {
-  constructor(private readonly service: DriverSelfService) {}
+  constructor(
+    private readonly service: DriverSelfService,
+    private readonly leaderboardService: LeaderboardService,
+  ) {}
 
   @Get("me")
   me(@CurrentUser() user: AuthUser) {
@@ -45,16 +49,21 @@ export class DriverSelfController {
   }
 
   @Post("me/availability")
-  availability(
-    @CurrentUser() user: AuthUser,
-    @Body() dto: SetAvailabilityDto,
-  ) {
+  availability(@CurrentUser() user: AuthUser, @Body() dto: SetAvailabilityDto) {
     return this.service.setAvailability(user.userId, dto);
   }
 
   /**
    * صدارة السائقين: scope=city (الافتراضي) أو scope=country.
    * مطلوبة لشاشة الطبقات والترقية في تطبيق السائق.
+   *
+   * العقد المنشور محفوظ بحرفه (scope | localBasis | period | available |
+   * total | rows[] | me) وأُضيفت حقول جديدة فقط. الحساب انتقل إلى
+   * LeaderboardService: الترتيب يُحسب في PostgreSQL على كل المؤهلين بدل
+   * جلب 1000 صف وفرزها في Node.
+   *
+   * ملاحظة: scope و limit فقط تُقرأ من الطلب. الولاية لا تُقبل من العميل
+   * إطلاقًا — تُستخرج من ملف السائق المرتبط بالتوكن.
    */
   @Get("leaderboard")
   leaderboard(
@@ -67,6 +76,28 @@ export class DriverSelfController {
       scope,
       limit ? Number(limit) : undefined,
     );
+  }
+
+  /**
+   * الشكل الكامل للصدارة: الترتيب الوطني وترتيب الولاية معًا في رد واحد،
+   * مع فوارق النقاط (pointsToNext / pointsToLeader) والفترة الفعّالة
+   * والقواعد المُطبَّقة.
+   *
+   * نقطة منفصلة عن "/leaderboard" حتى لا يتغير حجم أو شكل الرد المنشور
+   * على التطبيقات القديمة.
+   */
+  @Get("leaderboard/summary")
+  leaderboardSummary(
+    @CurrentUser() user: AuthUser,
+    @Query("scope") scope?: string,
+    @Query("period") period?: string,
+    @Query("limit") limit?: string,
+  ) {
+    return this.leaderboardService.summary(user.userId, {
+      scope,
+      period,
+      limit,
+    });
   }
 
   /**
@@ -106,12 +137,25 @@ export class DriverSelfController {
     return this.service.trips(user.userId, q);
   }
 
-
   @Get("me/trips/:id")
-  trip(@CurrentUser() user: AuthUser, @Param("id") id: string) { return this.service.trip(user.userId, id); }
+  trip(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.service.trip(user.userId, id);
+  }
 
   @Patch("me/trips/:id/status")
-  updateTrip(@CurrentUser() user: AuthUser, @Param("id") id: string, @Body() body: { status: "ARRIVING" | "IN_PROGRESS" | "COMPLETED"; reason?: string }) { return this.service.updateTripStatus(user.userId, id, body.status, body.reason); }
+  updateTrip(
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body()
+    body: { status: "ARRIVING" | "IN_PROGRESS" | "COMPLETED"; reason?: string },
+  ) {
+    return this.service.updateTripStatus(
+      user.userId,
+      id,
+      body.status,
+      body.reason,
+    );
+  }
 
   @Post("me/documents")
   addDocument(@CurrentUser() user: AuthUser, @Body() dto: AddDocumentDto) {

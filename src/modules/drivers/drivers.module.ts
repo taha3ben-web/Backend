@@ -3,7 +3,7 @@ import { RbacModule } from "../rbac/rbac.module";
 import { NotificationsModule } from "../notifications/notifications.module";
 import { TripGuardsModule } from "../trips/trip-guards.module";
 import { ProfileLevelsModule } from "../profile-levels/profile-levels.module";
-// المرحلة و: لحقن RequirementsService المُصدَّر من وحدة الكتالوج.
+// المرحلة و: لحقن RequirementsService المُصدَّر من وحدة الكتالوج.
 // لا خطر استيراد دائري: VehicleTypesModule لا يستورد DriversModule.
 import { VehicleTypesModule } from "../vehicle-types/vehicle-types.module";
 import { DriversService } from "./drivers.service";
@@ -18,6 +18,11 @@ import { DriverSelfController } from "./driver-self.controller";
 import { DriverQrService } from "./driver-qr.service";
 import { DriverQrController } from "./driver-qr.controller";
 import { DriverQrPublicController } from "./driver-qr-public.controller";
+// محرّك الصدارة: خدمة واحدة تقرأ القواعد من جدول Setting وترتّب في PostgreSQL.
+// ConfigCacheService لا يحتاج استيرادًا: InfraModule مُعلن @Global.
+// StorageService كذلك @Global. ProfileLevelsModule مستورد أصلًا أعلاه.
+import { LeaderboardService } from "./leaderboard.service";
+import { LeaderboardAdminController } from "./leaderboard-admin.controller";
 
 @Module({
   imports: [
@@ -34,6 +39,7 @@ import { DriverQrPublicController } from "./driver-qr-public.controller";
     DocumentsService,
     DriverSelfService,
     DriverQrService,
+    LeaderboardService,
   ],
   controllers: [
     DriversController,
@@ -42,6 +48,7 @@ import { DriverQrPublicController } from "./driver-qr-public.controller";
     DriverSelfController,
     DriverQrController,
     DriverQrPublicController,
+    LeaderboardAdminController,
   ],
   exports: [
     DriversService,
@@ -50,6 +57,7 @@ import { DriverQrPublicController } from "./driver-qr-public.controller";
     DocumentsService,
     DriverSelfService,
     DriverQrService,
+    LeaderboardService,
   ],
 })
 export class DriversModule {}
