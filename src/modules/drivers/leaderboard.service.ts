@@ -41,7 +41,7 @@ import {
  * الحل هنا:
  *  - الترتيب يُحسب في PostgreSQL بـ ROW_NUMBER()/COUNT() OVER على كل المؤهلين،
  *    ويُعاد من القاعدة صفّا المتصدرين فقط + صف السائق نفسه. لا فرز في Node.
- *  - المعاملات تأتي من جدول Setting القائم عبر leaderboard.util (مُطهرة ومقصوصة).
+ *  - المعاملات تأتي من جدول Setting القائم عبر leaderboard.util (مُطهّرة ومقصوصة).
  *  - الولاية تُستخرج من ملف السائق المرتبط بالتوكن، ولا تُقرأ من الطلب أبدًا.
  *
  * ما لا يفعله هذا الملف (ولا يدّعيه):
@@ -85,6 +85,26 @@ interface TopRow {
   wilaya_name_en: string | null;
 }
 
+/**
+ * صف العرض الواحد في قائمة المتصدرين.
+ *
+ * مُعلن صراحة لأن الرد المُعطّل يعيد قائمة فارغة؛ لو تُركت بلا نوع
+ * لأصبح نوع الصف في الاتحاد unknown ولانكسر بناء العقد القديم.
+ */
+export interface LeaderboardRowView {
+  rank: number;
+  driverId: string;
+  name: string | null;
+  photoUrl: string | null;
+  cityName: string | null;
+  wilayaName: { ar: string; fr: string | null; en: string | null } | null;
+  score: number;
+  scoreUnitKey: "TRIP" | "POINT";
+  rating: number;
+  completedTrips: number;
+  isMe: boolean;
+}
+
 export interface LeaderboardQuery {
   scope?: string;
   period?: string;
@@ -110,7 +130,7 @@ export class LeaderboardService {
    * بين وحدة السائقين ووحدة الإعدادات.
    *
    * الكتابة ليست هنا إطلاقًا: تمرّ عبر مسار الإعدادات المحكوم أصلًا
-   * (مسودة → مراجعة → نشر → SettingRevision) فيُعرف من غير ومتى وماذا،
+   * (مسودة → مراجعة → نشر → SettingRevision) فيُعرف من غيّر ومتى وماذا،
    * بلا نظام تدقيق موازٍ.
    */
   async loadConfig(): Promise<{
@@ -285,7 +305,7 @@ export class LeaderboardService {
             totalDrivers: null,
             pointsToNext: null,
             pointsToLeader: null,
-            topDrivers: [],
+            topDrivers: [] as LeaderboardRowView[],
           },
       me: me
         ? {
@@ -593,7 +613,7 @@ export class LeaderboardService {
     scope: LeaderboardScope,
     myDriverId: string,
     unitKey: "TRIP" | "POINT",
-  ) {
+  ): Promise<LeaderboardRowView[]> {
     return Promise.all(
       rows.map(async (r) => ({
         rank: scope === "NATIONAL" ? r.national_rank : (r.wilaya_rank ?? 0),
@@ -634,7 +654,7 @@ export class LeaderboardService {
       totalDrivers: null,
       pointsToNext: null,
       pointsToLeader: null,
-      topDrivers: [] as unknown[],
+      topDrivers: [] as LeaderboardRowView[],
     };
     return {
       enabled: false,
