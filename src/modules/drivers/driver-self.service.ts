@@ -26,6 +26,7 @@ import { PaginationDto } from "../../common/dto/pagination.dto";
 import { round2 } from "../../common/money.util";
 import { RequirementsService } from "../vehicle-types/requirements.service";
 import { identityChanged } from "./vehicle-verification.util";
+import { LeaderboardService } from "./leaderboard.service";
 import {
   AddDocumentDto,
   DOC_TYPES,
@@ -98,6 +99,9 @@ export class DriverSelfService {
     private readonly profileLevels: ProfileLevelsService,
     // المرحلة و: إعادة استعمال خدمة المتطلبات القائمة بدل بناء نظام فحص ثانٍ.
     private readonly requirements: RequirementsService,
+    // محرّك الصدارة: الترتيب والمعاملات في مكان واحد. لا خطر دائري:
+    // LeaderboardService لا يعتمد على DriverSelfService إطلاقًا.
+    private readonly leaderboardEngine: LeaderboardService,
   ) {}
 
   /** حالة عقوبات الإلغاء للسائق الحالي (مشتقة من userId الجلسة). */
@@ -480,14 +484,15 @@ export class DriverSelfService {
         (active?.vehicleTypeId ?? null) !== (requestedTypeId ?? null);
       if (active) {
         // عند تغيّر هوية المركبة (الصانع/الطراز/اللوحة/السنة) يُعاد ضبط التحقق للمراجعة.
-        const resetVerification = identityChanged(active, data) || typeChanged
-          ? {
-              verificationStatus: "PENDING" as const,
-              verificationNote: null,
-              verifiedById: null,
-              verifiedAt: null,
-            }
-          : {};
+        const resetVerification =
+          identityChanged(active, data) || typeChanged
+            ? {
+                verificationStatus: "PENDING" as const,
+                verificationNote: null,
+                verifiedById: null,
+                verifiedAt: null,
+              }
+            : {};
         await this.prisma.vehicle.update({
           where: { id: active.id },
           data: { ...data, ...resetVerification },
@@ -503,141 +508,25 @@ export class DriverSelfService {
   }
 
   /**
-   * ===== المرحلة أ: صدارة السائقين (المدينة / الجزائر كاملة) =====
+   * ===== صدارة السائقين — العقد المنشور ("GET /api/driver/leaderboard") =====
    *
-   * شاشة الطبقات في تطبيق السائق كانت تعرض حالة فارغة لأن هذه النقطة
-   * لم تكن موجودة إطلاقًا.
+   * الحساب انتقل إلى LeaderboardService. النسخة السابقة كانت تجلب `take: 1000`
+   * سائق **بلا orderBy** ثم ترتّبهم في Node، وهذا يعني أربعة أعطاب حقيقية:
+   *   1. على مستوى الجزائر كان "المتصدرون" أول ألف صف ترجعه القاعدة، لا الأعلى نقاطًا.
+   *   2. بلا orderBy فالعينة نفسها تختلف بين طلبين — ترتيب يرتجف.
+   *   3. سائق خارج الألف لا يرى مرتبته إطلاقًا (me = null).
+   *   4. المعادلة مدفونة في الكود فلا يملكها العمل.
    *
-   * الترتيب مشتق من الرحلات المكتملة فعليًا (COMPLETED) لا من totalTrips
-   * المخزّن، لأن الأخير عدّاد تشغيلي قد يتقدم بلا رحلة مكتملة؛ وهو
-   * نفس المصدر الذي تبنى عليه مستويات الملف (ProfileLevelsService)، فلا يرى
-   * السائق رقمين متعارضين في شاشتين.
+   * المحرك الجديد يرتّب في PostgreSQL (ROW_NUMBER/COUNT OVER) على كل المؤهلين،
+   * ويقرأ المعاملات من جدول Setting (مفتاح "driver.leaderboard") فيملكها العمل.
    *
-   * السائقون المعتمدون فقط (APPROVED)، والرتبة تُحسب على القائمة الكاملة
-   * قبل الاقتطاع، حتى يعرف من هو خارج العشرة الأولى مرتبته الحقيقية.
-   * لا أرقام مخترعة ولا مراكز تجريبية.
+   * شكل الرد محفوظ بحرفه (scope | localBasis | period | available | total |
+   * rows[] | me، وكل صف فيه rank | driverId | name | photoUrl | cityName | score |
+   * scoreUnit | rating | isMe) وأُضيفت حقول جديدة فقط، فالتطبيق المنشور
+   * يعمل كما هو. التفاصيل الكاملة في "GET /driver/leaderboard/summary".
    */
   async leaderboard(userId: string, scopeRaw?: string, limitRaw?: number) {
-    const driver = await this.requireDriver(userId);
-    const scope = scopeRaw === "country" ? "country" : "city";
-    const limit = Math.min(Math.max(Number(limitRaw) || 20, 5), 50);
-
-    // سائق بلا مدينة لا يمكن ترتيبه محليًا: نقول ذل�� صراحة بدل قائمة مضلّلة.
-    // ===== المرحلة ج: "مدينتي" تعمل بالولاية عند غياب المدينة =====
-    // بعد قرار "الولاية فقط عند التسجيل" لم يعد للسائق الجديد cityId،
-    // فكان الشرط أدناه يُرجع available:false للجميع تقريبًا: ميزة مبنية
-    // في الطرفين ولا تعمل. الأساس المحلي الآن: المدينة إن وُجدت، وإلا
-    // الولاية؛ ويُعلن الأساس في الرد (localBasis) لأن عنوان التبويب يختلف
-    // بين "مدينتي" و"ولايتي"، ولا يجوز للتطبيق أن يخمنه.
-    const localFilter: Prisma.DriverWhereInput | null = driver.cityId
-      ? { cityId: driver.cityId }
-      : driver.wilayaId
-        ? { wilayaId: driver.wilayaId }
-        : null;
-    const localBasis: "city" | "wilaya" | null = driver.cityId
-      ? "city"
-      : driver.wilayaId
-        ? "wilaya"
-        : null;
-
-    // من لا مدينة له ولا ولاية لا يمكن ترتيبه محليًا: نقول ذلك صراحة.
-    if (scope === "city" && !localFilter) {
-      return {
-        scope,
-        localBasis,
-        period: "ALL_TIME",
-        available: false,
-        rows: [],
-        me: null,
-      };
-    }
-
-    const peers = await this.prisma.driver.findMany({
-      where: {
-        status: "APPROVED",
-        ...(scope === "city" && localFilter ? localFilter : {}),
-      },
-      select: {
-        id: true,
-        rating: true,
-        city: { select: { name: true } },
-        // المرحلة ج: من لا مدينة له يُعرف بولايته، لا بفراغ.
-        wilaya: { select: { nameAr: true, nameFr: true, nameEn: true } },
-        user: { select: { name: true, avatarUrl: true } },
-      },
-      // حدّ أمان لحجم الاستعلام التالي.
-      take: 1000,
-    });
-
-    if (peers.length === 0) {
-      return {
-        scope,
-        localBasis,
-        period: "ALL_TIME",
-        available: true,
-        rows: [],
-        me: null,
-      };
-    }
-
-    const counts = await this.prisma.trip.groupBy({
-      by: ["driverId"],
-      where: {
-        status: "COMPLETED",
-        driverId: { in: peers.map((p) => p.id) },
-      },
-      _count: { _all: true },
-    });
-    const countBy = new Map<string, number>();
-    for (const row of counts) {
-      if (row.driverId) countBy.set(row.driverId, row._count._all);
-    }
-
-    const ranked = peers
-      .map((p) => ({
-        driverId: p.id,
-        name: p.user?.name ?? null,
-        avatarKey: p.user?.avatarUrl ?? null,
-        // المرحلة ج: المدينة إن وُجدت، وإلا اسم الولاية.
-        cityName: p.city?.name ?? p.wilaya?.nameAr ?? null,
-        rating: Number(p.rating),
-        score: countBy.get(p.id) ?? 0,
-      }))
-      // التعادل يُفصل بالتقييم ثم بالمعرّف لترتيب ثابت لا يرتجف بين الطلبات.
-      .sort(
-        (a, b) =>
-          b.score - a.score ||
-          b.rating - a.rating ||
-          a.driverId.localeCompare(b.driverId),
-      )
-      .map((row, index) => ({ ...row, rank: index + 1 }));
-
-    const mine = ranked.find((row) => row.driverId === driver.id) ?? null;
-    const top = ranked.slice(0, limit);
-
-    const resolve = async (row: (typeof ranked)[number]) => ({
-      rank: row.rank,
-      driverId: row.driverId,
-      name: row.name,
-      photoUrl: await this.storage.resolveStoredUrl(
-        row.avatarKey,
-        STORED_MEDIA_READ_TTL_MINUTES,
-      ),
-      cityName: row.cityName,
-      score: row.score,
-      scoreUnit: "رحلة",
-      rating: row.rating,
-      isMe: row.driverId === driver.id,
-    });
-
-    return {
-      scope,
-      period: "ALL_TIME",
-      available: true,
-      total: ranked.length,
-      rows: await Promise.all(top.map(resolve)),
-      me: mine ? await resolve(mine) : null,
-    };
+    return this.leaderboardEngine.legacyView(userId, scopeRaw, limitRaw);
   }
 
   /**
@@ -876,13 +765,18 @@ export class DriverSelfService {
     return { items, total, page: q.page, limit: q.limit };
   }
 
-
   async trip(userId: string, tripId: string) {
-    const trip = await this.prisma.trip.findUnique({ where: { id: tripId }, include: { passenger: { select: { name: true, phone: true, avatarUrl: true } } } });
+    const trip = await this.prisma.trip.findUnique({
+      where: { id: tripId },
+      include: {
+        passenger: { select: { name: true, phone: true, avatarUrl: true } },
+      },
+    });
     const driver = await this.requireDriver(userId);
-    if (!trip || trip.driverId !== driver.id) throw new NotFoundException("الرحلة غير موجودة");
+    if (!trip || trip.driverId !== driver.id)
+      throw new NotFoundException("الرحلة غير موجودة");
     // السائق لا يرى رقم الراكب الحقيقي أبدًا.
-    // المرحلة 11: مستوى الراكب وإطاره يأتيان جاهزين من الخادم لعرضهما ف��
+    // المرحلة 11: مستوى الراكب وإطاره يأتيان جاهزين من الخادم لعرضهما في
     // بطاقة الرحلة دون أي حساب داخل تطبيق السائق.
     const passengerLevel = await this.profileLevels.forPassenger(
       trip.passengerId,
@@ -905,11 +799,24 @@ export class DriverSelfService {
     };
   }
 
-  async updateTripStatus(userId: string, tripId: string, status: "ARRIVING" | "IN_PROGRESS" | "COMPLETED", reason?: string) {
-    const driver = await this.requireDriver(userId); const trip = await this.prisma.trip.findUnique({ where: { id: tripId } });
-    if (!trip || trip.driverId !== driver.id) throw new NotFoundException("الرحلة غير موجودة");
-    const allowed = (trip.status === "ACCEPTED" && status === "ARRIVING") || (trip.status === "ARRIVING" && status === "IN_PROGRESS") || (trip.status === "IN_PROGRESS" && status === "COMPLETED");
-    if (!allowed) throw new BadRequestException(`Invalid transition ${trip.status} -> ${status}`);
+  async updateTripStatus(
+    userId: string,
+    tripId: string,
+    status: "ARRIVING" | "IN_PROGRESS" | "COMPLETED",
+    reason?: string,
+  ) {
+    const driver = await this.requireDriver(userId);
+    const trip = await this.prisma.trip.findUnique({ where: { id: tripId } });
+    if (!trip || trip.driverId !== driver.id)
+      throw new NotFoundException("الرحلة غير موجودة");
+    const allowed =
+      (trip.status === "ACCEPTED" && status === "ARRIVING") ||
+      (trip.status === "ARRIVING" && status === "IN_PROGRESS") ||
+      (trip.status === "IN_PROGRESS" && status === "COMPLETED");
+    if (!allowed)
+      throw new BadRequestException(
+        `Invalid transition ${trip.status} -> ${status}`,
+      );
     // D-6 — لا يُسمح بتسجيل الوصول إلا داخل نصف القطر (موقع الخادم، fail-closed).
     if (status === "ARRIVING") {
       await this.arrivalGuard.assertCanMarkArriving({
@@ -919,11 +826,20 @@ export class DriverSelfService {
         pickupLng: trip.pickupLng,
       });
     }
-    const changed = await this.prisma.trip.updateMany({ where: { id: tripId, status: trip.status }, data: { status, startedAt: status === "IN_PROGRESS" ? new Date() : undefined, completedAt: status === "COMPLETED" ? new Date() : undefined, cancelReason: reason } });
-    if (changed.count !== 1) throw new BadRequestException("Trip state changed concurrently");
+    const changed = await this.prisma.trip.updateMany({
+      where: { id: tripId, status: trip.status },
+      data: {
+        status,
+        startedAt: status === "IN_PROGRESS" ? new Date() : undefined,
+        completedAt: status === "COMPLETED" ? new Date() : undefined,
+        cancelReason: reason,
+      },
+    });
+    if (changed.count !== 1)
+      throw new BadRequestException("Trip state changed concurrently");
     // المرحلة 11 — مسار إكمال قائم ثانٍ (PATCH /driver/me/trips/:id/status).
     // الحارس updateMany أعلاه يضمن أن الانتقال حدث مرة واحدة، والحساب
-    // مشتق من عدّ الرحلات فل�� يمكن احتساب الإكمال مرتين أصلًا.
+    // مشتق من عدّ الرحلات فلا يمكن احتساب الإكمال مرتين أصلًا.
     if (status === "COMPLETED") {
       void this.profileLevels.onTripCompleted(tripId).catch(() => undefined);
     }
