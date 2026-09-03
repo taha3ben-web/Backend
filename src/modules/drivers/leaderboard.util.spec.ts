@@ -28,7 +28,27 @@ const row = (
 describe("leaderboard config normalization", () => {
   it("يعيد الإعداد الافتراضي عند غياب القيمة", () => {
     const { config, warnings } = normalizeLeaderboardConfig(undefined);
-    expect(config).toEqual(DEFAULT_LEADERBOARD_CONFIG);
+    // العقد الحقيقي: غياب القيمة = نفس الشكل المُطهَّر للإعداد الافتراضي
+    // (التطهير يُصرّح بالحقول الاختيارية كـ null، والافتراضي بذرة تحذفها).
+    expect(config).toEqual(
+      normalizeLeaderboardConfig(DEFAULT_LEADERBOARD_CONFIG).config,
+    );
+    expect(config.enabled).toBe(DEFAULT_LEADERBOARD_CONFIG.enabled);
+    expect(config.period).toBe(DEFAULT_LEADERBOARD_CONFIG.period);
+    expect(config.topLimit).toBe(DEFAULT_LEADERBOARD_CONFIG.topLimit);
+    expect(config.cacheTtlSec).toBe(DEFAULT_LEADERBOARD_CONFIG.cacheTtlSec);
+    expect(config.weekStartsOn).toBe(DEFAULT_LEADERBOARD_CONFIG.weekStartsOn);
+    expect(config.eligibility).toEqual(DEFAULT_LEADERBOARD_CONFIG.eligibility);
+    expect(
+      config.rules.map((r) => [r.key, r.type, r.enabled, r.value]),
+    ).toEqual(
+      DEFAULT_LEADERBOARD_CONFIG.rules.map((r) => [
+        r.key,
+        r.type,
+        r.enabled,
+        r.value,
+      ]),
+    );
     expect(warnings).toHaveLength(0);
   });
 
