@@ -832,6 +832,12 @@ export class DriverSelfService {
         status,
         startedAt: status === "IN_PROGRESS" ? new Date() : undefined,
         completedAt: status === "COMPLETED" ? new Date() : undefined,
+        // P0-1 — بدون هذا السطر تبقى الرحلة على NOT_REQUIRED، فيرفض
+        // canSettlementTransition الانتقال إلى POSTED وتخرج settleTrip
+        // صامتة. PENDING هي البوابة القانونية الوحيدة لشبكة التسوية
+        // القائمة (settleTrip + retryUnsettledTripsTask). لا تسوية تُنفَّذ
+        // هنا: الحارس الذري أدناه يبقى كما هو.
+        settlementStatus: status === "COMPLETED" ? "PENDING" : undefined,
         cancelReason: reason,
       },
     });
