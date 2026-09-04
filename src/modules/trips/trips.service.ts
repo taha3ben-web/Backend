@@ -78,10 +78,22 @@ export class TripsService {
         ? {
             OR: [
               { id: { contains: search, mode: "insensitive" } },
-              { passenger: { name: { contains: search, mode: "insensitive" } } },
-              { passenger: { phone: { contains: search, mode: "insensitive" } } },
-              { driver: { user: { name: { contains: search, mode: "insensitive" } } } },
-              { driver: { user: { phone: { contains: search, mode: "insensitive" } } } },
+              {
+                passenger: { name: { contains: search, mode: "insensitive" } },
+              },
+              {
+                passenger: { phone: { contains: search, mode: "insensitive" } },
+              },
+              {
+                driver: {
+                  user: { name: { contains: search, mode: "insensitive" } },
+                },
+              },
+              {
+                driver: {
+                  user: { phone: { contains: search, mode: "insensitive" } },
+                },
+              },
             ],
           }
         : {}),
@@ -170,7 +182,13 @@ export class TripsService {
 
     return {
       range: { from, to },
-      events: { requested, noDrivers, searchTimeout, accepted, cancelledEvents },
+      events: {
+        requested,
+        noDrivers,
+        searchTimeout,
+        accepted,
+        cancelledEvents,
+      },
       rates: { matchRate, unservedRate },
       funnel: { totalTrips, completed, cancelledTrips, activeSearching },
       recentFailures,
@@ -230,15 +248,44 @@ export class TripsService {
     });
 
     if (to === "COMPLETED") {
-      await this.settleCompletedTrip(id);
+      // ===== حدّ فشل التسوية (settlement failure boundary) =====
+      //
+      // التسوية المالية لها شبكة تعويض كاملة ومُثبتة: settleTrip تُثبّت
+      // settlementStatus="FAILED" و settlementError و settlementAttempts في
+      // قاعدة البيانات، ثم retryUnsettledTrips (كل دقيقة، حتى 20 محاولة)
+      // تعيد المحاولة حتى POSTED، و idempotencyKey="trip:settle:<id>" مع
+      // DriverEarning.tripId @unique يمنعان أي ترحيل مزدوج.
+      //
+      // أمّا تحرير السائق وإبطال جلسات الاتصال والبثّ اللحظي فلا شبكة
+      // تعويض لها إطلاقًا: لا مهمة دورية تُحرّر سائقًا عالقًا. لذلك كان
+      // ترك الاستثناء يصعد من هنا يعني أن فشلًا ماليًا قابلًا لإعادة
+      // المحاولة يُجمّد السائق على ON_TRIP بلا رحلة، ويُبقي جسر الاتصال
+      // صالحًا حتى CALL_LINK_TTL_MIN، ويمنع الراكب من رؤية الإنهاء.
+      //
+      // الحالة المطلوبة: Trip=COMPLETED, Settlement=FAILED, Driver=ONLINE,
+      // call links=revoked, realtime=emitted. الفشل هنا مسجَّل (error+stack)
+      // ومُثبَّت في القاعدة وقابل لإعادة المحاولة — وليس مخفيًا.
+      // مسار الطاقم retrySettlement يبقى يرمي الاستثناء كما هو.
+      try {
+        await this.settleCompletedTrip(id);
+      } catch (err) {
+        this.logger.error(
+          `تعذّرت تسوية الرحلة ${id} عند الإكمال — الحالة مُثبتة في settlementStatus وستُعاد المحاولة دوريًا: ${
+            (err as Error).message
+          }`,
+          (err as Error).stack,
+        );
+      }
       // المرحلة 11 — المكان canonical لاكتمال الرحلة: يُعاد حساب المستوى
       // للراكب والسائق ويُبثّ لحطيًا. fire-and-forget: تحديث عرض لا يجوز
       // أن يُسقط إنهاء الرحلة أو تسويتها المالية.
-      void this.profileLevels.onTripCompleted(id).catch((err: unknown) =>
-        this.logger.warn(
-          `تعذّر تحديث مستوى الملف الشخصي للرحلة ${id}: ${(err as Error).message}`,
-        ),
-      );
+      void this.profileLevels
+        .onTripCompleted(id)
+        .catch((err: unknown) =>
+          this.logger.warn(
+            `تعذّر تحديث مستوى الملف الشخصي للرحلة ${id}: ${(err as Error).message}`,
+          ),
+        );
     }
 
     if (to === "CANCELLED") {
@@ -357,17 +404,35 @@ export class TripsService {
     );
   }
 
-  private async sendTripPush(passengerId: string, tripId: string, to: TripStatus) {
-    const user = await this.prisma.user.findUnique({ where: { id: passengerId }, select: { locale: true } });
-    const templates = await this.settings.getValue<Record<string, Partial<Record<TripStatus, { title: string; body: string }>>>>("passenger.tripStatusNotifications");
+  private async sendTripPush(
+    passengerId: string,
+    tripId: string,
+    to: TripStatus,
+  ) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: passengerId },
+      select: { locale: true },
+    });
+    const templates = await this.settings.getValue<
+      Record<
+        string,
+        Partial<Record<TripStatus, { title: string; body: string }>>
+      >
+    >("passenger.tripStatusNotifications");
     const locale = user?.locale ?? "ar";
     const msg = templates?.[locale]?.[to] ?? templates?.ar?.[to];
     if (!msg?.title || !msg?.body) return;
-    await this.notifications.notifyUser(passengerId, msg.title, msg.body, "PUSH", {
+    await this.notifications.notifyUser(
+      passengerId,
+      msg.title,
+      msg.body,
+      "PUSH",
+      {
         kind: "trip",
         tripId,
         status: to,
-      });
+      },
+    );
   }
 
   /**
