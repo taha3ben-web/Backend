@@ -1,7 +1,11 @@
 import { Module } from "@nestjs/common";
 import { RbacModule } from "../rbac/rbac.module";
 import { NotificationsModule } from "../notifications/notifications.module";
-import { TripGuardsModule } from "../trips/trip-guards.module";
+// دورة حياة الرحلة canonical: PATCH /driver/me/trips/:id/status صار adapter
+// رفيعًا يسلّم إلى TripsService.driverChangeStatus. لا حاجة لـforwardRef:
+// لا شيء في src/modules/trips يعتمد على أي خدمة في src/modules/drivers،
+// ولا يستورد DriversModule أحدٌ سوى AppModule (مُتحقّق بالبحث).
+import { TripsModule } from "../trips/trips.module";
 import { ProfileLevelsModule } from "../profile-levels/profile-levels.module";
 // المرحلة و: لحقن RequirementsService المُصدَّر من وحدة الكتالوج.
 // لا خطر استيراد دائري: VehicleTypesModule لا يستورد DriversModule.
@@ -28,7 +32,7 @@ import { LeaderboardAdminController } from "./leaderboard-admin.controller";
   imports: [
     RbacModule,
     NotificationsModule,
-    TripGuardsModule,
+    TripsModule,
     ProfileLevelsModule,
     VehicleTypesModule,
   ],
