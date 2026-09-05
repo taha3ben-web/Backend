@@ -1,7 +1,7 @@
 import { Module } from "@nestjs/common";
 import { RbacModule } from "../rbac/rbac.module";
 import { NotificationsModule } from "../notifications/notifications.module";
-import { TripGuardsModule } from "../trips/trip-guards.module";
+import { TripsModule } from "../trips/trips.module";
 import { ProfileLevelsModule } from "../profile-levels/profile-levels.module";
 // المرحلة و: لحقن RequirementsService المُصدَّر من وحدة الكتالوج.
 // لا خطر استيراد دائري: VehicleTypesModule لا يستورد DriversModule.
@@ -28,7 +28,7 @@ import { LeaderboardAdminController } from "./leaderboard-admin.controller";
   imports: [
     RbacModule,
     NotificationsModule,
-    TripGuardsModule,
+    TripsModule,
     ProfileLevelsModule,
     VehicleTypesModule,
   ],

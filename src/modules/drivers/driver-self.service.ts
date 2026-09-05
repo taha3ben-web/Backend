@@ -15,7 +15,7 @@ import {
   STORED_MEDIA_READ_TTL_MINUTES,
 } from "../storage/storage.service";
 import { DriverSanctionsService } from "./driver-sanctions.service";
-import { ArrivalGuardService } from "../trips/arrival-guard.service";
+import { TripsService } from "../trips/trips.service";
 import { ProfileLevelsService } from "../profile-levels/profile-levels.service";
 import {
   PROFILE_LEVEL_COMMON_BENEFITS,
@@ -82,6 +82,19 @@ type DriverWithRelations = Prisma.DriverGetPayload<{
 const DOCUMENT_UPLOAD_TTL_MINUTES = 30;
 
 /**
+ * قائمة الحالات المسموحة على "PATCH /driver/me/trips/:id/status".
+ *
+ * عقد منشور يجب الحفاط عليه حرفيًا: هذا المسار لا يقبل CANCELLED
+ * إطلاقًا (للسائق مسار إلغاء منفصل يفتح حساب الغرامة). يُفحص وقت
+ * التشغيل ولا يُترك للأنواع وحدها لأن جسم الطلب ليس DTO بـclass-validator.
+ */
+const PATCH_TRIP_STATUS_WHITELIST: string[] = [
+  "ARRIVING",
+  "IN_PROGRESS",
+  "COMPLETED",
+];
+
+/**
  * خدمة الخدمة الذاتية للسائق (تطبيق السائق):
  * ملف السائق، مركبته النشطة، توفّره، أرباحه، رحلاته، ووثائقه.
  * كل العمليات تُشتق من userId المستخرج من الـ JWT، ولا يصل السائق لبيانات غيره.
@@ -92,8 +105,9 @@ export class DriverSelfService {
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
     private readonly sanctions: DriverSanctionsService,
-    // D-6: حراسة وقت الانتطار — نفس الخدمة المستخدمة في TripsService.
-    private readonly arrivalGuard: ArrivalGuardService,
+    // دورة حياة الرحلة canonical. الاسم tripsLifecycle لا trips: الصنف يملك
+    // أصلًا الدالة العامة trips(userId, q) لسجل رحلات السائق.
+    private readonly tripsLifecycle: TripsService,
     // المرحلة 11: مستوى السائق ومستوى الراكب من مصدر واحد.
     @Inject(forwardRef(() => ProfileLevelsService))
     private readonly profileLevels: ProfileLevelsService,
@@ -799,6 +813,28 @@ export class DriverSelfService {
     };
   }
 
+  /**
+   * ===== مسار توافق فقط (compatibility adapter) =====
+   *
+   * "PATCH /driver/me/trips/:id/status" عقد منشور وموثّق في
+   * docs/api/endpoints.md و docs/api/openapi.json، وتطبيق السائق غير موجود في
+   * أي repository متاح ⇒ الاستخدام الخارجي NOT VERIFIABLE، فلا يُحذف.
+   *
+   * لا دورة حياة هنا: لا جدول انتقالات، ولا كتابة Prisma على حالة الرحلة،
+   * ولا تسوية، ولا profile level، ولا releaseDriver، ولا realtime، ولا إبطال
+   * اتصالات، ولا فاتورة/ولاء/بريد، ولا حارس وصول. كل ذلك يملكه المصدر
+   * canonical الوحيد: TripsService.driverChangeStatus → TripsService.changeStatus.
+   *
+   * ما يبقى هنا هو حفط عقد الـHTTP القديم فقط:
+   *   1. 404 "ملف السائق غير موجود" (requireDriver).
+   *   2. قائمة الحالات المسموحة الثلاث — لا CANCELLED عبر هذا المسار.
+   *   3. 404 "الرحلة غير موجودة" عند عدم الملكية (وليس 403).
+   *
+   * فحص الملكية هنا لتوافق رمز الحالة لا للأمن: الفحص الأمني الحقيقي
+   * (trip.driver.userId === driverUserId) يبقى داخل driverChangeStatus ويُنفّذ
+   * مستقلاً، ولم يُحذف لتجنّب استعلام مكرر، والحارس الذري updateMany
+   * داخل changeStatus هو خط الدفاع الأخير ضد أي تنافس.
+   */
   async updateTripStatus(
     userId: string,
     tripId: string,
@@ -806,50 +842,20 @@ export class DriverSelfService {
     reason?: string,
   ) {
     const driver = await this.requireDriver(userId);
-    const trip = await this.prisma.trip.findUnique({ where: { id: tripId } });
-    if (!trip || trip.driverId !== driver.id)
-      throw new NotFoundException("الرحلة غير موجودة");
-    const allowed =
-      (trip.status === "ACCEPTED" && status === "ARRIVING") ||
-      (trip.status === "ARRIVING" && status === "IN_PROGRESS") ||
-      (trip.status === "IN_PROGRESS" && status === "COMPLETED");
-    if (!allowed)
-      throw new BadRequestException(
-        `Invalid transition ${trip.status} -> ${status}`,
-      );
-    // D-6 — لا يُسمح بتسجيل الوصول إلا داخل نصف القطر (موقع الخادم، fail-closed).
-    if (status === "ARRIVING") {
-      await this.arrivalGuard.assertCanMarkArriving({
-        tripId,
-        driverUserId: userId,
-        pickupLat: trip.pickupLat,
-        pickupLng: trip.pickupLng,
-      });
+    if (!PATCH_TRIP_STATUS_WHITELIST.includes(status)) {
+      throw new BadRequestException(`Invalid transition -> ${status}`);
     }
-    const changed = await this.prisma.trip.updateMany({
-      where: { id: tripId, status: trip.status },
-      data: {
-        status,
-        startedAt: status === "IN_PROGRESS" ? new Date() : undefined,
-        completedAt: status === "COMPLETED" ? new Date() : undefined,
-        // P0-1 — بدون هذا السطر تبقى الرحلة على NOT_REQUIRED، فيرفض
-        // canSettlementTransition الانتقال إلى POSTED وتخرج settleTrip
-        // صامتة. PENDING هي البوابة القانونية الوحيدة لشبكة التسوية
-        // القائمة (settleTrip + retryUnsettledTripsTask). لا تسوية تُنفَّذ
-        // هنا: الحارس الذري أدناه يبقى كما هو.
-        settlementStatus: status === "COMPLETED" ? "PENDING" : undefined,
-        cancelReason: reason,
-      },
+    const owned = await this.prisma.trip.findFirst({
+      where: { id: tripId, driverId: driver.id },
+      select: { id: true },
     });
-    if (changed.count !== 1)
-      throw new BadRequestException("Trip state changed concurrently");
-    // المرحلة 11 — مسار إكمال قائم ثانٍ (PATCH /driver/me/trips/:id/status).
-    // الحارس updateMany أعلاه يضمن أن الانتقال حدث مرة واحدة، والحساب
-    // مشتق من عدّ الرحلات فلا يمكن احتساب الإكمال مرتين أصلًا.
-    if (status === "COMPLETED") {
-      void this.profileLevels.onTripCompleted(tripId).catch(() => undefined);
-    }
-    return this.prisma.trip.findUnique({ where: { id: tripId } });
+    if (!owned) throw new NotFoundException("الرحلة غير موجودة");
+    return this.tripsLifecycle.driverChangeStatus(
+      userId,
+      tripId,
+      status,
+      reason,
+    );
   }
 
   async addDocument(userId: string, dto: AddDocumentDto) {
