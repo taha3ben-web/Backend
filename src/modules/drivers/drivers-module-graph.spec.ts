@@ -42,7 +42,7 @@ describe("DriversModule → TripsModule dependency closure", () => {
     const driverSelf = moduleRef.get(DriverSelfService, { strict: false });
     const trips = moduleRef.get(TripsService, { strict: false });
 
-    expect((driverSelf as any).trips).toBe(trips);
+    expect((driverSelf as any).tripsLifecycle).toBe(trips);
 
     await moduleRef.close();
   }, 60000);

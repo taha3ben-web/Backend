@@ -105,8 +105,9 @@ export class DriverSelfService {
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
     private readonly sanctions: DriverSanctionsService,
-    // D-6: حراسة وقت الانتطار — نفس الخدمة المستخدمة في TripsService.
-    private readonly trips: TripsService,
+    // دورة حياة الرحلة canonical. الاسم tripsLifecycle لا trips: الصنف يملك
+    // أصلًا الدالة العامة trips(userId, q) لسجل رحلات السائق.
+    private readonly tripsLifecycle: TripsService,
     // المرحلة 11: مستوى السائق ومستوى الراكب من مصدر واحد.
     @Inject(forwardRef(() => ProfileLevelsService))
     private readonly profileLevels: ProfileLevelsService,
@@ -849,7 +850,12 @@ export class DriverSelfService {
       select: { id: true },
     });
     if (!owned) throw new NotFoundException("الرحلة غير موجودة");
-    return this.trips.driverChangeStatus(userId, tripId, status, reason);
+    return this.tripsLifecycle.driverChangeStatus(
+      userId,
+      tripId,
+      status,
+      reason,
+    );
   }
 
   async addDocument(userId: string, dto: AddDocumentDto) {
