@@ -5,6 +5,12 @@ import { PrismaService } from "../../prisma/prisma.service";
 import { EventBusService } from "./event-bus.service";
 import { nextOutboxState, OUTBOX_MAX_ATTEMPTS } from "./outbox.util";
 import { DistributedLockService } from "./distributed-lock.service";
+import {
+  bumpCounter,
+  observeHistogram,
+  safeMetric,
+  setGauge,
+} from "../observability/runtime-metrics";
 
 export interface EnqueueOptions {
   /** مفتاح إزالة التكرار (فريد) — يمنع إدخال نفس الحدث مرتين. */
@@ -20,6 +26,12 @@ export interface EnqueueOptions {
  *   محاولة أسّية؛ وبعد بلوغ الحد الأقصى تنتقل إلى DLQ (حالة DEAD).
  *
  * التسليم at-least-once: يجب أن يكون المستهلكون idempotent.
+ *
+ * الرصد (PR A): نقاط قياس داخل الذاكرة فقط عبر `safeMetric` — لا تُضيف أي
+ * جولة DB/Redis، ولا تغيّر دلالات التسليم، وأي خلل فيها يُبتلع ولا يُسقط التسليم.
+ * ملاحظة أمانة: `outbox_generated_total` يُزاد بعد نجاح عبارة الإدخال، فإن تراجعت
+ * معاملة العمل بعدها يكون العدّاد أعلى من عدد الأسطر المحفوظة فعلًا (مقبول لمؤشر
+ * رصد، وغير مقبول للمحاسبة — مصدر الحقيقة يبقى جدول OutboxEvent).
  */
 @Injectable()
 export class OutboxService {
@@ -51,6 +63,7 @@ export class OutboxService {
         availableAt: options.availableAt ?? new Date(),
       },
     });
+    safeMetric(() => bumpCounter("outbox_generated_total"));
   }
 
   /**
@@ -72,12 +85,14 @@ export class OutboxService {
           availableAt: options.availableAt ?? new Date(),
         },
       });
+      safeMetric(() => bumpCounter("outbox_generated_total"));
     } catch (error) {
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
         error.code === "P2002"
       ) {
         // حدث مكرر بنفس dedupeKey — تجاهل (idempotent).
+        safeMetric(() => bumpCounter("outbox_dedupe_skipped_total"));
         return;
       }
       throw error;
@@ -109,6 +124,10 @@ export class OutboxService {
         orderBy: { availableAt: "asc" },
         take: 50,
       });
+      safeMetric(() => {
+        bumpCounter("outbox_relay_cycles_total");
+        setGauge("outbox_last_batch_size", due.length);
+      });
       for (const event of due) {
         await this.dispatch(event);
       }
@@ -128,6 +147,8 @@ export class OutboxService {
     attempts: number;
     maxAttempts: number;
   }): Promise<void> {
+    const startedAt = Date.now();
+    safeMetric(() => bumpCounter("outbox_dispatch_attempted_total"));
     let success = false;
     let error: string | null = null;
     try {
@@ -153,6 +174,19 @@ export class OutboxService {
         lastError: transition.lastError,
         deliveredAt: transition.deliveredAt,
       },
+    });
+
+    safeMetric(() => {
+      observeHistogram("outbox_dispatch_duration_ms", Date.now() - startedAt);
+      if (transition.status === "DELIVERED") {
+        bumpCounter("outbox_delivered_total");
+      } else if (transition.status === "DEAD") {
+        bumpCounter("outbox_dead_total");
+      } else {
+        // FAILED يعني دائمًا إعادة جدولة لمحاولة لاحقة (availableAt مؤجّل).
+        bumpCounter("outbox_failed_total");
+        bumpCounter("outbox_retry_total");
+      }
     });
 
     if (transition.status === "DEAD") {

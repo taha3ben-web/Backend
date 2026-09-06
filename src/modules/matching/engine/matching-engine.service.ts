@@ -9,6 +9,11 @@ import {
 } from "./matching-strategy";
 import { FastestEtaStrategy } from "./nearest-driver.strategy";
 import { driverOfferKey, filterUnreserved } from "../matching-lock.util";
+import {
+  bumpCounter,
+  observeHistogram,
+  safeMetric,
+} from "../../../common/observability/runtime-metrics";
 
 /**
  * أقصى عدد مرشحين يُحسب لهم ETA حقيقي.
@@ -49,12 +54,48 @@ export class MatchingEngineService {
   /**
    * اختيار المرشّحين المتاحين (APPROVED + ONLINE + غير مشغولين)
    * مرتّبين حسب الاستراتيجية الحالية. لا يُدير العروض — ذلك من مسؤولية حلقة المطابقة.
+   *
+   * الرصد (PR A): هذه الدالة غلاف قياس فقط؛ الخوارزمية كاملة في
+   * `selectCandidatesInternal` بلا أي تغيير: لا نطاق، ولا COUNT، ولا حدود جديدة،
+   * ولا مساس بالأقفال أو الترتيب. أي خطأ يُعاد رفعه كما هو.
    */
   async selectCandidates(
     ctx: MatchingContext,
     exclude: Set<string>,
     max: number,
   ): Promise<string[]> {
+    const startedAt = Date.now();
+    safeMetric(() => bumpCounter("matching_requests_total"));
+    try {
+      const outcome = await this.selectCandidatesInternal(ctx, exclude, max);
+      safeMetric(() => {
+        observeHistogram("matching_duration_ms", Date.now() - startedAt);
+        observeHistogram("matching_candidate_count", outcome.candidatePoolSize);
+        bumpCounter(
+          outcome.offered.length > 0
+            ? "matching_success_total"
+            : "matching_no_driver_total",
+        );
+      });
+      return outcome.offered;
+    } catch (error) {
+      safeMetric(() => {
+        observeHistogram("matching_duration_ms", Date.now() - startedAt);
+        bumpCounter("matching_error_total");
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * المنطق الفعلي لاختيار المرشّحين. يعيد أيضًا حجم بركة المرشّحين قبل القطع
+   * بـ max لأجل الرصد فقط — لا يُستخدم في أي قرار اختيار.
+   */
+  private async selectCandidatesInternal(
+    ctx: MatchingContext,
+    exclude: Set<string>,
+    max: number,
+  ): Promise<{ offered: string[]; candidatePoolSize: number }> {
     const nearby = await this.redis.nearbyDriversWithCoords(
       ctx.pickupLat,
       ctx.pickupLng,
@@ -69,7 +110,7 @@ export class MatchingEngineService {
     const notExcluded = nearby
       .map((entry) => entry.driverId)
       .filter((id) => !exclude.has(id));
-    if (notExcluded.length === 0) return [];
+    if (notExcluded.length === 0) return { offered: [], candidatePoolSize: 0 };
 
     // استبعاد السائقين المحجوزين حاليًا لعرض آخر (مطابقة موزّعة، fail-open).
     let reserved = new Set<string>();
@@ -84,7 +125,7 @@ export class MatchingEngineService {
       reserved = new Set<string>();
     }
     const userIds = filterUnreserved(notExcluded, reserved);
-    if (userIds.length === 0) return [];
+    if (userIds.length === 0) return { offered: [], candidatePoolSize: 0 };
 
     // 1) جلب دفعي لحالة "مشغول برحلة" (خط أنابيب واحد) تجنّبًا لـ N+1.
     const pipeline = this.redis.client.pipeline();
@@ -131,16 +172,17 @@ export class MatchingEngineService {
         rating: ratingByUser.get(id) ?? null,
       });
     });
-    if (candidates.length === 0) return [];
+    if (candidates.length === 0) return { offered: [], candidatePoolSize: 0 };
 
     // 4) إثراء المرشّحين بـ ETA حقيقي على شبكة الطرق قبل الترتيب.
     await this.enrichWithEta(candidates, positionByUser, ctx);
 
     // 5) تطبيق الاستراتيجية ثم الحد الأقصى.
-    return this.strategy
+    const offered = this.strategy
       .rank(candidates, ctx)
       .slice(0, max)
       .map((c) => c.userId);
+    return { offered, candidatePoolSize: candidates.length };
   }
 
   /**

@@ -108,6 +108,16 @@ export function droppedSeriesCount(): number {
   return droppedSeriesTotal;
 }
 
+/** عدد السلاسل المحفوظة فعلًا الآن (لإثبات أن الكاردينالية مقيّدة). */
+export function httpSeriesCount(): number {
+  return seriesByKey.size;
+}
+
+/** السقف الفعلي المطبَّق (بعد الحدّ الأدنى 50). */
+export function httpMaxSeries(): number {
+  return MAX_SERIES;
+}
+
 /** يمسح كل الحالة — للاختبارات فقط. */
 export function resetHttpMetrics(): void {
   seriesByKey.clear();
@@ -132,6 +142,53 @@ export function estimateQuantileSeconds(
   return null;
 }
 
+/**
+ * أصناف رموز الحالة. تُحسب اشتقاقًا من اللقطة عند القراءة فقط — بلا أي تخزين
+ * إضافي وبلا تسميات جديدة، فلا أثر على مسار تسجيل الطلب.
+ */
+export interface HttpStatusClasses {
+  c2xx: number;
+  c3xx: number;
+  c4xx: number;
+  /** مجموعة فرعية من `c4xx` تُفصل صراحة: الخفض (429) ليس نجاحًا ولا خطأ عميل عاديًا. */
+  c429: number;
+  c5xx: number;
+  /** رموز خارج 2xx..5xx (مثل 0 حين تتعذّر قراءة رمز الحالة). */
+  other: number;
+  /**
+   * مهلات معلنة برمز حالة فقط (408/504). المهلة التي يقطعها العميل دون استجابة
+   * لا تُسجّل هنا لأن الـ interceptor لا يرى لها رمز حالة — تُقاس في مرحلة
+   * Load Test من جهة مُولّد الحمل.
+   */
+  timeoutStatus: number;
+}
+
+export function httpStatusClasses(
+  series: HttpSeries[] = httpSeriesSnapshot(),
+): HttpStatusClasses {
+  const out: HttpStatusClasses = {
+    c2xx: 0,
+    c3xx: 0,
+    c4xx: 0,
+    c429: 0,
+    c5xx: 0,
+    other: 0,
+    timeoutStatus: 0,
+  };
+  for (const s of series) {
+    const status = s.status;
+    if (status >= 200 && status < 300) out.c2xx += s.count;
+    else if (status >= 300 && status < 400) out.c3xx += s.count;
+    else if (status >= 400 && status < 500) {
+      out.c4xx += s.count;
+      if (status === 429) out.c429 += s.count;
+    } else if (status >= 500 && status < 600) out.c5xx += s.count;
+    else out.other += s.count;
+    if (status === 408 || status === 504) out.timeoutStatus += s.count;
+  }
+  return out;
+}
+
 export interface HttpSummary {
   requestsTotal: number;
   serverErrorsTotal: number;
@@ -139,9 +196,13 @@ export interface HttpSummary {
   /** نسبة 5xx إلى الإجمالي (0..1) — مؤشر الخدمة الأول. */
   errorRate: number;
   avgMs: number | null;
+  p50Ms: number | null;
   p95Ms: number | null;
   p99Ms: number | null;
   droppedSeries: number;
+  seriesCount: number;
+  maxSeries: number;
+  statusClasses: HttpStatusClasses;
   topRoutes: Array<{
     method: string;
     route: string;
@@ -203,6 +264,7 @@ export function httpSummary(
       serverErrors: e.serverErrors,
     }));
 
+  const p50 = estimateQuantileSeconds(series, 0.5);
   const p95 = estimateQuantileSeconds(series, 0.95);
   const p99 = estimateQuantileSeconds(series, 0.99);
 
@@ -213,9 +275,13 @@ export function httpSummary(
     errorRate:
       requestsTotal > 0 ? round3(serverErrorsTotal / requestsTotal) : 0,
     avgMs: requestsTotal > 0 ? round2((sumSeconds / requestsTotal) * 1000) : null,
+    p50Ms: p50 === null ? null : p50 * 1000,
     p95Ms: p95 === null ? null : p95 * 1000,
     p99Ms: p99 === null ? null : p99 * 1000,
     droppedSeries: droppedSeriesTotal,
+    seriesCount: seriesByKey.size,
+    maxSeries: MAX_SERIES,
+    statusClasses: httpStatusClasses(series),
     topRoutes,
   };
 }
@@ -285,6 +351,22 @@ export function renderHttpPrometheus(
       `nova_http_request_duration_seconds_count{${labels}} ${entry.count}`,
     );
   }
+
+  // أصناف رموز الحالة: ست سلاسل ثابتة لا تنمو مع عدد المسارات.
+  const classes = httpStatusClasses(series);
+  lines.push(
+    "# HELP nova_http_status_class_total Requests grouped by status class (429 is also counted inside 4xx)",
+    "# TYPE nova_http_status_class_total counter",
+    `nova_http_status_class_total{class="2xx"} ${classes.c2xx}`,
+    `nova_http_status_class_total{class="3xx"} ${classes.c3xx}`,
+    `nova_http_status_class_total{class="4xx"} ${classes.c4xx}`,
+    `nova_http_status_class_total{class="429"} ${classes.c429}`,
+    `nova_http_status_class_total{class="5xx"} ${classes.c5xx}`,
+    `nova_http_status_class_total{class="other"} ${classes.other}`,
+    "# HELP nova_http_timeout_status_total Requests answered with 408 or 504",
+    "# TYPE nova_http_timeout_status_total counter",
+    `nova_http_timeout_status_total ${classes.timeoutStatus}`,
+  );
 
   lines.push(
     "# HELP nova_http_series_dropped_total Series folded into route=other by the cardinality cap",
