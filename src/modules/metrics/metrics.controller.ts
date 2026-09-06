@@ -14,6 +14,10 @@ import {
   httpSummary,
   renderHttpPrometheus,
 } from "../../common/observability/http-metrics";
+import {
+  renderRuntimePrometheus,
+  runtimeMetricsSnapshot,
+} from "../../common/observability/runtime-metrics";
 
 type Check = { ok: boolean; latencyMs?: number; error?: string };
 
@@ -23,11 +27,14 @@ function round2(n: number): number {
 
 /**
  * نقاط رصد التشغيل (observability):
- *  - GET /api/metrics             → JSON (uptime, memory, HTTP, WS, DB, Redis, drivers)
+ *  - GET /api/metrics             → JSON (uptime, memory, HTTP, WS, runtime, DB, Redis, drivers)
  *  - GET /api/metrics/prometheus  → صيغة Prometheus للماسحات
  *
  * الحماية: إن ضُبِط METRICS_TOKEN يُطلب تمريره عبر Authorization: Bearer <token>.
  * إن لم يُضبط (تطوير) تبقى النقطة مفتوحة.
+ *
+ * المفتاح `runtime` مُضاف فقط (backward-compatible): كل المفاتيح القديمة باقية
+ * بأسمائها ودلالاتها، ولا يُقرأ من قاعدة البيانات أو Redis لبنائه.
  */
 import { Public } from "../../common/decorators/public.decorator";
 
@@ -63,6 +70,7 @@ export class MetricsController {
         ...this.metrics.wsSnapshot(),
         ...this.metrics.counters(),
       },
+      runtime: runtimeMetricsSnapshot(),
       db,
       redis,
       driversWithGeo,
@@ -116,6 +124,7 @@ export class MetricsController {
       "# TYPE nova_memory_rss_bytes gauge",
       `nova_memory_rss_bytes ${mem.rss}`,
       ...renderHttpPrometheus(),
+      ...renderRuntimePrometheus(),
     ];
     return lines.join("\n") + "\n";
   }
