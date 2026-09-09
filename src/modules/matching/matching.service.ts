@@ -385,26 +385,33 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
           }
         }
 
-        // لا يوجد سائق متاح
+        // لا يوجد سائق متاح — إلغاء ذري (CAS) بحارس الحالة SEARCHING.
+        // الفحص السابق كان قراءة منفصلة ثم update بشرط id فقط، فكان يمكن
+        // أن يطمس قبولًا متزامنًا (SEARCHING → ACCEPTED) ويترك السائق ON_TRIP
+        // على رحلة CANCELLED. الآن لا تُنفّذ أي آثار جانبية إلا إذا فزنا.
         const current = await this.prisma.trip.findUnique({
           where: { id: tripId },
           select: { status: true, passengerId: true },
         });
         if (current && current.status === "SEARCHING") {
-          await this.releaseCoupon(tripId);
-          await this.prisma.trip.update({
-            where: { id: tripId },
+          const timedOut = await this.prisma.trip.updateMany({
+            where: { id: tripId, status: "SEARCHING" },
             data: {
               status: "CANCELLED",
               cancelReason: "لا يوجد سائق متاح",
               cancelledBy: "SYSTEM",
-              events: { create: { type: "trip:no_drivers", actor: "SYSTEM" } },
             },
           });
-          this.realtime.emitToUser(current.passengerId, "ride:no_drivers", {
-            tripId,
-          });
-          this.realtime.emitTripStatus(tripId, "CANCELLED");
+          if (timedOut.count > 0) {
+            await this.releaseCoupon(tripId);
+            await this.prisma.tripEvent.create({
+              data: { tripId, type: "trip:no_drivers", actor: "SYSTEM" },
+            });
+            this.realtime.emitToUser(current.passengerId, "ride:no_drivers", {
+              tripId,
+            });
+            this.realtime.emitTripStatus(tripId, "CANCELLED");
+          }
         }
       } finally {
         // نظّف علامة الإلغاء المحلية دائمًا (منع تسرّب ذاكرة تدريجي).
@@ -415,7 +422,7 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
 
   /**
    * يعرض الطلب على دفعة كاملة بالتزامن. قد يضغط أكثر من سائق «قبول»،
-   * لكن assignDriver تقفل السائق وتتحقق من SEARCHING داخل معاملة؛ لذلك
+   * لكن assignDriver تقفل السائق وتُطالب بالرحلة ذريًا داخل معاملة؛ لذلك
    * أول معاملة ناجحة فقط تفوز وتُغلق البطاقات عند بقية السائقين.
    */
   private async offerToBatch(
@@ -738,28 +745,34 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
         });
         if (claimed.count === 0) return null; // السائق مأخوذ بالفعل
 
-        // 2) تأكد أن الرحلة ما زالت قيد البحث؛ وإلا تراجع عن المعاملة
-        //    (throw يُلغي المطالبة بالسائق تلقائيًا).
-        const current = await client.trip.findUnique({
-          where: { id: tripId },
-          select: { status: true },
-        });
-        if (!current || current.status !== "SEARCHING") {
-          throw new Error("trip-not-searching");
-        }
-
-        // 3) عيّن السائق للرحلة
-        const trip = await client.trip.update({
-          where: { id: tripId },
+        // 2) مطالبة ذرية بالرحلة (compare-and-set): SEARCHING → ACCEPTED في
+        //    عبارة UPDATE واحدة. سابقًا كان الفحص قراءةً منفصلة (findUnique)
+        //    ثم update بشرط id فقط — وهي ثغرة TOCTOU حقيقية سمحت لأكثر من
+        //    سائق بالفوز بالرحلة نفسها تحت التزامن. الشرط status = SEARCHING
+        //    داخل UPDATE نفسه يجعل PostgreSQL هو مرجع الصحة: صف واحد فقط
+        //    يمكن أن يُحدَّث، والبقية تحصل على count = 0.
+        const claimedTrip = await client.trip.updateMany({
+          where: { id: tripId, status: "SEARCHING" },
           data: {
             status: "ACCEPTED",
             driverId: driver.id,
             acceptedAt: new Date(),
-            events: {
-              create: { type: "trip:accepted", actor: "DRIVER" },
-            },
           },
         });
+        // خسِرنا التسابق (الرحلة أُسندت أو أُلغيت) → throw كي تتراجع المعاملة
+        //    بكاملها وتُلغى مطالبة السائق (ON_TRIP ← ONLINE) تلقائيًا.
+        if (claimedTrip.count === 0) {
+          throw new Error("trip-not-searching");
+        }
+
+        await client.tripEvent.create({
+          data: { tripId, type: "trip:accepted", actor: "DRIVER" },
+        });
+
+        // 3) اقرأ الرحلة كاملة داخل المعاملة نفسها (لا معاملة ثانية) لأن
+        //    المُستدعي يحتاج كائن Trip كما كان يعيده update سابقًا.
+        const trip = await client.trip.findUnique({ where: { id: tripId } });
+        if (!trip) throw new Error("trip-not-searching");
         return trip;
       });
 
@@ -778,7 +791,7 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
       this.realtime.emitTripStatus(tripId, "ACCEPTED");
 
       // قناة احتياطية عبر Push للراكب — نظير ما يجري لعرض السائق في
-      // offerToDriver أعلاه. الـ socket هو ��لمسار الأساسي، لكن تطبيق الراكب
+      // offerToDriver أعلاه. الـ socket هو المسار الأساسي، لكن تطبيق الراكب
       // قد يكون في الخلفية أو مغلقًا في أهم لحظة في الرحلة (لحظة القبول).
       // fire-and-forget: الإسناد تمّ داخل المعاملة أعلاه ولا يجوز أن يُبطله
       // فشل إشعار ثانوي.
@@ -856,15 +869,28 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
       throw new BadRequestException("لا يمكن إلغاء البحث في هذه الحالة");
     }
     this.cancelled.add(tripId);
-    await this.releaseCoupon(tripId);
-    await this.prisma.trip.update({
-      where: { id: tripId },
+    // إلغاء ذري (CAS): الشرط status = SEARCHING داخل UPDATE نفسه. سابقًا كان
+    // التحديث غير مشروط (where: { id }) فكان يطمس قبولًا متزامنًا ويُنتج حالة
+    // مستحيلة: Trip = CANCELLED مع سائق ON_TRIP. كذلك كان releaseCoupon يسبق
+    // التحديث، فيُرجع كوبون رحلة صارت ACCEPTED فعلًا. الآن لا يُنفَّذ أي أثر
+    // جانبي (كوبون/حدث/بثّ) إلا بعد فوز الإلغاء.
+    const cancelled = await this.prisma.trip.updateMany({
+      where: { id: tripId, status: "SEARCHING" },
       data: {
         status: "CANCELLED",
         cancelReason: "ألغاه الراكب",
         cancelledBy: "PASSENGER",
-        events: { create: { type: "trip:cancelled", actor: "PASSENGER" } },
       },
+    });
+    if (cancelled.count === 0) {
+      // فاز قبول سائق متزامن — نفس رسالة الفحص المسبق أعلاه، فعقد المُستدعي
+      // لا يتغيّر (400 من REST، ride:error من WebSocket).
+      this.cancelled.delete(tripId);
+      throw new BadRequestException("لا يمكن إلغاء البحث في هذه الحالة");
+    }
+    await this.releaseCoupon(tripId);
+    await this.prisma.tripEvent.create({
+      data: { tripId, type: "trip:cancelled", actor: "PASSENGER" },
     });
     this.realtime.emitTripStatus(tripId, "CANCELLED");
   }
@@ -911,17 +937,24 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
     // بعد القبول وقبل بدء الرحلة
     if (trip.status === "ACCEPTED" || trip.status === "ARRIVING") {
       const statusAtCancel = trip.status;
-      await this.releaseCoupon(tripId);
-      await this.prisma.trip.update({
-        where: { id: tripId },
+      // إلغاء ذري (CAS) على الحالات المشروعة فعلًا في هذا المسار فقط:
+      // ACCEPTED/ARRIVING. التحديث غير المشروط السابق كان قادرًا على طمس
+      // انتقال متزامن إلى IN_PROGRESS (السائق بدأ الرحلة في اللحظة نفسها).
+      const cancelled = await this.prisma.trip.updateMany({
+        where: { id: tripId, status: { in: ["ACCEPTED", "ARRIVING"] } },
         data: {
           status: "CANCELLED",
           cancelReason: reason ?? "ألغاه الراكب",
           cancelledBy: "PASSENGER",
-          events: {
-            create: { type: "trip:cancelled", actor: "PASSENGER" },
-          },
         },
+      });
+      if (cancelled.count === 0) {
+        // تغيّرت الحالة تحت أقدامنا — لا كوبون، ولا تحرير سائق، ولا بثّ.
+        throw new BadRequestException("لا يمكن إلغاء الرحلة في هذه الحالة");
+      }
+      await this.releaseCoupon(tripId);
+      await this.prisma.tripEvent.create({
+        data: { tripId, type: "trip:cancelled", actor: "PASSENGER" },
       });
       // تحرير السائق: إتاحته من جديد ومسح ارتباطه بالرحلة في Redis
       if (trip.driverId) {
