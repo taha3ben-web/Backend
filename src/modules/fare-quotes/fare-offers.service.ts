@@ -28,7 +28,7 @@ type DriverBidProfile = Prisma.DriverGetPayload<{
 /**
  * خدمة عروض السائقين المضادة (FareOffer — مزايدة inDrive).
  * السائق يقدّم عرضًا مضادًا على FareQuote مفتوح، ثم يقبل الراكب عرضًا واحدًا
- * فتُرفض بقية العروض المعلّقة ذريًّا. لا توجد حركة مالية هنا (قبل-الرحلة).
+ * فتُرفض بقية العروض المعلّقة ذريًّا. لا توجد حركة مالية هنا (قبل-الرحلة).
  */
 @Injectable()
 export class FareOffersService {
@@ -413,9 +413,16 @@ export class FareOffersService {
 
   /**
    * الراكب: قبول عرض سائق — يُنشئ رحلة (Trip) بالسعر المتفَق، ويقفل عرض السعر،
-   * ويرفض بقية العروض المعلّقة — كلّه ذريًّا داخل معاملة واحدة.
+   * ويرفض بقية العروض المعلّقة — كلّه ذريًّا داخل معاملة واحدة.
    * لا توجد حركة Ledger هنا: الرحلة تُنشأ بحالة ACCEPTED، والتسوية المالية
    * تبقى عند إكمال الرحلة (settleTrip) معتمدة على trip.fare + commissionPct.
+   *
+   * التزامن: الفحوص التمهيدية أدناه (ملكية/صلاحية/مبلغ) تبقى كما هي لأنها
+   * تحفظ رسائل الخطأ المتوقعة، لكنها **ليست** ضمانة التزامن. الضمانة الفعلية
+   * هي CAS على مستوى FareQuote داخل المعاملة: أول معاملة تنجح في تحويل
+   * (QUOTED|PROPOSED, tripId = null) → ACCEPTED هي الفائز الوحيد لهذا العرض،
+   * وأي معاملة متزامنة أخرى ترى count === 0 فترمي وتتراجع بالكامل — بما في
+   * ذلك مطالبتها بالسائق — فلا تبقى رحلة يتيمة ولا سائق عالق في ON_TRIP.
    */
   async acceptOffer(passengerUserId: string, quoteId: string, offerId: string) {
     const quote = await this.requireQuoteOwned(passengerUserId, quoteId);
@@ -471,7 +478,41 @@ export class FareOffersService {
 
     const now = new Date();
     const result = await this.prisma.$transaction(async (client) => {
-      // 1) مطالبة ذريّة بالسائق (ONLINE ←→ ON_TRIP) لمنع الإسناد المزدوج.
+      // 1) CAS على مستوى عرض السعر — هذا هو حاسم السباق.
+      //    الشرط (status ∈ {QUOTED, PROPOSED} AND tripId IS NULL) يمرّ لمعاملة
+      //    واحدة فقط؛ الصف يبقى مقفولًا حتى الالتزام فتُسلسل بقية المعاملات
+      //    عليه وتراها ACCEPTED فتحصل على count === 0.
+      const wonQuote = await client.fareQuote.updateMany({
+        where: {
+          id: quoteId,
+          passengerId: passengerUserId,
+          status: { in: ["QUOTED", "PROPOSED"] },
+          tripId: null,
+        },
+        data: {
+          status: "ACCEPTED",
+          proposedFare: offer.amount,
+          proposedAt: now,
+        },
+      });
+      if (wonQuote.count === 0) {
+        // عرض سعر حُسم بالفعل (عرض آخر فاز، أو أُلغي/انتهت صلاحيته).
+        throw new AppException("FARE_QUOTE_INVALID_STATE");
+      }
+
+      // 2) CAS على العرض نفسه: PENDING فقط (يمنع قبول عرض مسحوب/منتهٍ/مرفوض
+      //    بين الفحص التمهيدي وبداية المعاملة).
+      const wonOffer = await client.fareOffer.updateMany({
+        where: { id: offer.id, fareQuoteId: quoteId, status: "PENDING" },
+        data: { status: "ACCEPTED", respondedAt: now },
+      });
+      if (wonOffer.count === 0) {
+        throw new AppException("FARE_OFFER_INVALID_STATE");
+      }
+
+      // 3) مطالبة ذريّة بالسائق (ONLINE → ON_TRIP) لمنع الإسناد المزدوج.
+      //    تبقى كما كانت؛ لم تُضعَّف. الفرق أنها الآن بعد حسم سباق عرض السعر،
+      //    فالمعاملة الخاسرة لا تصل إليها أصلًا.
       const claimed = await client.driver.updateMany({
         where: { id: offer.driverId, availability: "ONLINE" },
         data: { availability: "ON_TRIP" },
@@ -480,7 +521,8 @@ export class FareOffersService {
         throw new AppException("FARE_OFFER_DRIVER_UNAVAILABLE");
       }
 
-      // 2) إنشاء الرحلة بحالة ACCEPTED وبالسعر المتفَق (عرض السائق).
+      // 4) إنشاء الرحلة بحالة ACCEPTED وبالسعر المتفَق (عرض السائق).
+      //    لا تُنشأ إلا بعد الفوز النهائي بالسباق على مستوى عرض السعر.
       const trip = await client.trip.create({
         data: {
           passengerId: quote.passengerId,
@@ -521,12 +563,13 @@ export class FareOffersService {
         },
       });
 
-      // 3) تثبيت حالات العروض وعرض السعر + ربط tripId.
-      const accepted = await client.fareOffer.update({
-        where: { id: offer.id },
-        data: { status: "ACCEPTED", respondedAt: now },
+      // 5) ربط الرحلة بعرض السعر الذي فازت به هذه المعاملة.
+      await client.fareQuote.update({
+        where: { id: quoteId },
+        data: { tripId: trip.id },
       });
-      // العروض المعلّقة الأخرى (ل��خطار أصحابها بالرفض بعد الالتزام).
+
+      // 6) العروض المعلّقة الأخرى (لإخطار أصحابها بالرفض بعد الالتزام).
       const siblings = await client.fareOffer.findMany({
         where: {
           fareQuoteId: quoteId,
@@ -543,19 +586,16 @@ export class FareOffersService {
         },
         data: { status: "REJECTED", respondedAt: now },
       });
-      await client.fareQuote.update({
-        where: { id: quoteId },
-        data: {
-          status: "ACCEPTED",
-          proposedFare: offer.amount,
-          proposedAt: now,
-          tripId: trip.id,
-        },
+
+      const accepted = await client.fareOffer.findUnique({
+        where: { id: offer.id },
       });
+      if (!accepted) throw new AppException("FARE_OFFER_NOT_FOUND");
       return { trip, accepted, siblings };
     });
 
-    // بثّ فوري بعد الالتزام (أفضل-جهد).
+    // بثّ فوري بعد الالتزام (أفضل-جهد) — لا يصله إلا الفائز، لأن الخاسر
+    // يرمي داخل المعاملة قبل الوصول إلى هنا.
     const { trip, accepted, siblings } = result;
     const winnerUserId = await this.resolveDriverUserId(offer.driverId);
     this.notify(winnerUserId, "fare:offer_accepted", {
