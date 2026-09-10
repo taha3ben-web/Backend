@@ -165,7 +165,7 @@ export class ScheduledTripsService {
   }
 
   /** المنطق الفعلي للمهمة بعد الحصول على القفل. */
-  async activateDueTripsTask(): Promise<{ activated: number }> {
+  async activateDueTripsTask(): Promise<{ activated: number; failed: number }> {
     const now = new Date();
     const due = await this.prisma.trip.findMany({
       where: {
@@ -176,23 +176,41 @@ export class ScheduledTripsService {
       take: 50,
     });
     let activated = 0;
+    let failed = 0;
     for (const trip of due) {
-      // القفل الموزّع يمنع تزاحم نسخ الـ cron فقط، ولا يمنع إلغاءً
-      // قادمًا من المستخدم بين الـ SELECT والـ UPDATE. الشرط في WHERE
-      // هو ما يمنع إحياء رحلة أُلغيت (CANCELLED -> SEARCHING).
-      const guard = await this.prisma.trip.updateMany({
-        where: { id: trip.id, status: "SCHEDULED" },
-        data: { status: "SEARCHING" },
-      });
-      if (guard.count === 0) {
-        this.logger.log(
-          `Skipped scheduled trip ${trip.id}: state changed before activation`,
+      // عزل الأعطال: فشل رحلة واحدة يجب ألّا يُسقِط بقية الدفعة.
+      // الحالة الواقعية: فهرس التفرّد الجزئي
+      // Trip_one_active_per_passenger_idx يرفض التفعيل إذا كان للراكب
+      // رحلة نشطة بالفعل (SEARCHING/ACCEPTED/ARRIVING/IN_PROGRESS)،
+      // فيرمي Prisma الخطأ P2002. بدون هذا الالتقاط تتوقف الحلقة كلها.
+      try {
+        // القفل الموزّع يمنع تزاحم نسخ الـ cron فقط، ولا يمنع إلغاءً
+        // قادمًا من المستخدم بين الـ SELECT والـ UPDATE. الشرط في WHERE
+        // هو ما يمنع إحياء رحلة أُلغيت (CANCELLED -> SEARCHING).
+        const guard = await this.prisma.trip.updateMany({
+          where: { id: trip.id, status: "SCHEDULED" },
+          data: { status: "SEARCHING" },
+        });
+        if (guard.count === 0) {
+          this.logger.log(
+            `Skipped scheduled trip ${trip.id}: state changed before activation`,
+          );
+          continue;
+        }
+        activated += 1;
+        this.logger.log(`Activated scheduled trip ${trip.id}`);
+      } catch (err) {
+        // لا نغيّر حالة الرحلة ولا نلغيها: تبقى SCHEDULED وهي حالة صالحة،
+        // ويُعاد المحاولة في الدورة التالية. التحديث المشروط لم يُنفَّذ،
+        // فلا آثار جانبية ولا ازدواج.
+        failed += 1;
+        this.logger.warn(
+          `Failed to activate scheduled trip ${trip.id}; it stays SCHEDULED and will be retried: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
         );
-        continue;
       }
-      activated += 1;
-      this.logger.log(`Activated scheduled trip ${trip.id}`);
     }
-    return { activated };
+    return { activated, failed };
   }
 }
