@@ -27,6 +27,8 @@ import { round2 } from "../../common/money.util";
 import { RequirementsService } from "../vehicle-types/requirements.service";
 import { identityChanged } from "./vehicle-verification.util";
 import { LeaderboardService } from "./leaderboard.service";
+import { periodBoundaries } from "./earnings-period.util";
+import { FinancialService } from "../financial/financial.service";
 import {
   AddDocumentDto,
   DOC_TYPES,
@@ -116,6 +118,9 @@ export class DriverSelfService {
     // محرّك الصدارة: الترتيب والمعاملات في مكان واحد. لا خطر دائري:
     // LeaderboardService لا يعتمد على DriverSelfService إطلاقًا.
     private readonly leaderboardEngine: LeaderboardService,
+    // أرصدة محفظة العمولة ورصيد عمولة الكوبون — من LedgerCore عبر
+    // FinancialService، لا من أي عدّاد موازٍ.
+    private readonly financial: FinancialService,
   ) {}
 
   /** حالة عقوبات الإلغاء للسائق الحالي (مشتقة من userId الجلسة). */
@@ -707,48 +712,108 @@ export class DriverSelfService {
     return { availability: dto.availability };
   }
 
+  /**
+   * أرباح السائق — **قيم محاسبية/عرضية فقط**.
+   *
+   * ===== ما هذه الأرقام وما ليست =====
+   * `DriverEarning.net` هو صافي ما استحقّه السائق عن رحلاته. في نموذج
+   * flaminGO لا يوجد سحب ولا صرف نقدي لهذا المبلغ:
+   *   • في الرحلة النقدية استلمه السائق نقدًا من الراكب أصلًا.
+   *   • في رحلة flaminGO Pay قُيّد كمستحقّ على المنصّة
+   *     (PLATFORM:DRIVER_PAYABLE) يُسوّى تشغيليًا خارج التطبيق.
+   * ولذلك يُرجع الرد `withdrawable: false` صراحةً، وتُعرض محفظة العمولة
+   * ورصيد عمولة الكوبون في حقول **منفصلة** كي لا يخلطها التطبيق بالأرباح:
+   * محفظة العمولة رصيد تشغيلي مسبق الدفع، وليست ربحًا.
+   *
+   * ===== لماذا تجميع في القاعدة =====
+   * كانت الدالة تجلب آخر 100 صف وتجمعها في Node، فسائق نشط بأكثر من 100
+   * رحلة يرى «أرباح اليوم» ناقصة، و«الإجمالي» مقطوعًا عند 100 رحلة. الآن
+   * كل فترة تُجمَّع بـaggregate في PostgreSQL على كل الصفوف.
+   *
+   * حدود الفترات تُحسب بتوقيت المنصّة (APP_TIMEZONE) لا بتوقيت الخادم:
+   * خادم على UTC كان يُنهي «اليوم» الساعة 01:00 بتوقيت الجزائر.
+   */
   async earnings(userId: string) {
     const driver = await this.requireDriver(userId);
-    const items = await this.prisma.driverEarning.findMany({
-      where: { driverId: driver.id },
-      orderBy: { createdAt: "desc" },
-      take: 100,
-      include: {
-        trip: {
-          select: {
-            id: true,
-            destAddress: true,
-            distanceKm: true,
-            rideClass: true,
-            completedAt: true,
+    const now = new Date();
+    const { dayStart, weekStart, monthStart, yearStart } =
+      periodBoundaries(now);
+
+    const sumNet = (from: Date) =>
+      this.prisma.driverEarning.aggregate({
+        where: { driverId: driver.id, createdAt: { gte: from } },
+        _sum: { net: true, gross: true, commission: true },
+        _count: { _all: true },
+      });
+
+    const [today, week, month, year, all, items, balances] = await Promise.all([
+      sumNet(dayStart),
+      sumNet(weekStart),
+      sumNet(monthStart),
+      sumNet(yearStart),
+      this.prisma.driverEarning.aggregate({
+        where: { driverId: driver.id },
+        _sum: { net: true, gross: true, commission: true },
+        _count: { _all: true },
+      }),
+      this.prisma.driverEarning.findMany({
+        where: { driverId: driver.id },
+        orderBy: { createdAt: "desc" },
+        take: 100,
+        include: {
+          trip: {
+            select: {
+              id: true,
+              destAddress: true,
+              distanceKm: true,
+              rideClass: true,
+              paymentMethod: true,
+              completedAt: true,
+            },
           },
         },
-      },
+      }),
+      this.financial.driverCommissionBalances(userId),
+    ]);
+
+    const period = (
+      row: Awaited<ReturnType<typeof sumNet>>,
+    ): { net: number; gross: number; commission: number; trips: number } => ({
+      net: round2(Number(row._sum.net ?? 0)),
+      gross: round2(Number(row._sum.gross ?? 0)),
+      commission: round2(Number(row._sum.commission ?? 0)),
+      trips: row._count._all ?? 0,
     });
 
-    const now = new Date();
-    const startOfDay = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate(),
-    );
-    const startOfWeek = new Date(startOfDay);
-    startOfWeek.setDate(startOfDay.getDate() - ((startOfDay.getDay() + 6) % 7));
-
-    let today = 0;
-    let week = 0;
-    let all = 0;
-    for (const e of items) {
-      const net = Number(e.net);
-      all += net;
-      if (e.createdAt >= startOfDay) today += net;
-      if (e.createdAt >= startOfWeek) week += net;
-    }
     return {
+      currency: balances.currency,
+      /**
+       * أرباح صافية للعرض فقط. `withdrawable: false` ثابت في العقد: لا يوجد
+       * أي مسار في الخادم يحوّل هذه الأرقام إلى سحب أو صرف نقدي.
+       */
+      earnings: {
+        withdrawable: false as const,
+        today: period(today),
+        week: period(week),
+        month: period(month),
+        year: period(year),
+        allTime: period(all),
+      },
+      /**
+       * محفظة عمولة السائق ورصيد عمولة الكوبون — أرصدة **تشغيلية** منفصلة
+       * تمامًا عن الأرباح أعلاه، وكلاهما غير قابل للسحب.
+       */
+      commission: {
+        wallet: balances.commissionWallet,
+        couponCredit: balances.commissionCredit,
+        available: balances.available,
+        withdrawable: false as const,
+      },
+      // مُحافظ على العقد المنشور للتطبيقات القديمة: نفس الأسماء والقيم.
       totals: {
-        today: round2(today),
-        week: round2(week),
-        all: round2(all),
+        today: period(today).net,
+        week: period(week).net,
+        all: period(all).net,
         trips: driver.totalTrips,
       },
       items: items.map((e) => ({

@@ -49,3 +49,22 @@ export const SHAREABLE_TRIP_STATUSES: TripStatus[] = [
 export function isLiveTripStatus(status: string): boolean {
   return (LIVE_TRIP_STATUSES as readonly string[]).includes(status);
 }
+
+/**
+ * حالات «الرحلة الفورية الجارية» — المصدر الوحيد للحقيقة لقاعدة التفرّد:
+ * **راكب واحد ← رحلة فورية واحدة**.
+ *
+ * SCHEDULED غير موجودة هنا **عمدًا**: الحجز المستقبلي ليس رحلة جارية، ولا
+ * يجوز أن يحجب طلب رحلة الآن. أي تعديل على هذه القائمة يجب أن يُرافقه تعديل
+ * مطابق للفهرس الجزئي `Trip_active_passenger_unique` في قاعدة البيانات
+ * (مايغريشن 20260912090100)، وإلا انفصلت سلطة التطبيق عن سلطة القاعدة.
+ */
+export const ACTIVE_IMMEDIATE_TRIP_STATUSES: TripStatus[] = [
+  "SEARCHING",
+  ...LIVE_TRIP_STATUSES,
+];
+
+/** هل الحالة تعني رحلة فورية جارية (تحجب طلب رحلة فورية أخرى)؟ */
+export function isActiveImmediateTripStatus(status: string): boolean {
+  return (ACTIVE_IMMEDIATE_TRIP_STATUSES as readonly string[]).includes(status);
+}

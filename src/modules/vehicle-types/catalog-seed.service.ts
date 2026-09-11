@@ -210,7 +210,9 @@ export class CatalogSeedService implements OnModuleInit {
         perKm: t.price.perKm,
         perMin: t.price.perMin,
         minFare: t.price.minFare,
-        commissionPct: 15,
+        // لا نسبة عمولة في بيانات الـseed: العمولة تُدار من لوحة التحكم عبر
+        // CommissionRule. null = لا تجاوز على قاعدة السعر.
+        commissionPct: null,
         currency: DEFAULT_CURRENCY,
         priority: 0,
       },

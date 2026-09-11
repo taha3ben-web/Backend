@@ -9,7 +9,10 @@ import { Cron, CronExpression } from "@nestjs/schedule";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import type { PostingLine } from "./financial.types";
-import { deriveTripEarnings } from "../trips/settlement.util";
+import {
+  planCommissionFunding,
+  prepaidCommissionRequirement,
+} from "../trips/settlement.util";
 import type { CouponFundingSource } from "../trips/settlement.util";
 import { buildFareBreakdown } from "../pricing-engine/fare-breakdown.util";
 import {
@@ -335,10 +338,10 @@ export class FinancialService {
               }
             }
             // trip.fare هي ما يدفعه الراكب فعليًا (الكوبون طُبّق وقت الطلب)، ولا
-            // نطبّق الخصم ثانيةً هنا. سياسة تحمّل الكوبون (Stage 62): تتحمّله الشركة
-            // بالكامل من عمولتها (قد تصبح سالبة)، وتُحسب العمولة على الأجرة الكاملة
-            // قبل الخصم فيبقى صافي السائق كرحلة بلا كوبون، ويُضاف تعويض الخصم للسائق
-            // كرصيد مقفل غير قابل للسحب (USER:...:LOCKED).
+            // نطبّق الخصم ثانيةً هنا. العمولة تُحتسب على قيمة الرحلة **قبل**
+            // الخصم، فيبقى صافي السائق كرحلة بلا كوبون، وما تتحمّله المنصّة من
+            // الخصم يُمنح للسائق كرصيد عمولة مخصّص (لا نقدًا ولا ربحًا) —
+            // انظر القيد الثالث أدناه.
             const discount = Math.max(Number(trip.discountAmount ?? 0), 0);
             // المرحلة 7 — مصدر حقيقة واحد للأجرة:
             // زمن الانتظار يُشتق من طوابع الخادم فقط (حدث status:ARRIVING
@@ -398,148 +401,241 @@ export class FinancialService {
                 },
               });
             }
-            // سياسة تمويل الكوبون تُقرّر وقت الطلب وتُخزّن على الرحلة، وتُدار
+            // ===================================================================
+            // نموذج flaminGO المالي — ثلاثة أرصدة منفصلة لا تختلط:
+            //
+            //   USER:<driver>:AVAILABLE          محفظة عمولة السائق
+            //                                   (رصيد تشغيلي مسبق الدفع،
+            //                                    ليس ربحًا وغير قابل للسحب)
+            //   USER:<driver>:COMMISSION_CREDIT  رصيد عمولة الكوبون
+            //                                   (يُستهلك في عمولة رحلات لاحقة)
+            //   PLATFORM:DRIVER_PAYABLE          صافي أرباح السائق المستحقّ
+            //                                   عن الرحلات المدفوعة إلكترونيًا
+            //   PLATFORM:COMMISSION              استحقاق عمولة المنصّة
+            //
+            // ولذلك:
+            //   • الرحلة **النقدية**: المنصّة لا تلمس المال — الراكب يدفع
+            //     للسائق مباشرة. القيد الوحيد هو تحصيل العمولة من محفظة
+            //     العمولة. لا يُضاف أي رصيد للسائق، فيستحيل الائتمان
+            //     الاقتصادي المزدوج (نقد في يده + رصيد قابل للسحب).
+            //   • الرحلة بـ**flaminGO Pay / بطاقة**: المنصّة تُحصّل المبلغ،
+            //     تحتجز العمولة منه، والباقي يُقيَّد كمستحقّ للسائق.
+            //
+            // سياسة تمويل الكوبون تُقرّر وقت الطلب وتُخزّن على الرحلة وتُدار
             // بالكامل من لوحة التحكم (إعداد عام coupons.funding + تجاوز لكل
-            // كوبون): PLATFORM=الشركة تتحمّل كامل الخصم، DRIVER=السائق،
-            // SHARED=يُقسّم بحصة platformShare. لا شيء مبرمَج ثابتًا هنا.
-            // حصة السائق من تمويل الخصم (breakdown.coupon.driverFunded) محسومة أصلاً
-            // داخل breakdown.driverNet في buildFareBreakdown، فلا تُقرأ هنا مرة ثانية.
-            // صافي السائق المستحق = أرباحه الكاملة ناقص ما يتحمّله من الخصم.
+            // كوبون): PLATFORM/DRIVER/SHARED. حصة السائق من التمويل محسومة
+            // أصلًا داخل breakdown.driverNet، وحصة المنصّة تُمنح للسائق
+            // كـ**رصيد عمولة** لا كنقد (انظر القيد الثالث أدناه).
             const driverNet = breakdown.driverNet;
-            // السائق يسحب كامل ما دفعه الراكب (بحدّ أقصى إجماليه المستحق)؛
-            // العمولة تُقتطع أولًا من تعويض الخصم لا من رصيده المتاح، فيبقى
-            // المقفل = ما تتحمّله الشركة فعليًا (تعويض الخصم ناقص العمولة، ولا يقلّ عن صفر).
-            const driverAvailable = round2(Math.min(driverNet, riderPays));
-            const commissionCredit = round2(riderPays - driverAvailable);
-            const driverLocked = round2(driverNet - driverAvailable);
-            const driver = await this.ledger.userAccount(
+            const commissionDue = breakdown.commission;
+            const couponCommissionCredit = breakdown.coupon.platformFunded;
+
+            const driverWallet = await this.ledger.userAccount(
               tx,
               trip.driver.userId,
               trip.currency,
             );
+            const commissionCreditAccount =
+              await this.ledger.commissionCreditAccount(
+                tx,
+                trip.driver.userId,
+                trip.currency,
+              );
             const revenue = await this.ledger.platformAccount(
               tx,
               "COMMISSION",
               "REVENUE",
               trip.currency,
             );
-            const debit =
-              trip.paymentMethod === "WALLET"
-                ? await this.ledger.userAccount(tx, trip.passengerId, trip.currency)
-                : trip.paymentMethod === "CARD"
-                  ? await this.ledger.platformAccount(
+            const driverPayable = await this.ledger.platformAccount(
+              tx,
+              "DRIVER_PAYABLE",
+              "LIABILITY",
+              trip.currency,
+            );
+
+            // ---------- القيد 1: تحصيل الأجرة (إلكترونيًا فقط) ----------
+            // الرحلة النقدية لا تُنتج قيد تحصيل إطلاقًا: لا يوجد مال عبر
+            // المنصّة كي يُقيَّد، وإنشاء قيد صوري له كان سيعني تضخيم إيراد
+            // لم يُحصَّل. هذا هو الفرق الجوهري الذي يمنع الائتمان المزدوج.
+            const isElectronic =
+              trip.paymentMethod === "WALLET" || trip.paymentMethod === "CARD";
+            const collected = isElectronic ? riderPays : 0;
+
+            if (collected > 0) {
+              const source =
+                trip.paymentMethod === "WALLET"
+                  ? await this.ledger.userAccount(
                       tx,
-                      "CARD_RECEIVABLE",
-                      "ASSET",
+                      trip.passengerId,
                       trip.currency,
                     )
                   : await this.ledger.platformAccount(
                       tx,
-                      "CASH_CLEARING",
+                      "CARD_RECEIVABLE",
                       "ASSET",
                       trip.currency,
                     );
-            // محفظة الراكب حساب حقيقي لا حساب مقاصّة: خصم يتجاوز رصيدها يتركه
-            // سالبًا بلا غطاء. فحص وقت الـcheckout لا يكفي وحده لأن الرصيد قد
-            // ينخفض بين إنشاء الدفعة والتسوية (اشتراك، إكرامية، سحب، رحلة أخرى).
-            // نرفض هنا فتُوسَم الرحلة FAILED ويعيد retryUnsettledTrips المحاولة،
-            // وتظهر في طابور التسوية بدل أن تُنشئ رصيدًا سالبًا صامتًا.
-            if (
-              trip.paymentMethod === "WALLET" &&
-              riderPays > 0 &&
-              Number(debit.balanceCache) + 1e-9 < riderPays
-            ) {
-              throw new AppException("INSUFFICIENT_BALANCE", {
-                details: {
-                  tripId,
-                  required: riderPays,
-                  balance: Number(debit.balanceCache),
-                  currency: trip.currency,
-                },
-              });
-            }
-            // القيد الأساسي: توزيع ما دفعه الراكب فعليًا بين رصيد السائق المتاح
-            // والعمولة. بلا كوبون (discount=0) يطابق السلوك السابق حرفيًا.
-            let base = { gross: 0, commission: 0, net: 0 };
-            if (riderPays > 0) {
-              const baseLines: PostingLine[] = [
-                { accountId: debit.id, direction: "DEBIT", amount: riderPays },
-              ];
-              if (driverAvailable > 0) {
-                baseLines.push({
-                  accountId: driver.id,
-                  direction: "CREDIT",
-                  amount: driverAvailable,
+              // رصيد flaminGO Pay للراكب حساب حقيقي لا حساب مقاصّة: خصم
+              // يتجاوزه يتركه سالبًا بلا غطاء. الفحص وقت الـcheckout لا يكفي
+              // لأن الرصيد قد ينخفض بين إنشاء الدفعة والتسوية (اشتراك،
+              // إكرامية، رحلة أخرى). نرفض هنا فتُوسَم الرحلة FAILED ويعيد
+              // retryUnsettledTrips المحاولة بدل إنشاء رصيد سالب صامت.
+              if (
+                trip.paymentMethod === "WALLET" &&
+                Number(source.balanceCache) + 1e-9 < collected
+              ) {
+                throw new AppException("INSUFFICIENT_BALANCE", {
+                  details: {
+                    tripId,
+                    required: collected,
+                    balance: Number(source.balanceCache),
+                    currency: trip.currency,
+                  },
                 });
               }
-              if (commissionCredit > 0) {
-                baseLines.push({
-                  accountId: revenue.id,
-                  direction: "CREDIT",
-                  amount: commissionCredit,
-                });
-              }
-              const posted = await this.ledger.post(tx, {
+              await this.ledger.post(tx, {
                 command: "settleTrip",
                 idempotencyKey: `trip:settle:${tripId}`,
                 currency: trip.currency,
                 referenceType: "TRIP",
                 referenceId: tripId,
-                lines: baseLines,
-              });
-              const accountCodeById = new Map<string, string>([
-                [debit.id, debit.code],
-                [driver.id, driver.code],
-                [revenue.id, revenue.code],
-              ]);
-              base = deriveTripEarnings(
-                posted.entries.map((entry) => ({
-                  direction: entry.direction,
-                  amount: Number(entry.amount),
-                  accountCode: accountCodeById.get(entry.accountId) ?? "",
-                })),
-              );
-            }
-            // تعويض الكوبون: الشركة تموّل الفرق من عمولتها (DEBIT عمولة)
-            // وتضيفه للسائق كرصيد مقفل غير قابل للسحب (CREDIT USER:...:LOCKED). idempotent.
-            if (driverLocked > 0) {
-              const driverLockedAcc = await this.ledger.lockedUserAccount(
-                tx,
-                trip.driver.userId,
-                trip.currency,
-              );
-              await this.ledger.post(tx, {
-                command: "settleCouponCompensation",
-                idempotencyKey: `trip:couponcomp:${tripId}`,
-                currency: trip.currency,
-                referenceType: "TRIP",
-                referenceId: tripId,
-                reason: "coupon_driver_compensation",
+                reason: "trip_fare_collected",
                 lines: [
+                  { accountId: source.id, direction: "DEBIT", amount: collected },
                   {
-                    accountId: revenue.id,
-                    direction: "DEBIT",
-                    amount: driverLocked,
-                  },
-                  {
-                    accountId: driverLockedAcc.id,
+                    accountId: driverPayable.id,
                     direction: "CREDIT",
-                    amount: driverLocked,
+                    amount: collected,
                   },
                 ],
               });
             }
-            // تحصيل غرامات إلغاء السائق المتراكمة من مستحقّه في نفس المعاملة
-            // (لا خصم مباشر من المحفظة، ومقيد بالمبلغ المتاح driverAvailable).
+
+            // ---------- القيد 2: عمولة المنصّة ----------
+            // الترتيب (رصيد الكوبون ← المُحصَّل ← محفظة العمولة) دالة نقية
+            // مشتركة مع فحص ما قبل القبول، فلا يختلف شرط القبول عن الخصم.
+            //
+            // مهم: رصيد الكوبون يُقرأ **قبل** منح رصيد هذه الرحلة (القيد 3)،
+            // فمنفعة كوبون الرحلة الحالية لا تُستهلك في عمولتها هي — بل في
+            // عمولة رحلة لاحقة، كما ينصّ نموذج العمل.
+            const creditAvailable = Number(
+              commissionCreditAccount.balanceCache,
+            );
+            const funding = planCommissionFunding({
+              commissionDue,
+              commissionCreditAvailable: creditAvailable,
+              electronicallyCollected: collected,
+            });
+
+            if (
+              funding.fromDriverWallet > 0 &&
+              Number(driverWallet.balanceCache) + 1e-9 <
+                funding.fromDriverWallet
+            ) {
+              // لا نسمح برصيد سالب في محفظة العمولة. الرحلة تُوسَم FAILED
+              // وتظهر في طابور التسوية وتُعاد المحاولة بعد الشحن.
+              throw new AppException("DRIVER_COMMISSION_BALANCE_INSUFFICIENT", {
+                details: {
+                  tripId,
+                  driverId: trip.driverId,
+                  required: funding.fromDriverWallet,
+                  walletBalance: Number(driverWallet.balanceCache),
+                  commissionCredit: creditAvailable,
+                  currency: trip.currency,
+                },
+              });
+            }
+
+            if (commissionDue > 0) {
+              const commissionLines: PostingLine[] = [];
+              if (funding.fromCommissionCredit > 0) {
+                commissionLines.push({
+                  accountId: commissionCreditAccount.id,
+                  direction: "DEBIT",
+                  amount: funding.fromCommissionCredit,
+                });
+              }
+              if (funding.fromCollection > 0) {
+                commissionLines.push({
+                  accountId: driverPayable.id,
+                  direction: "DEBIT",
+                  amount: funding.fromCollection,
+                });
+              }
+              if (funding.fromDriverWallet > 0) {
+                commissionLines.push({
+                  accountId: driverWallet.id,
+                  direction: "DEBIT",
+                  amount: funding.fromDriverWallet,
+                });
+              }
+              commissionLines.push({
+                accountId: revenue.id,
+                direction: "CREDIT",
+                amount: commissionDue,
+              });
+              await this.ledger.post(tx, {
+                command: "settleTripCommission",
+                idempotencyKey: `trip:commission:${tripId}`,
+                currency: trip.currency,
+                referenceType: "TRIP",
+                referenceId: tripId,
+                reason: "platform_commission",
+                lines: commissionLines,
+              });
+            }
+
+            // ---------- القيد 3: رصيد عمولة الكوبون ----------
+            // ما تحمّلته المنصّة من خصم الكوبون يُمنح للسائق كرصيد عمولة
+            // مخصّص (لا نقدًا ولا ربحًا ولا رصيدًا قابلًا للسحب أو التحويل)،
+            // مقابل مصروف دعم ترويجي على المنصّة.
+            if (couponCommissionCredit > 0) {
+              const subsidy = await this.ledger.platformAccount(
+                tx,
+                "COUPON_SUBSIDY",
+                "EXPENSE",
+                trip.currency,
+              );
+              await this.ledger.post(tx, {
+                command: "grantCouponCommissionCredit",
+                idempotencyKey: `trip:couponcredit:${tripId}`,
+                currency: trip.currency,
+                referenceType: "TRIP",
+                referenceId: tripId,
+                reason: "coupon_commission_credit",
+                lines: [
+                  {
+                    accountId: subsidy.id,
+                    direction: "DEBIT",
+                    amount: couponCommissionCredit,
+                  },
+                  {
+                    accountId: commissionCreditAccount.id,
+                    direction: "CREDIT",
+                    amount: couponCommissionCredit,
+                  },
+                ],
+              });
+            }
+
+            // ---------- تحصيل غرامات إلغاء السائق المتراكمة ----------
+            // تُحصّل من محفظة العمولة (الرصيد التشغيلي الوحيد للسائق)،
+            // ومقيدة بما بقي فيها فعلًا بعد خصم عمولة هذه الرحلة فلا
+            // يصبح الرصيد سالبًا.
             if (trip.driverId) {
+              const walletAfterCommission = round2(
+                Number(driverWallet.balanceCache) - funding.fromDriverWallet,
+              );
               await this.recoverDriverCancellationPenalties(tx, {
                 settledTripId: tripId,
                 driverId: trip.driverId,
-                driverAccountId: driver.id,
+                driverAccountId: driverWallet.id,
                 currency: trip.currency,
-                maxRecoverable: driverAvailable,
+                maxRecoverable: Math.max(walletAfterCommission, 0),
               });
             }
+
             await tx.payment.upsert({
               where: { tripId },
               create: {
@@ -551,12 +647,19 @@ export class FinancialService {
               },
               update: {},
             });
-            // إسقاط الأرباح يُشتقّ من قيود دفتر الأستاذ المرحّلة (مصدر
-            // الحقيقة الوحيد) لا من قيمة محسوبة مستقلة، ثم يُكتب عبر نفس
-            // مسار إعادة البناء (projectTripEarnings) لإزالة التخزين المزدوج.
-            const net = round2(base.net + driverLocked);
-            const commission = round2(base.commission - driverLocked);
-            const gross = round2(net + commission);
+
+            // إسقاط الأرباح (DriverEarning/CompanyEarning) يُكتب من نفس
+            // التفكيك الذي وُلّدت منه القيود، داخل المعاملة نفسها. هذه قيم
+            // **محاسبية/عرضية** لا أرصدة قابلة للسحب:
+            //   gross      = قيمة الرحلة قبل الخصم
+            //   commission = استحقاق عمولة المنصّة (اللقطة التاريخية)
+            //   net        = صافي أرباح السائق
+            // لأنها مشتقّة من لقطة الرحلة (fare + commissionPct + سياسة
+            // الكوبون) فإن تغيير إعداد العمولة في اللوحة لاحقًا لا يعيد
+            // كتابتها إطلاقًا.
+            const gross = breakdown.grossFare;
+            const commission = commissionDue;
+            const net = driverNet;
             await this.projectTripEarnings(tx, {
               tripId,
               driverId: trip.driverId as string,
@@ -578,7 +681,20 @@ export class FinancialService {
                 tripId,
                 type: "settlement:posted",
                 actor: "SYSTEM",
-                meta: { gross, net, commission },
+                meta: {
+                  gross,
+                  net,
+                  commission,
+                  commissionPct: trip.commissionPct,
+                  commissionRuleId: trip.commissionRuleId,
+                  paymentMethod: trip.paymentMethod,
+                  riderPays,
+                  electronicallyCollected: collected,
+                  commissionFromCredit: funding.fromCommissionCredit,
+                  commissionFromCollection: funding.fromCollection,
+                  commissionFromWallet: funding.fromDriverWallet,
+                  couponCommissionCredit,
+                },
               },
             });
             // حدث دائم داخل نفس المعاملة (transactional outbox) — يُسلّم لاحقًا مع إعادة محاولة + DLQ.
@@ -902,19 +1018,24 @@ export class FinancialService {
   }
 
   /**
-   * تحصيل غرامات إلغاء السائق المتراكمة من مستحقّه وقت التسوية.
+   * تحصيل غرامات إلغاء السائق المتراكمة وقت تسوية رحلة مكتملة.
    *
-   * يُنادى داخل معاملة settleTrip() نفسها بعد القيد الأساسي:
-   *   DEBIT  محفظة السائق (خصم من المستحقّ المُقيد توّا لهذه الرحلة)
+   * يُنادى داخل معاملة settleTrip() نفسها بعد قيد العمولة:
+   *   DEBIT  محفظة عمولة السائق (USER:...:AVAILABLE)
    *   CREDIT PLATFORM:DRIVER_PENALTY_RECEIVABLE (إقفال المستحقّ)
    *
+   * لماذا من محفظة العمولة: بعد تصحيح النموذج لم يبقَ للسائق أي رصيد آخر
+   * لدى المنصّة إلا هذه المحفظة (صافي أرباحه صار مستحقًّا على المنصّة في
+   * PLATFORM:DRIVER_PAYABLE، ورصيد الكوبون مخصّص للعمولة حصرًا).
+   *
    * ضمانات:
-   *   - مقيد بـ maxRecoverable (= driverAvailable) فلا يصبح رصيد السائق سالبًا.
+   *   - مقيد بـ maxRecoverable (= ما بقي في المحفظة بعد خصم عمولة هذه
+   *     الرحلة) فلا يصبح الرصيد سالبًا أبدًا.
    *   - idempotent مرتين: مفتاح trip:drvpenrecover:<penaltyTrip>:<settledTrip>
    *     يمنع تكرار نفس التسوية، وفحص referenceId يمنع تحصيل نفس
    *     الغرامة مرة أخرى في تسوية لاحقة.
-   *   - القيد منفصل عن baseLines قصدًا حتى لا تختلط الغرامة بالعمولة
-   *     في deriveTripEarnings.
+   *   - قيد منفصل عن قيد العمولة قصدًا حتى لا تختلط الغرامة بالعمولة في
+   *     أي تقرير أو إعادة بناء.
    */
   private async recoverDriverCancellationPenalties(
     tx: Prisma.TransactionClient,
@@ -1270,6 +1391,15 @@ export class FinancialService {
       });
     });
   }
+  /**
+   * شحن محفظة **عمولة** السائق بواسطة الطاقم/الوكيل (طلب مُعتمد).
+   *
+   * المحفظة رصيد تشغيلي مسبق الدفع لتغطية عمولة المنصّة، وليست محفظة
+   * أرباح: الشحن هنا لا يُنشئ ربحًا للسائق ولا مبلغًا قابلًا للسحب.
+   *   DEBIT  PLATFORM:CASH (ASSET) — نقد استلمه الوكيل فعلًا
+   *   CREDIT USER:<driver>:AVAILABLE (LIABILITY)
+   * خامل التكرار عبر `driverFunding:fund:<requestId>`.
+   */
   async fundDriverWallet(requestId: string): Promise<void> {
     await this.prisma.$transaction(
       async (tx) => {
@@ -1319,6 +1449,15 @@ export class FinancialService {
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
   }
+  /**
+   * تحويل رصيد محفظة العمولة بين سائقين (طلب مُعتمد من الطاقم).
+   *
+   * تحويل **داخلي** فقط ولا علاقة له بالسحب: الرصيد ينتقل من محفظة عمولة
+   * إلى محفظة عمولة ولا يخرج من المنصّة إطلاقًا. مقيّد برصيد المُرسِل
+   * فلا يصبح سالبًا، وخامل التكرار عبر
+   * `driverTransfer:complete:<transferId>`، وكله داخل معاملة واحدة بعزل
+   * Serializable فلا يمكن لتحويلين متزامنين صرف نفس الرصيد.
+   */
   async transferDriverFunds(transferId: string): Promise<void> {
     await this.prisma.$transaction(
       async (tx) => {
@@ -1896,15 +2035,285 @@ export class FinancialService {
    * الرصيد المقفل غير القابل للسحب (USER:...:LOCKED) — مثل تعويض خصم
    * الكوبون الممنوح للسائق. منفصل عن الرصيد المتاح فلا يدخل السحب/التحويل.
    */
+  /**
+   * أرصدة السائق ذات الصلة بالعمولة.
+   *
+   * ثلاث قيم منفصلة قصدًا، وتسميتها في الرد جزء من العقد مع التطبيقات:
+   *   commissionWallet  محفظة عمولة السائق — رصيد تشغيلي مسبق الدفع.
+   *                     **ليس ربحًا** ولا يُسحب.
+   *   commissionCredit  رصيد عمولة الكوبون — يُستهلك في العمولة فقط.
+   *   available         مجموعهما = ما يستطيع تغطية عمولة الرحلة القادمة.
+   */
+  async driverCommissionBalances(
+    driverUserId: string,
+    currency = DEFAULT_CURRENCY,
+  ): Promise<{
+    commissionWallet: number;
+    commissionCredit: number;
+    available: number;
+    currency: string;
+    withdrawable: false;
+  }> {
+    const [wallet, credit] = await Promise.all([
+      this.ledger.getUserBalance(driverUserId, currency),
+      this.ledger.getCommissionCreditBalance(driverUserId, currency),
+    ]);
+    return {
+      commissionWallet: wallet.balance,
+      commissionCredit: credit.commissionCredit,
+      available: round2(wallet.balance + credit.commissionCredit),
+      currency,
+      // ثابت في نموذج العمل: لا سحب ولا صرف نقدي لأي من الرصيدين.
+      withdrawable: false as const,
+    };
+  }
+
+  /**
+   * يتحقّق أن السائق يملك تغطية عمولة كافية **قبل** أن يُسنَد إلى رحلة
+   * تُنشئ التزام عمولة على محفظته.
+   *
+   * لماذا هنا وليس في التطبيق: التطبيق لا يملك أرصدة الدفتر ولا قواعد
+   * العمولة، وأي فحص فيه قابل للتجاوز. هذه الدالة تُنادى **داخل نفس معاملة**
+   * إسناد السائق، ومطالبة السائق الذرّية (ONLINE ← ON_TRIP) هي ما يمنع
+   * تسابق قبولين متزامنين على نفس الرصيد: لا يمكن للسائق أن يكون في
+   * رحلتين معًا، فلا يوجد مسار لصرف نفس الرصيد مرتين. الخصم الفعلي وقت
+   * التسوية يجري بعزل Serializable مع حارس «لا رصيد سالب».
+   */
+  async assertDriverCommissionCoverage(
+    client: Prisma.TransactionClient,
+    input: {
+      driverUserId: string;
+      currency: string;
+      /** عمولة الرحلة المستحقّة (من لقطة العمولة على الرحلة). */
+      commissionDue: number;
+      /** ما ستُحصّله المنصّة إلكترونيًا (0 للرحلة النقدية). */
+      electronicallyCollected: number;
+      tripId?: string;
+    },
+  ): Promise<void> {
+    if (input.commissionDue <= 0) return;
+    const [wallet, credit] = await Promise.all([
+      client.financialAccount.findUnique({
+        where: {
+          code: `USER:${input.driverUserId}:${input.currency}:AVAILABLE`,
+        },
+        select: { balanceCache: true },
+      }),
+      client.financialAccount.findUnique({
+        where: {
+          code: `USER:${input.driverUserId}:${input.currency}:COMMISSION_CREDIT`,
+        },
+        select: { balanceCache: true },
+      }),
+    ]);
+    const walletBalance = Number(wallet?.balanceCache ?? 0);
+    const creditBalance = Number(credit?.balanceCache ?? 0);
+    const required = prepaidCommissionRequirement({
+      commissionDue: input.commissionDue,
+      commissionCreditAvailable: creditBalance,
+      electronicallyCollected: input.electronicallyCollected,
+    });
+    if (required <= 0) return;
+    if (walletBalance + 1e-9 < required) {
+      throw new AppException("DRIVER_COMMISSION_BALANCE_INSUFFICIENT", {
+        details: {
+          tripId: input.tripId,
+          required,
+          walletBalance: round2(walletBalance),
+          commissionCredit: round2(creditBalance),
+          currency: input.currency,
+        },
+      });
+    }
+  }
+
+  /**
+   * لقطة مالية لسائق واحد للوحة التحكم والدعم.
+   *
+   * تجيب على السؤال التشغيلي الأكثر تكرارًا: «لماذا لا يستطيع هذا السائق
+   * قبول رحلات؟». تُجمع الأرقام من مصادرها الأصلية بلا أي عدّاد موازٍ:
+   * الأرصدة من دفتر الأستاذ، والأرباح من إسقاط DriverEarning، وخصومات
+   * العمولة من معاملات الدفتر نفسها.
+   *
+   * تُبرز الفصل بين المفاهيم صراحةً في الرد: محفظة العمولة ورصيد الكوبون
+   * وصافي الأرباح واستحقاق عمولة المنصّة حقول مستقلة، وكلها غير قابلة للسحب.
+   */
+  async driverFinancialSnapshot(driverId: string, currency = DEFAULT_CURRENCY) {
+    const driver = await this.prisma.driver.findUnique({
+      where: { id: driverId },
+      select: {
+        id: true,
+        userId: true,
+        user: { select: { name: true, phone: true } },
+      },
+    });
+    if (!driver) {
+      throw new AppException("DRIVER_NOT_FOUND", { details: { driverId } });
+    }
+
+    const [balances, earnings, commissionTxns] = await Promise.all([
+      this.driverCommissionBalances(driver.userId, currency),
+      this.prisma.driverEarning.aggregate({
+        where: { driverId },
+        _sum: { gross: true, commission: true, net: true },
+        _count: { _all: true },
+      }),
+      this.prisma.ledgerTransaction.findMany({
+        where: {
+          command: {
+            in: [
+              "settleTripCommission",
+              "grantCouponCommissionCredit",
+              "creditWalletTopUp",
+              "fundDriverWallet",
+              "transferDriverFunds",
+              "recoverDriverCancellationPenalty",
+            ],
+          },
+          status: "POSTED",
+          entries: {
+            some: {
+              account: {
+                code: { startsWith: `USER:${driver.userId}:${currency}:` },
+              },
+            },
+          },
+        },
+        orderBy: { createdAt: "desc" },
+        take: 50,
+        select: {
+          id: true,
+          command: true,
+          referenceType: true,
+          referenceId: true,
+          reason: true,
+          createdAt: true,
+          entries: {
+            select: {
+              direction: true,
+              amount: true,
+              balanceAfter: true,
+              account: { select: { code: true } },
+            },
+          },
+        },
+      }),
+    ]);
+
+    return {
+      driverId: driver.id,
+      driverUserId: driver.userId,
+      name: driver.user?.name ?? null,
+      phone: driver.user?.phone ?? null,
+      currency,
+      /** رصيد تشغيلي مسبق الدفع لتغطية العمولة — ليس ربحًا وغير قابل للسحب. */
+      commissionWallet: balances.commissionWallet,
+      /** منفعة كوبون مخصّصة للعمولة — غير قابلة للسحب ولا تُحتسب ربحًا. */
+      couponCommissionCredit: balances.commissionCredit,
+      /** التغطية المتاحة لعمولة الرحلة القادمة. */
+      commissionCoverage: balances.available,
+      /** قيم محاسبية للعرض فقط. */
+      earnings: {
+        withdrawable: false as const,
+        trips: earnings._count._all ?? 0,
+        gross: round2(Number(earnings._sum.gross ?? 0)),
+        net: round2(Number(earnings._sum.net ?? 0)),
+      },
+      /** استحقاق عمولة المنصّة المتراكم من رحلات هذا السائق. */
+      platformCommissionEntitlement: round2(
+        Number(earnings._sum.commission ?? 0),
+      ),
+      recentLedgerActivity: commissionTxns,
+    };
+  }
+
+  /**
+   * إيداع رصيد شحن محفظة مؤكَّد من مزوّد الدفع.
+   *
+   * نفس القيد لكلا الاستخدامين — رصيد flaminGO Pay للراكب ومحفظة عمولة
+   * السائق — لأنهما نفس الحساب المحاسبي (USER:...:AVAILABLE) يختلف معناه
+   * التجاري بحسب نوع المستخدم، لا نظامان منفصلان:
+   *   DEBIT  PLATFORM:TOPUP_CLEARING (ASSET) — مال وارد بانتظار التسوية البنكية
+   *   CREDIT USER:<user>:<CUR>:AVAILABLE   (LIABILITY)
+   *
+   * خامل التكرار عبر `wallet:topup:<topUpId>`: إعادة إرسال نفس الـwebhook
+   * أو ضغط زر التأكيد مرتين لا يُنشئ مالًا جديدًا.
+   */
+  async creditWalletTopUp(input: {
+    topUpId: string;
+    userId: string;
+    amount: number;
+    currency: string;
+    provider: string;
+    reference?: string | null;
+  }): Promise<void> {
+    this.ledger.assertCurrency(input.currency);
+    if (!Number.isFinite(input.amount) || toMinorUnits(input.amount) <= 0) {
+      throw new BadRequestException("Top-up amount must be positive");
+    }
+    await this.prisma.$transaction(
+      async (tx) => {
+        const account = await this.ledger.userAccount(
+          tx,
+          input.userId,
+          input.currency,
+        );
+        const clearing = await this.ledger.platformAccount(
+          tx,
+          "TOPUP_CLEARING",
+          "ASSET",
+          input.currency,
+        );
+        await this.ledger.post(tx, {
+          command: "creditWalletTopUp",
+          idempotencyKey: `wallet:topup:${input.topUpId}`,
+          currency: input.currency,
+          referenceType: "WALLET_TOPUP",
+          referenceId: input.topUpId,
+          reason: input.reference
+            ? `wallet_topup:${input.provider}:${input.reference}`
+            : `wallet_topup:${input.provider}`,
+          lines: [
+            {
+              accountId: clearing.id,
+              direction: "DEBIT",
+              amount: input.amount,
+            },
+            {
+              accountId: account.id,
+              direction: "CREDIT",
+              amount: input.amount,
+            },
+          ],
+        });
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
+  }
+
   async getLockedBalance(userId: string, currency = DEFAULT_CURRENCY) {
     return this.ledger.getLockedBalance(userId, currency);
   }
 
+  /** رصيد عمولة الكوبون (غير قابل للسحب — يُستهلك في العمولة فقط). */
+  async getCommissionCreditBalance(
+    userId: string,
+    currency = DEFAULT_CURRENCY,
+  ) {
+    return this.ledger.getCommissionCreditBalance(userId, currency);
+  }
+
   /**
-   * المسار الوحيد لكتابة إسقاط أرباح الرحلة (DriverEarning/CompanyEarning)
-   * من قيم مشتقّة من دفتر الأستاذ. يُستدعى من التسوية ومن إعادة
-   * بناء الإسقاطات، فتبقى هذه الجداول مجرّد إسقاط (projection) للحقيقة
-   * لا مصدرًا مستقلاً. آمن للتكرار (idempotent).
+   * المسار الوحيد لكتابة إسقاط أرباح الرحلة (DriverEarning/CompanyEarning).
+   *
+   * القيم تُشتقّ حتميًا من **لقطة الرحلة** (fare + discountAmount +
+   * commissionPct + سياسة الكوبون) عبر `buildFareBreakdown` — نفس الدالة
+   * التي وُلّدت منها قيود الدفتر، وداخل نفس المعاملة. يُستدعى من التسوية ومن
+   * إعادة البناء، فتبقى هذه الجداول إسقاطًا (projection) قابلًا لإعادة
+   * التوليد لا مصدر حقيقة مستقلاً. آمن للتكرار (idempotent).
+   *
+   * ملاحظة: هذه قيم **محاسبية/عرضية** لا أرصدة قابلة للسحب. لا يوجد أي
+   * مسار في النظام يحوّل `DriverEarning.net` إلى سحب أو صرف نقدي.
    */
   private async projectTripEarnings(
     client: Prisma.TransactionClient,
@@ -1930,95 +2339,136 @@ export class FinancialService {
   }
 
   /**
-   * Derive DriverEarning/CompanyEarning for a trip purely from the Ledger
-   * (the single source of truth), then upsert the read-model projections so
-   * they match. Proves the earnings tables are reconstructable, not
-   * independent sources. Safe to run repeatedly (idempotent).
+   * يعيد بناء إسقاطات أرباح الرحلة (DriverEarning/CompanyEarning) من **لقطة
+   * الرحلة المحفوظة** بنفس الدالة النقية التي تستعملها التسوية.
+   *
+   * لماذا من اللقطة وليس من قيود الدفتر: بعد تصحيح نموذج العمل لم يبقَ
+   * «صافي السائق» قيدًا دائنًا على حساب مستخدم (الرحلة النقدية لا تُنتج أي
+   * قيد أصلًا لأن المال لم يعبر المنصّة)، فاشتقاق الصافي من الدفتر صار
+   * مستحيلًا للرحلات النقدية. اللقطة (fare + discountAmount + commissionPct
+   * + سياسة الكوبون) مثبّتة على الرحلة وقت الطلب/التسوية ولا تتغير، فهي
+   * مصدر حتمي واحد: نفس المدخلات ⇒ نفس الأرقام دائمًا.
+   *
+   * وتبقى المطابقة قابلة للإثبات: نقارن العمولة المشتقّة بالعمولة المرحّلة
+   * فعلًا في `trip:commission:<id>` ونُرجع الفرق إن وُجد بدل إخفائه.
+   * آمن للتكرار (idempotent).
    */
-  async rebuildTripProjections(
-    tripId: string,
-  ): Promise<{ tripId: string; rebuilt: boolean }> {
-    const txn = await this.prisma.ledgerTransaction.findUnique({
-      where: { idempotencyKey: `trip:settle:${tripId}` },
-      include: { entries: { include: { account: true } } },
-    });
-    if (!txn || txn.status !== "POSTED") return { tripId, rebuilt: false };
-
+  async rebuildTripProjections(tripId: string): Promise<{
+    tripId: string;
+    rebuilt: boolean;
+    ledgerCommission?: number;
+    derivedCommission?: number;
+    mismatch?: number;
+  }> {
     const trip = await this.prisma.trip.findUnique({
       where: { id: tripId },
-      select: { driverId: true },
+      select: {
+        driverId: true,
+        settledAt: true,
+        fare: true,
+        discountAmount: true,
+        commissionPct: true,
+        couponFundingSource: true,
+        couponPlatformShare: true,
+      },
     });
-    if (!trip?.driverId) return { tripId, rebuilt: false };
-    const driverId = trip.driverId;
+    if (!trip?.driverId || !trip.settledAt || trip.fare == null) {
+      return { tripId, rebuilt: false };
+    }
 
-    // Derive earnings purely from the ledger entries (single source of truth).
-    const base = deriveTripEarnings(
-      txn.entries.map((entry) => ({
-        direction: entry.direction,
-        amount: Number(entry.amount),
-        accountCode: entry.account.code,
-      })),
-    );
-    const couponComp = await this.prisma.ledgerTransaction.findUnique({
-      where: { idempotencyKey: `trip:couponcomp:${tripId}` },
+    const discount = Math.max(Number(trip.discountAmount ?? 0), 0);
+    const breakdown = buildFareBreakdown({
+      baseComputedFare: round2(Number(trip.fare) + discount),
+      commissionPct: trip.commissionPct,
+      coupon:
+        discount > 0
+          ? {
+              kind: "FIXED",
+              value: discount,
+              funding: (trip.couponFundingSource ??
+                "PLATFORM") as CouponFundingSource,
+              platformShare:
+                trip.couponPlatformShare != null
+                  ? Number(trip.couponPlatformShare)
+                  : undefined,
+            }
+          : null,
+    });
+
+    const commissionTxn = await this.prisma.ledgerTransaction.findUnique({
+      where: { idempotencyKey: `trip:commission:${tripId}` },
       include: { entries: { include: { account: true } } },
     });
-    const lockedComp =
-      couponComp && couponComp.status === "POSTED"
+    const ledgerCommission =
+      commissionTxn && commissionTxn.status === "POSTED"
         ? round2(
-            couponComp.entries
+            commissionTxn.entries
               .filter(
                 (entry) =>
                   entry.direction === "CREDIT" &&
-                  entry.account.code.startsWith("USER:"),
+                  entry.account.code.startsWith("PLATFORM:COMMISSION:"),
               )
               .reduce((sum, entry) => sum + Number(entry.amount), 0),
           )
         : 0;
-    const net = round2(base.net + lockedComp);
-    const commission = round2(base.commission - lockedComp);
-    const gross = round2(net + commission);
 
     await this.prisma.$transaction((tx) =>
       this.projectTripEarnings(tx, {
         tripId,
-        driverId,
-        gross,
-        commission,
-        net,
+        driverId: trip.driverId as string,
+        gross: breakdown.grossFare,
+        commission: breakdown.commission,
+        net: breakdown.driverNet,
       }),
     );
-    return { tripId, rebuilt: true };
+    return {
+      tripId,
+      rebuilt: true,
+      ledgerCommission,
+      derivedCommission: breakdown.commission,
+      mismatch: round2(breakdown.commission - ledgerCommission),
+    };
   }
 
   /**
-   * Rebuild earning projections for the most recent settled trips from the
-   * Ledger. Use to backfill/repair the read models after schema or logic
-   * changes without ever treating them as an authoritative source.
+   * يعيد بناء إسقاطات الأرباح لأحدث الرحلات المُسوّاة.
+   *
+   * المصدر هو الرحلات المُسوّاة نفسها (`settledAt != null`) لا معاملات
+   * الدفتر: الرحلة النقدية لم تُنتج قيد تحصيل إطلاقًا بعد تصحيح النموذج،
+   * فالبحث بـ`command: "settleTrip"` كان سيتجاهل كل الرحلات النقدية.
+   * يُرجع أيضًا عدد الرحلات التي اختلفت فيها العمولة المشتقّة عن المرحّلة،
+   * فيصبح التعارض رقمًا ظاهرًا في اللوحة لا خطأً صامتًا.
    */
   async rebuildAllTripProjections(
     limit = 500,
-  ): Promise<{ scanned: number; rebuilt: number }> {
-    const settled = await this.prisma.ledgerTransaction.findMany({
-      where: { command: "settleTrip", status: "POSTED", referenceType: "TRIP" },
-      select: { referenceId: true },
-      orderBy: { createdAt: "desc" },
+  ): Promise<{ scanned: number; rebuilt: number; mismatches: number }> {
+    const settled = await this.prisma.trip.findMany({
+      where: { status: "COMPLETED", settledAt: { not: null } },
+      select: { id: true },
+      orderBy: { settledAt: "desc" },
       take: limit,
     });
     let rebuilt = 0;
-    for (const txn of settled) {
-      if (!txn.referenceId) continue;
-      const result = await this.rebuildTripProjections(txn.referenceId);
+    let mismatches = 0;
+    for (const trip of settled) {
+      const result = await this.rebuildTripProjections(trip.id);
       if (result.rebuilt) rebuilt += 1;
+      if (result.mismatch != null && Math.abs(result.mismatch) > 0.005) {
+        mismatches += 1;
+      }
     }
-    return { scanned: settled.length, rebuilt };
+    return { scanned: settled.length, rebuilt, mismatches };
   }
   /**
-   * Revenue totals computed directly from the Ledger (single source of truth),
-   * NOT from the DriverEarning/CompanyEarning read models.
-   * - commission: platform revenue credited on settleTrip transactions.
-   * - driverNet: amount credited to driver user accounts on settleTrip.
-   * - gross: commission + driverNet (total settled fare).
+   * إجماليات الإيراد محسوبة مباشرةً من دفتر الأستاذ (لا من جداول الإسقاط).
+   *
+   *  - commission: صافي ما قُيّد دائنًا على PLATFORM:COMMISSION ناقص ما قُيّد
+   *    مدينًا عليه (الاسترداد/التعويض التاريخي).
+   *  - driverNet: صافي ما استحقّ للسائقين، أي الدائن على
+   *    PLATFORM:DRIVER_PAYABLE ناقص المدين عليه (العمولة المحتجزة منه).
+   *    الأوامر التاريخية التي كانت تُقيّد صافي السائق على حساب مستخدم
+   *    (USER:...) ما زالت محسوبة كما هي، فلا تتغيّر أرقام الفترات السابقة.
+   *  - gross: commission + driverNet.
    */
   async getLedgerRevenue(range?: { gte?: Date; lte?: Date }): Promise<{
     commission: number;
@@ -2033,46 +2483,68 @@ export class FinancialService {
           }
         : undefined;
     const transaction: Prisma.LedgerTransactionWhereInput = {
-      command: { in: ["settleTrip", "settleCouponCompensation"] },
+      command: {
+        in: [
+          "settleTrip",
+          "settleTripCommission",
+          "grantCouponCommissionCredit",
+          // أوامر تاريخية قبل تصحيح النموذج — تبقى محسوبة كما كانت.
+          "settleCouponCompensation",
+        ],
+      },
       status: "POSTED",
       ...(createdAt ? { createdAt } : {}),
     };
-    const [commissionCredit, commissionDebit, driverNet] =
-      await this.prisma.$transaction([
-        this.prisma.ledgerEntry.aggregate({
-          where: {
-            direction: "CREDIT",
-            transaction,
-            account: { code: { startsWith: "PLATFORM:COMMISSION:" } },
+    const sumFor = (
+      direction: "DEBIT" | "CREDIT",
+      codePrefix: string,
+    ) =>
+      this.prisma.ledgerEntry.aggregate({
+        where: {
+          direction,
+          transaction,
+          account: { code: { startsWith: codePrefix } },
+        },
+        _sum: { amount: true },
+      });
+
+    const [
+      commissionCredit,
+      commissionDebit,
+      payableCredit,
+      payableDebit,
+      legacyUserCredit,
+    ] = await this.prisma.$transaction([
+      sumFor("CREDIT", "PLATFORM:COMMISSION:"),
+      sumFor("DEBIT", "PLATFORM:COMMISSION:"),
+      sumFor("CREDIT", "PLATFORM:DRIVER_PAYABLE:"),
+      sumFor("DEBIT", "PLATFORM:DRIVER_PAYABLE:"),
+      this.prisma.ledgerEntry.aggregate({
+        where: {
+          direction: "CREDIT",
+          transaction: {
+            ...transaction,
+            command: { in: ["settleCouponCompensation"] },
           },
-          _sum: { amount: true },
-        }),
-        this.prisma.ledgerEntry.aggregate({
-          where: {
-            direction: "DEBIT",
-            transaction,
-            account: { code: { startsWith: "PLATFORM:COMMISSION:" } },
-          },
-          _sum: { amount: true },
-        }),
-        this.prisma.ledgerEntry.aggregate({
-          where: {
-            direction: "CREDIT",
-            transaction,
-            account: { code: { startsWith: "USER:" } },
-          },
-          _sum: { amount: true },
-        }),
-      ]);
+          account: { code: { startsWith: "USER:" } },
+        },
+        _sum: { amount: true },
+      }),
+    ]);
+
     const commissionNum = round2(
       Number(commissionCredit._sum.amount ?? 0) -
         Number(commissionDebit._sum.amount ?? 0),
     );
-    const driverNetNum = Number(driverNet._sum.amount ?? 0);
+    const driverNetNum = round2(
+      Number(payableCredit._sum.amount ?? 0) -
+        Number(payableDebit._sum.amount ?? 0) +
+        Number(legacyUserCredit._sum.amount ?? 0),
+    );
     return {
       commission: commissionNum,
       driverNet: driverNetNum,
-      gross: Number((commissionNum + driverNetNum).toFixed(2)),
+      gross: round2(commissionNum + driverNetNum),
     };
   }
 

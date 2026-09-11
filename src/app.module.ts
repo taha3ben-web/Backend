@@ -32,6 +32,7 @@ import { LoyaltyModule } from "./modules/loyalty/loyalty.module";
 import { SubscriptionsModule } from "./modules/subscriptions/subscriptions.module";
 import { KycModule } from "./modules/kyc/kyc.module";
 import { PricingAdminModule } from "./modules/pricing/pricing-admin.module";
+import { CommissionModule } from "./modules/commission/commission.module";
 import { SupportModule } from "./modules/support/support.module";
 import { ReportsModule } from "./modules/reports/reports.module";
 import { RbacModule } from "./modules/rbac/rbac.module";
@@ -124,6 +125,7 @@ export const SCHEDULER_ENABLED = APP_ROLE !== "api";
     SubscriptionsModule,
     KycModule,
     PricingAdminModule,
+    CommissionModule,
     SupportModule,
     ReportsModule,
     RbacModule,

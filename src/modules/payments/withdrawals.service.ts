@@ -4,7 +4,6 @@ import { PrismaService } from "../../prisma/prisma.service";
 import { PaginationDto } from "../../common/dto/pagination.dto";
 import { FinancialService } from "../financial/financial.service";
 import { round2 } from "../../common/money.util";
-import { RiskService } from "../risk/risk.service";
 import { TracerService } from "../../common/observability/tracer.service";
 import { AppException } from "../../common/api/app.exception";
 import { DistributedLockService } from "../../common/infra/distributed-lock.service";
@@ -13,16 +12,11 @@ import {
   type WithdrawalStatus,
 } from "./withdrawal-transitions";
 
-/** حدود سرعة السحب لكشف الاحتيال (نافذة 24 ساعة). */
-const WITHDRAWAL_VELOCITY_WINDOW_MS = 24 * 60 * 60 * 1000;
-const WITHDRAWAL_VELOCITY_MAX_COUNT = 5;
-
 @Injectable()
 export class WithdrawalsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly financial: FinancialService,
-    private readonly risk: RiskService,
     @Optional() private readonly tracer?: TracerService,
     @Optional() private readonly lock?: DistributedLockService,
   ) {}
@@ -423,58 +417,38 @@ export class WithdrawalsService {
     return { totals, items: sorted };
   }
 
+  /**
+   * ===== السحب غير موجود في نموذج عمل flaminGO =====
+   *
+   * الأرصدة الثلاثة كلها **غير قابلة للسحب**:
+   *   • flaminGO Pay للراكب: رصيد دفع مخزَّن للرحلات وخدمات المنصّة.
+   *   • محفظة عمولة السائق: رصيد تشغيلي مسبق الدفع لتغطية العمولة، وليس
+   *     ربحًا — انخفاضه بـ150 دج يعني «دفعت عمولة»، لا «خسرت أرباحًا».
+   *   • أرباح السائق الصافية: في الرحلة النقدية استلمها نقدًا من الراكب،
+   *     وفي رحلة flaminGO Pay هي مستحقّ محاسبي على المنصّة يُسوّى تشغيليًا.
+   *     تحويلها إلى سحب داخل التطبيق = ائتمان اقتصادي مزدوج.
+   *
+   * لذلك أُغلق مسار إنشاء طلب السحب. ما بقي من هذه الخدمة هو **إدارة
+   * السجلات القائمة فقط** (اعتماد/رفض/تعليم كمدفوع + التقارير)، حتى تُنهي
+   * اللوحة ما كان معلّقًا قبل التصحيح دون حذف أي بيانات أو مايغريشن
+   * تاريخي. لا تُعِد فتح هذا المسار دون قرار تجاري صريح موثّق.
+   */
   async createForDriver(
-    userId: string,
-    amount: number,
-    note?: string,
-    idempotencyKey?: string,
-  ) {
-    return this.withTrace(
-      "withdrawals.create_request",
-      {
-        userId,
-        amount,
-        idempotencyKey: idempotencyKey ?? null,
+    _userId: string,
+    _amount: number,
+    _note?: string,
+    _idempotencyKey?: string,
+  ): Promise<never> {
+    throw new AppException("WITHDRAWAL_NOT_SUPPORTED", {
+      details: {
+        reason: "no_cash_out_in_business_model",
+        balances: [
+          "passenger_flamingo_pay",
+          "driver_commission_wallet",
+          "driver_net_earnings",
+        ],
       },
-      async () => {
-        const driver = await this.prisma.driver.findUnique({
-          where: { userId },
-          include: { user: { select: { phone: true } } },
-        });
-        if (!driver) {
-          throw new AppException("DRIVER_NOT_FOUND", { details: { userId } });
-        }
-
-        if (idempotencyKey) {
-          const existing = await this.prisma.withdrawRequest.findUnique({
-            where: { idempotencyKey },
-          });
-          if (existing) return existing;
-        }
-
-        await this.assessWithdrawalRisk(userId, amount, driver.user?.phone);
-
-        const request = await this.prisma.withdrawRequest.create({
-          data: {
-            driverId: driver.id,
-            userId,
-            amount,
-            note,
-            idempotencyKey,
-            status: "PENDING",
-          },
-        });
-        try {
-          await this.financial.reserveWithdrawal(request.id);
-        } catch (error) {
-          await this.prisma.withdrawRequest.delete({
-            where: { id: request.id },
-          });
-          throw error;
-        }
-        return request;
-      },
-    );
+    });
   }
 
   async approve(id: string, processedById: string, note?: string) {
@@ -513,64 +487,6 @@ export class WithdrawalsService {
         note,
       );
     });
-  }
-
-  /**
-   * تقييم مخاطر طلب السحب قبل إنشائه. يجمع تاريخ السحب الأخير (للسرعة)
-   * ومتوسّط المبالغ (لكشف الشذوذ) ثم يفوّض إلى `RiskService.assess`.
-   * قرار BLOCK يرفض الطلب فورًا؛ REVIEW يُسجَّل في طابور المراجعة ويُسمح.
-   */
-  private async assessWithdrawalRisk(
-    userId: string,
-    amount: number,
-    phone?: string | null,
-  ): Promise<void> {
-    const now = Date.now();
-    const since = new Date(now - WITHDRAWAL_VELOCITY_WINDOW_MS);
-    const [recent, avg] = await this.prisma.$transaction([
-      this.prisma.withdrawRequest.findMany({
-        where: { userId, createdAt: { gte: since } },
-        select: { amount: true, createdAt: true },
-      }),
-      this.prisma.withdrawRequest.aggregate({
-        where: { userId },
-        _avg: { amount: true },
-      }),
-    ]);
-
-    const history = recent.map((r) => ({
-      at: r.createdAt.getTime(),
-      amount: Number(r.amount),
-    }));
-    const avgAmount = Number(avg._avg.amount ?? 0) || undefined;
-
-    const blacklistChecks: Array<{ kind: "USER" | "PHONE"; value: string }> = [
-      { kind: "USER", value: userId },
-    ];
-    if (phone) blacklistChecks.push({ kind: "PHONE", value: phone });
-
-    const assessment = await this.risk.assess({
-      subjectKind: "USER",
-      subjectId: userId,
-      action: "withdrawal.create",
-      amount,
-      avgAmount,
-      blacklistChecks,
-      velocity: {
-        history,
-        limit: {
-          windowMs: WITHDRAWAL_VELOCITY_WINDOW_MS,
-          maxCount: WITHDRAWAL_VELOCITY_MAX_COUNT,
-        },
-        now,
-      },
-    });
-
-    if (RiskService.shouldBlock(assessment.decision)) {
-      throw new AppException("RISK_BLOCKED", {
-        details: { action: "withdrawal.create" },
-      });
-    }
   }
 
   private buildWhere(

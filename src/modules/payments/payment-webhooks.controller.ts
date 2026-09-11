@@ -11,6 +11,7 @@ import {
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { Request } from "express";
 import { PaymentsService } from "./payments.service";
+import { WalletTopUpsService } from "./wallet-topups.service";
 import { Public } from "../../common/decorators/public.decorator";
 import {
   readChargilyConfig,
@@ -23,7 +24,35 @@ type RawBodyRequest = Request & { rawBody?: Buffer };
 @Public()
 @Controller("payments/webhooks")
 export class PaymentWebhooksController {
-  constructor(private readonly payments: PaymentsService) {}
+  constructor(
+    private readonly payments: PaymentsService,
+    private readonly topUps: WalletTopUpsService,
+  ) {}
+
+  /**
+   * توجيه الحدث بعد التحقّق من التوقيع: عملية شحن محفظة أم دفعة رحلة؟
+   *
+   * التوجيه **حتمي** لا تخميني: نبحث عن صف شحن يطابق معرّف المزوّد أو
+   * معرّفنا الداخلي في الحمولة؛ إن وُجد فهو حدث شحن، وإلا يُسلَّم لمسار
+   * دفعات الرحلات كما كان. لا توجد حالة يُعالَج فيها الحدث مرتين: كل مسار
+   * يملك جدول أحداثه ومفتاح خموله المستقل.
+   *
+   * نقطة النهاية واحدة قصدًا: التحقّق من التوقيع الخام يعيش في مكان واحد،
+   * وأي نقطة ثانية كانت ستضاعف منطق الأمن — وهو أسوأ مكان للتكرار.
+   */
+  private async dispatch(
+    provider: string,
+    payload: Record<string, unknown>,
+    eventId?: string,
+  ) {
+    const topUpResult = await this.topUps.processWebhook(
+      provider,
+      payload,
+      eventId,
+    );
+    if (topUpResult.matched) return topUpResult;
+    return this.payments.processWebhook(provider, payload, eventId);
+  }
 
   /**
    * استقبال webhook من مزوّد دفع.
@@ -74,7 +103,7 @@ export class PaymentWebhooksController {
       if (!ok) {
         throw new UnauthorizedException("Webhook signature غير صالح");
       }
-      return this.payments.processWebhook("chargily", payload, eventId);
+      return this.dispatch("chargily", payload, eventId);
     }
 
     // في الإنتاج: يجب ضبط التوقيع أو التوكن على الأقل.
@@ -101,7 +130,7 @@ export class PaymentWebhooksController {
       throw new UnauthorizedException("Webhook token غير صالح");
     }
 
-    return this.payments.processWebhook(provider, payload, eventId);
+    return this.dispatch(provider, payload, eventId);
   }
 
   /** تحقق HMAC-SHA256 على البايتات الخام، بمقارنة ثابتة الزمن. */

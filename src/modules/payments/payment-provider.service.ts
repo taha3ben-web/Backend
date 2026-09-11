@@ -66,13 +66,29 @@ export class PaymentProviderService {
     this.adapters.set(adapter.name, adapter);
   }
 
+  /** المحوّلات الداخلية (ليست بوابات خارجية) — تُستثنى من اختيار البوابة. */
+  private static readonly INTERNAL_ADAPTERS = new Set(["cash", "wallet"]);
+
+  /**
+   * يحلّ **مزوّد** الدفع لوسيلة دفع معيّنة.
+   *
+   * وسيلة الدفع ومزوّد الدفع مفهومان منفصلان: `WALLET` هو منتج flaminGO Pay
+   * الموجّه للراكب، و`chargily`/`cib`/`visa` بوابات (rails). ولذلك لا يُذكر
+   * اسم بوابة بعينها هنا: أي بوابة مُسجّلة تصلح لوسيلة البطاقة، ويُختار
+   * أولها تسجيلًا كافتراض. المتصل يستطيع دائمًا فرض بوابة صراحةً.
+   * إضافة Visa مستقبلًا = ملف محوّل + `register()`، بلا تعديل هذا التابع.
+   */
   resolveProvider(method: PaymentMethod, provider?: string): string {
     const normalized = provider?.trim().toLowerCase();
     if (normalized) return normalized;
     switch (method) {
-      case "CARD":
-        if (this.adapters.has("chargily")) return "chargily";
+      case "CARD": {
+        const gateway = [...this.adapters.keys()].find(
+          (name) => !PaymentProviderService.INTERNAL_ADAPTERS.has(name),
+        );
+        if (gateway) return gateway;
         throw new BadRequestException("No card payment provider is configured");
+      }
       case "WALLET":
         return "wallet";
       case "CASH":

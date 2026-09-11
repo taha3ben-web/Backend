@@ -133,7 +133,9 @@ export class VehiclePricingService {
         maxFare: dto.maxFare,
         negotiationMin: dto.negotiationMin,
         negotiationMax: dto.negotiationMax,
-        commissionPct: dto.commissionPct ?? 0,
+        // null = لا تجاوز (تُحلّ العمولة من CommissionRule). لا نضع 0 لأنه
+        // نسبة عمولة مبرمَجة بحكم الأمر الواقع (عمولة صفر لكل قاعدة جديدة).
+        commissionPct: dto.commissionPct ?? null,
         currency: dto.currency ?? DEFAULT_CURRENCY,
         metadata: this.json(dto.metadata),
         priority: dto.priority ?? 0,

@@ -64,11 +64,18 @@ export class LedgerCoreService {
   }
 
   /**
-   * حساب المحفظة المقفلة للمستخدم (USER:...:LOCKED — LIABILITY): رصيد غير قابل
-   * للسحب (تعويض خصم الكوبون الممنوح للسائق وتموّله الشركة). منفصل تمامًا
-   * عن AVAILABLE فلا يدخل في فحص السحب/التحويل.
+   * حساب **رصيد عمولة الكوبون** للسائق (USER:...:COMMISSION_CREDIT — LIABILITY).
+   *
+   * ما هو: رصيد مخصّص حصرًا لتغطية عمولة المنصّة في الرحلات القادمة، ينشأ
+   * من منفعة الكوبون التي تحمّلتها المنصّة. ليس ربح سائق، وليس رصيد دفع،
+   * وليس قابلًا للسحب أو التحويل — لا يوجد أي مسار يقرأه إلا تسوية العمولة.
+   *
+   * لماذا حساب ثالث منفصل: خلطه بـAVAILABLE (محفظة العمولة) كان سيجعل
+   * منفعة الكوبون قابلة للتحويل إلى سائق آخر، وخلطه بـLOCKED كان سيخلطه
+   * بتعويضات تاريخية لها دلالة أخرى. الفصل هو ما يجعل الجملة «رصيد الكوبون
+   * لا يُسحب ولا يُحتسب ربحًا» قابلة للإثبات من رمز الحساب نفسه.
    */
-  async lockedUserAccount(
+  async commissionCreditAccount(
     tx: Prisma.TransactionClient,
     userId: string,
     currency: string,
@@ -83,7 +90,7 @@ export class LedgerCoreService {
       create: { type: "USER", userId, displayName: user.name },
       update: { displayName: user.name },
     });
-    const code = `USER:${userId}:${currency}:LOCKED`;
+    const code = `USER:${userId}:${currency}:COMMISSION_CREDIT`;
     return tx.financialAccount.upsert({
       where: { code },
       create: { partyId: party.id, code, type: "LIABILITY", currency },
@@ -217,13 +224,31 @@ export class LedgerCoreService {
   }
 
   /**
-   * الرصيد المقفل غير القابل للسحب (USER:...:LOCKED) — مثل تعويض خصم
-   * الكوبون الممنوح للسائق. منفصل عن الرصيد المتاح فلا يدخل السحب/التحويل.
+   * الرصيد المقفل التاريخي (USER:...:LOCKED) — **قراءة فقط**.
+   *
+   * كان يحمل تعويض خصم الكوبون قبل تصحيح نموذج العمل. لم يبقَ أي مسار
+   * يكتب فيه (المنفعة صارت رصيد عمولة في COMMISSION_CREDIT)، لكن القراءة
+   * تبقى لأن أرصدة السائقين التاريخية فيه حقيقية ولا يجوز إخفاؤها عنهم.
+   * لا تُعِد إنشاء كاتب لهذا الحساب.
    */
   async getLockedBalance(userId: string, currency = DEFAULT_CURRENCY) {
     const account = await this.prisma.financialAccount.findUnique({
       where: { code: `USER:${userId}:${currency}:LOCKED` },
     });
     return { locked: Number(account?.balanceCache ?? 0), currency };
+  }
+
+  /**
+   * رصيد عمولة الكوبون غير القابل للسحب (USER:...:COMMISSION_CREDIT).
+   * يُستهلك فقط في تسوية عمولة الرحلات القادمة.
+   */
+  async getCommissionCreditBalance(
+    userId: string,
+    currency = DEFAULT_CURRENCY,
+  ) {
+    const account = await this.prisma.financialAccount.findUnique({
+      where: { code: `USER:${userId}:${currency}:COMMISSION_CREDIT` },
+    });
+    return { commissionCredit: Number(account?.balanceCache ?? 0), currency };
   }
 }

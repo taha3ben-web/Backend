@@ -12,7 +12,10 @@ export interface FareQuote {
   durationSec: number;
   fare: number;
   currency: string;
+  /** النسبة المحلولة من إعدادات اللوحة (لقطة تُخزَّن على الرحلة). */
   commissionPct: number;
+  /** قاعدة العمولة المستخدمة — للتدقيق (null = تجاوز/إعداد عام). */
+  commissionRuleId: string | null;
   experimentVariant: string | null;
   /** مسار الرحلة الفعلي من محرك التوجيه (إن توفّر). */
   route?: {
@@ -86,6 +89,7 @@ export class PricingService {
       fare: r.fare,
       currency: r.currency,
       commissionPct: r.commissionPct,
+      commissionRuleId: r.commissionRuleId,
       experimentVariant: r.experimentVariant,
       route: r.route,
       breakdown: {

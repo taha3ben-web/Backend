@@ -20,6 +20,7 @@ import { CountryConfigService } from "../country-config/country-config.service";
 import { CityScalingService } from "../city-scaling/city-scaling.service";
 import { GrowthService } from "../growth/growth.service";
 import { SurgeService } from "./surge.service";
+import { CommissionService } from "../commission/commission.service";
 
 /**
  * سياق طلب التسعير. كل الحقول اختيارية ليمكن استخدام المحرك
@@ -76,7 +77,12 @@ export interface PricingResult {
   currency: string;
   fare: number;
   commission: number;
+  /** النسبة المحلولة من إعدادات اللوحة — تُلتقط على الرحلة كلقطة تاريخية. */
   commissionPct: number;
+  /** قاعدة العمولة التي حُلّت منها النسبة (null = تجاوز/إعداد عام). */
+  commissionRuleId: string | null;
+  /** من أين جاءت النسبة (للتدقيق وللوحة). */
+  commissionSource: "COMMISSION_RULE" | "VEHICLE_PRICING_RULE" | "PLATFORM_SETTING";
   distanceKm: number;
   durationSec: number;
   ruleUsed: PricingRuleUsed;
@@ -128,7 +134,11 @@ interface ResolvedPricing {
   maxFare: number | { toString(): string } | null;
   currency: string;
   peakMultiplier: number;
-  commissionPct: number;
+  /**
+   * تجاوز العمولة المحفوظ على قاعدة السعر (إن ضُبط من اللوحة). null = لا
+   * تجاوز، فتُحلّ النسبة من CommissionRule/إعداد اللوحة.
+   */
+  commissionPct: number | null;
   negotiationMin: number | null;
   negotiationMax: number | null;
   ruleUsed: PricingRuleUsed;
@@ -144,7 +154,10 @@ const DEFAULT_RULE = {
   currency: DEFAULT_CURRENCY,
 };
 
-const DEFAULT_COMMISSION_PCT = 15;
+// لا يوجد ثابت DEFAULT_COMMISSION_PCT هنا — ولا يجوز إعادته.
+// نسبة العمولة تُحلّ بالكامل من إعدادات لوحة التحكم عبر CommissionService
+// (CommissionRule ← تجاوز قاعدة السعر ← إعداد commission.defaultPct)، وغياب
+// الإعداد يُرجع خطأ نطاق صريحًا بدل نسبة مبرمَجة صامتة.
 
 /**
  * محرك التسعير المستقل (Pricing Engine).
@@ -156,6 +169,7 @@ const DEFAULT_COMMISSION_PCT = 15;
 export class PricingEngineService {
   constructor(
     private readonly prisma: PrismaService,
+    private readonly commission: CommissionService,
     @Optional() private readonly countryConfig?: CountryConfigService,
     @Optional() private readonly cityScaling?: CityScalingService,
     @Optional() private readonly growth?: GrowthService,
@@ -336,7 +350,16 @@ export class PricingEngineService {
         : rule.currency;
     const experimentVariant = await this.assignPricingVariant(ctx.subjectId);
     const finalFare = tax.gross;
-    const commission = round2((finalFare * rule.commissionPct) / 100);
+    // العمولة تُحلّ من إعدادات اللوحة (دولة/مدينة/نوع/فئة) وليس من أي رقم
+    // مبرمَج. قاعدة السعر قد تحمل تجاوزًا اختياريًا ضُبط من اللوحة سابقًا.
+    const resolvedCommission = await this.commission.resolve({
+      countryCode,
+      cityId: ctx.cityId ?? null,
+      vehicleTypeId: ctx.vehicleTypeId ?? null,
+      vehiclePricingRuleCommissionPct: rule.commissionPct,
+    });
+    const commissionPct = resolvedCommission.commissionPct;
+    const commission = round2((finalFare * commissionPct) / 100);
 
     return {
       currency,
@@ -350,7 +373,9 @@ export class PricingEngineService {
         : undefined,
       fare: finalFare,
       commission,
-      commissionPct: rule.commissionPct,
+      commissionPct,
+      commissionRuleId: resolvedCommission.ruleId,
+      commissionSource: resolvedCommission.source,
       distanceKm,
       durationSec,
       ruleUsed: rule.ruleUsed,
@@ -440,7 +465,7 @@ export class PricingEngineService {
           maxFare: best.maxFare,
           currency: best.currency,
           peakMultiplier: best.peakMultiplier ?? 1,
-          commissionPct: best.commissionPct ?? DEFAULT_COMMISSION_PCT,
+          commissionPct: best.commissionPct ?? null,
           negotiationMin:
             best.negotiationMin != null ? Number(best.negotiationMin) : null,
           negotiationMax:
@@ -469,7 +494,9 @@ export class PricingEngineService {
       maxFare: legacy.maxFare,
       currency: legacy.currency,
       peakMultiplier,
-      commissionPct: DEFAULT_COMMISSION_PCT,
+      // قواعد السعر القديمة (PricingRule) لا تحمل عمولة إطلاقًا: النسبة
+      // تأتي من CommissionRule/إعداد اللوحة، لا من قيمة مبرمَجة هنا.
+      commissionPct: null,
       negotiationMin: null,
       negotiationMax: null,
       ruleUsed: {

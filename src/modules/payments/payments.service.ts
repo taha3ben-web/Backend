@@ -387,6 +387,13 @@ export class PaymentsService {
     );
   }
 
+  /**
+   * وسائل الدفع المفعّلة للراكب — من إعداد اللوحة `passenger.paymentMethods`.
+   *
+   * وسيلة الدفع (`method`) ومزوّدها (`provider`) حقلان منفصلان في نفس
+   * الإعداد، فيمكن تفعيل `WALLET` (= flaminGO Pay) و`CASH` اليوم، وإضافة
+   * `CARD` ببوابة محددة غدًا من اللوحة وحدها بلا نشر إصدار خادم جديد.
+   */
   async passengerMethods() {
     const policy = await this.settings.getValue<{
       methods?: Array<{

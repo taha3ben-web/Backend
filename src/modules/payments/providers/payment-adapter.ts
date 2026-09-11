@@ -71,8 +71,10 @@ export interface PaymentAdapter {
 }
 
 /**
- * محوّل الدفع نقدًا: لا حركة مال إلكترونية، التحصيل يدوي عند نهاية الرحلة،
- * والتسوية تجري في دفتر الأستاذ (`PLATFORM:CASH_CLEARING`).
+ * محوّل الدفع نقدًا: لا حركة مال إلكترونية إطلاقًا — الراكب يدفع الأجرة
+ * للسائق مباشرة. لا يعبر أي مبلغ حسابات المنصّة في هذه الحالة، ولذلك لا
+ * تُنتج تسوية الرحلة النقدية قيد تحصيل؛ القيد الوحيد هو خصم عمولة المنصّة
+ * من محفظة عمولة السائق (انظر `FinancialService.settleTrip`).
  */
 export class CashPaymentAdapter implements PaymentAdapter {
   readonly name = "cash";
@@ -126,8 +128,10 @@ export class CashPaymentAdapter implements PaymentAdapter {
 }
 
 /**
- * محوّل الدفع من المحفظة: المال داخلي بالكامل، والرصيد يُتحقق منه
- * ويُحجز في دفتر الأستاذ (LOCKED) وليس هنا — هذا المحوّل وصفي فقط.
+ * محوّل الدفع من رصيد **flaminGO Pay** المخزَّن: المال داخلي بالكامل.
+ * التحقّق من الرصيد وخصمه يجريان في دفتر الأستاذ وقت التسوية، لا هنا —
+ * هذا المحوّل وصفي فقط. اسم المحوّل "wallet" هو رمز الرصيد الداخلي وليس
+ * اسم بوابة: flaminGO Pay منتج، وChargily/CIB بوابات.
  */
 export class WalletPaymentAdapter implements PaymentAdapter {
   readonly name = "wallet";

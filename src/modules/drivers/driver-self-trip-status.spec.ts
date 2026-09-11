@@ -54,6 +54,8 @@ describe("DriverSelfService.updateTripStatus — thin adapter to canonical lifec
       profileLevels as any,
       {} as any,
       {} as any,
+      // FinancialService — غير مستعمل في هذا المسار (أرصدة العمولة فقط).
+      {} as any,
     );
     return { service, prisma, trips, profileLevels, canonicalResult };
   }
