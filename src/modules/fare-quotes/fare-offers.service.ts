@@ -16,6 +16,9 @@ import {
   STORED_MEDIA_READ_TTL_MINUTES,
 } from "../storage/storage.service";
 import { DistributedLockService } from "../../common/infra/distributed-lock.service";
+import { rethrowAsActiveTripConflict } from "../../common/api/prisma-error.util";
+import { ACTIVE_IMMEDIATE_TRIP_STATUSES } from "../trips/trip-transitions";
+import { FinancialService } from "../financial/financial.service";
 
 type DriverBidProfile = Prisma.DriverGetPayload<{
   include: {
@@ -51,6 +54,8 @@ export class FareOffersService {
     private readonly realtime: RealtimeGateway,
     private readonly notifications: NotificationsService,
     private readonly storage: StorageService,
+    // تغطية عمولة السائق قبل الإسناد (نفس فحص محرك المطابقة).
+    private readonly financial: FinancialService,
   ) {}
 
   /** يحلّ userId لسائق واحد (لغرفة user:{id} في الـ WebSocket). */
@@ -455,11 +460,14 @@ export class FareOffersService {
       });
     }
 
-    // منع رحلتين نشطتين للراكب نفسه.
+    // قاعدة التفرّد: رحلة فورية واحدة لكل راكب. SCHEDULED مستثناة عمدًا
+    // (انظر ACTIVE_IMMEDIATE_TRIP_STATUSES). هذا الفحص لطيف فقط؛ السلطة
+    // النهائية هي الفهرس الجزئي Trip_active_passenger_unique في القاعدة،
+    // والطلب الخاسر في التسابق يُترجَم إلى نفس الكود ACTIVE_TRIP_EXISTS.
     const activeTrip = await this.prisma.trip.findFirst({
       where: {
         passengerId: quote.passengerId,
-        status: { in: ["SEARCHING", "ACCEPTED", "ARRIVING", "IN_PROGRESS"] },
+        status: { in: ACTIVE_IMMEDIATE_TRIP_STATUSES },
       },
       select: { id: true },
     });
@@ -470,7 +478,8 @@ export class FareOffersService {
     }
 
     const now = new Date();
-    const result = await this.prisma.$transaction(async (client) => {
+    const result = await this.prisma
+      .$transaction(async (client) => {
       // 1) مطالبة ذريّة بالسائق (ONLINE ←→ ON_TRIP) لمنع الإسناد المزدوج.
       const claimed = await client.driver.updateMany({
         where: { id: offer.driverId, availability: "ONLINE" },
@@ -478,6 +487,31 @@ export class FareOffersService {
       });
       if (claimed.count === 0) {
         throw new AppException("FARE_OFFER_DRIVER_UNAVAILABLE");
+      }
+
+      // 1.b) تغطية عمولة السائق قبل الإسناد.
+      //
+      // الرحلة تُنشأ هنا بحالة ACCEPTED مباشرةً (السائق مُسنَد فورًا)، فهذه
+      // هي اللحظة المكافئة لـassignDriver في محرك المطابقة. بدون هذا الفحص
+      // كان مسار التفاوض ثغرةً تتجاوز شرط العمولة مسبقة الدفع بالكامل.
+      // الفحص داخل نفس المعاملة التي طالبت بالسائق ذريًا، فلا تسابق.
+      const driverUser = await client.driver.findUnique({
+        where: { id: offer.driverId },
+        select: { userId: true },
+      });
+      if (driverUser) {
+        const grossFare = round2(Number(offer.amount));
+        await this.financial.assertDriverCommissionCoverage(client, {
+          driverUserId: driverUser.userId,
+          currency: quote.currency,
+          commissionDue: round2(
+            (grossFare * Number(quote.commissionPct)) / 100,
+          ),
+          // رحلة التفاوض تُنشأ بوسيلة الدفع الافتراضية (نقدًا)، فلا يوجد
+          // تحصيل إلكتروني تُقتطع منه العمولة: التغطية المسبقة مطلوبة كاملة.
+          electronicallyCollected: 0,
+          tripId: undefined,
+        });
       }
 
       // 2) إنشاء الرحلة بحالة ACCEPTED وبالسعر المتفَق (عرض السائق).
@@ -497,7 +531,9 @@ export class FareOffersService {
           distanceKm: quote.distanceKm,
           durationSec: quote.durationSec,
           fare: offer.amount,
+          // لقطة العمولة تنتقل كما هي من عرض السعر: ما وافق عليه الطرفان.
           commissionPct: quote.commissionPct,
+          commissionRuleId: quote.commissionRuleId,
           currency: quote.currency,
           cityId: quote.cityId,
           events: {
@@ -553,7 +589,15 @@ export class FareOffersService {
         },
       });
       return { trip, accepted, siblings };
-    });
+      })
+      // نفس ترجمة محرك المطابقة: الطلب الخاسر في التسابق على
+      // Trip_active_passenger_unique يعود ACTIVE_TRIP_EXISTS لا HTTP 500.
+      .catch((error: unknown) =>
+        rethrowAsActiveTripConflict(error, {
+          passengerId: quote.passengerId,
+          quoteId,
+        }),
+      );
 
     // بثّ فوري بعد الالتزام (أفضل-جهد).
     const { trip, accepted, siblings } = result;

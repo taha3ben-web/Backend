@@ -11,6 +11,7 @@ import {
   TripStopInput,
 } from "./scheduling.util";
 import { DistributedLockService } from "../../common/infra/distributed-lock.service";
+import { CommissionService } from "../commission/commission.service";
 
 export interface CreateScheduledTripInput {
   passengerId: string;
@@ -32,6 +33,7 @@ export class ScheduledTripsService {
     private readonly cronLock: DistributedLockService,
     private readonly prisma: PrismaService,
     private readonly countryConfig: CountryConfigService,
+    private readonly commission: CommissionService,
   ) {}
 
   /** ينشئ رحلة مجدولة (مع توقفات اختيارية) ويحسب وقت الإرسال. */
@@ -72,10 +74,20 @@ export class ScheduledTripsService {
       : null;
     const currency = await this.countryConfig.currencyFor(city?.country ?? "");
 
+    // لقطة نسبة العمولة تُثبّت على الحجز نفسه لحظة إنشائه، تمامًا كما في
+    // طلب الرحلة الفورية. لا يوجد default في المخطط بعد تصحيح النموذج،
+    // فأي مسار إنشاء رحلة يجب أن يحلّ النسبة من إعدادات اللوحة صراحةً.
+    const resolvedCommission = await this.commission.resolve({
+      countryCode: city?.country ?? null,
+      cityId: input.cityId ?? null,
+    });
+
     return this.prisma.trip.create({
       data: {
         passengerId: input.passengerId,
         status: "SCHEDULED",
+        commissionPct: resolvedCommission.commissionPct,
+        commissionRuleId: resolvedCommission.ruleId,
         rideClass: (input.rideClass as any) ?? "ECONOMY",
         currency,
         cityId: input.cityId ?? null,

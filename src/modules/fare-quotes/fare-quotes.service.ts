@@ -139,7 +139,9 @@ export class FareQuotesService {
         suggestedFare: new Prisma.Decimal(band.suggested),
         minFare: new Prisma.Decimal(band.min),
         maxFare: new Prisma.Decimal(band.max),
+        // لقطة العمولة: النسبة المحلولة من إعدادات اللوحة + قاعدتها.
         commissionPct: result.commissionPct,
+        commissionRuleId: result.commissionRuleId,
         pricingSource: result.ruleUsed.source,
         pricingRuleId: result.ruleUsed.id,
         status: "QUOTED",
@@ -225,6 +227,8 @@ export class FareQuotesService {
       minFare: band.min,
       maxFare: band.max,
       commissionPct: result.commissionPct,
+      commissionRuleId: result.commissionRuleId,
+      commissionSource: result.commissionSource,
       pricingSource: result.ruleUsed.source,
       pricingRuleId: result.ruleUsed.id,
       /** رسوم الخدمة/الانتظار المطبّقة فعليًا — تظهر في محاكاة اللوحة. */
@@ -307,6 +311,7 @@ export class FareQuotesService {
         quote.proposedFare != null ? Number(quote.proposedFare) : null,
       passengerNote: quote.passengerNote,
       commissionPct: quote.commissionPct,
+      commissionRuleId: quote.commissionRuleId,
       pricingSource: quote.pricingSource,
       pricingRuleId: quote.pricingRuleId,
       status: effectiveStatus,

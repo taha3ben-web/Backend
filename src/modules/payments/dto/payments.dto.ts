@@ -6,7 +6,6 @@ import {
   IsPositive,
   IsString,
   MaxLength,
-  Min,
 } from "class-validator";
 import { PaymentMethod, PaymentStatus } from "@prisma/client";
 
@@ -89,28 +88,6 @@ export class WalletTopUpDto {
   @IsString()
   @IsOptional()
   reference?: string;
-}
-
-/** طلب سحب ينشئه السائق */
-export class CreateWithdrawDto {
-  @Type(() => Number)
-  @IsNumber()
-  @IsPositive()
-  @Min(1)
-  declare amount: number;
-
-  @IsString()
-  @IsOptional()
-  note?: string;
-
-  /**
-   * مفتاح عدم التكرار (idempotency) اختياري يرسله العميل (مثل UUID)
-   * لمنع إنشاء طلب سحب مكرر عند إعادة المحاولة/ضعف الشبكة.
-   */
-  @IsString()
-  @IsOptional()
-  @MaxLength(100)
-  idempotencyKey?: string;
 }
 
 /** معالجة طلب السحب من المدير */

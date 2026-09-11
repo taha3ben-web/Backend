@@ -562,6 +562,80 @@ export const API_ERROR_CODES = {
       fr: "Cette action ne peut pas être effectuée sur le statut actuel du véhicule.",
     },
   },
+  /**
+   * لا توجد قاعدة عمولة مضبوطة من لوحة التحكم تغطّي هذا السياق.
+   * مقصود أن يكون خطأً صريحًا: البديل الوحيد هو نسبة عمولة مبرمَجة في
+   * الكود، وهي ممنوعة في نموذج العمل.
+   */
+  COMMISSION_NOT_CONFIGURED: {
+    httpStatus: 409,
+    messages: {
+      ar: "لم تُضبط نسبة العمولة لهذا النطاق. يلزم ضبطها من لوحة التحكم.",
+      en: "No commission rate is configured for this scope. It must be set from the Dashboard.",
+      fr: "Aucun taux de commission n'est configuré pour ce périmètre. Il doit être défini depuis le tableau de bord.",
+    },
+  },
+  COMMISSION_RULE_NOT_FOUND: {
+    httpStatus: 404,
+    messages: {
+      ar: "قاعدة العمولة غير موجودة.",
+      en: "The commission rule was not found.",
+      fr: "La règle de commission est introuvable.",
+    },
+  },
+  COMMISSION_RULE_INVALID: {
+    httpStatus: 400,
+    messages: {
+      ar: "قيمة قاعدة العمولة غير صالحة.",
+      en: "The commission rule value is invalid.",
+      fr: "La valeur de la règle de commission est invalide.",
+    },
+  },
+  /** رصيد محفظة عمولة السائق لا يغطّي عمولة هذه الرحلة. */
+  DRIVER_COMMISSION_BALANCE_INSUFFICIENT: {
+    httpStatus: 402,
+    messages: {
+      ar: "رصيد محفظة العمولة غير كافٍ لقبول هذه الرحلة. اشحن محفظتك.",
+      en: "Your commission wallet balance is not enough to take this ride. Please top up.",
+      fr: "Le solde de votre portefeuille de commission est insuffisant pour cette course. Veuillez le recharger.",
+    },
+  },
+  /**
+   * السحب/الصرف النقدي غير موجود في نموذج العمل: رصيد flaminGO Pay للراكب
+   * ومحفظة عمولة السائق وأرباح السائق كلها غير قابلة للسحب.
+   */
+  WITHDRAWAL_NOT_SUPPORTED: {
+    httpStatus: 403,
+    messages: {
+      ar: "السحب غير متاح: الرصيد مخصّص للدفع داخل التطبيق وليس للسحب.",
+      en: "Withdrawals are not available: this balance is for in-app payments, not cash-out.",
+      fr: "Les retraits ne sont pas disponibles : ce solde sert aux paiements dans l'application, pas aux retraits.",
+    },
+  },
+  WALLET_TOPUP_NOT_FOUND: {
+    httpStatus: 404,
+    messages: {
+      ar: "عملية شحن المحفظة غير موجودة.",
+      en: "The wallet top-up was not found.",
+      fr: "Le rechargement du portefeuille est introuvable.",
+    },
+  },
+  WALLET_TOPUP_INVALID_STATE: {
+    httpStatus: 409,
+    messages: {
+      ar: "لا يمكن تنفيذ الإجراء على عملية الشحن في حالتها الحالية.",
+      en: "This action is not allowed for the top-up in its current state.",
+      fr: "Cette action n'est pas autorisée pour ce rechargement dans son état actuel.",
+    },
+  },
+  WALLET_TOPUP_AMOUNT_INVALID: {
+    httpStatus: 400,
+    messages: {
+      ar: "مبلغ الشحن خارج الحدود المسموح بها.",
+      en: "The top-up amount is outside the allowed limits.",
+      fr: "Le montant du rechargement est en dehors des limites autorisées.",
+    },
+  },
 } as const satisfies Record<string, ErrorCodeDef>;
 
 export type ApiErrorCode = keyof typeof API_ERROR_CODES;

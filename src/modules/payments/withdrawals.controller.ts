@@ -4,14 +4,13 @@ import {
   Get,
   Param,
   Patch,
-  Post,
   Query,
   UseGuards,
 } from "@nestjs/common";
 import { WithdrawStatus } from "@prisma/client";
 import { WithdrawalsService } from "./withdrawals.service";
 import { PaginationDto } from "../../common/dto/pagination.dto";
-import { CreateWithdrawDto, ProcessWithdrawDto } from "./dto/payments.dto";
+import { ProcessWithdrawDto } from "./dto/payments.dto";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
 import { RolesGuard } from "../../common/guards/roles.guard";
 import { PermissionsGuard } from "../../common/guards/permissions.guard";
@@ -22,20 +21,18 @@ import {
   AuthUser,
 } from "../../common/decorators/current-user.decorator";
 
+/**
+ * إدارة طلبات السحب **القائمة** فقط (لوحة التحكم).
+ *
+ * مسار الإنشاء `POST /withdrawals` أُزيل: لا يوجد سحب ولا صرف نقدي في
+ * نموذج عمل flaminGO لا للراكب ولا للسائق (انظر WithdrawalsService).
+ * بقيت مسارات الطاقم كي تُنهي اللوحة ما كان معلّقًا قبل التصحيح ولتبقى
+ * التقارير التاريخية متاحة — بلا حذف أي بيانات أو مايغريشن.
+ */
 @UseGuards(JwtAuthGuard)
 @Controller("withdrawals")
 export class WithdrawalsController {
   constructor(private readonly withdrawals: WithdrawalsService) {}
-
-  @Post()
-  create(@CurrentUser() user: AuthUser, @Body() dto: CreateWithdrawDto) {
-    return this.withdrawals.createForDriver(
-      user.userId,
-      dto.amount,
-      dto.note,
-      dto.idempotencyKey,
-    );
-  }
 
   @UseGuards(RolesGuard, PermissionsGuard)
   @Roles("STAFF")

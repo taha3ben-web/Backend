@@ -11,6 +11,7 @@ import { NotificationsModule } from "../notifications/notifications.module";
 import { TripGuardsModule } from "../trips/trip-guards.module";
 import { ProfileLevelsModule } from "../profile-levels/profile-levels.module";
 import { TripsModule } from "../trips/trips.module";
+import { FinancialModule } from "../financial/financial.module";
 
 @Module({
   imports: [
@@ -24,6 +25,8 @@ import { TripsModule } from "../trips/trips.module";
     PricingEngineModule,
     MatchingEngineModule,
     CityScalingModule,
+    // فحص تغطية عمولة السائق قبل الإسناد (LedgerCore هو مصدر الأرصدة).
+    FinancialModule,
     // تسجيل مخاطر إلغاء الراكب + معاينة قرار الخادم قبل الإلغاء.
     TripGuardsModule,
     // المرحلة 11: مستوى السائق المعروض للراكب أثناء الرحلة.

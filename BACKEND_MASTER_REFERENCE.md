@@ -5,9 +5,9 @@
 **Repository:** taha3ben-web/Backend
 **Document Type:** Living Backend Source of Truth
 **Baseline Date:** 2026-08-25
-**Last Verified:** 2026-08-25
+**Last Verified:** 2026-09-11 (partial — payments/wallets/commission/coupons/trip-concurrency only; see Section 36)
 **Baseline Commit:** `647dc78065e702c21d496909a655e72ed4910d43`
-**Production Status:** PRODUCTION READY (per FINAL READ-ONLY AUDIT completed 2026-08-25)
+**Production Status:** PRODUCTION READY as of the 2026-08-25 audit. The 2026-09-11 business-model correction (PR #28) is **not merged** and carries two items that must pass in CI before it is — see Sections 34 and 36.
 
 > Update this document whenever the backend architecture, API, database, infrastructure, configuration, security model, integrations, or runtime behavior changes.
 >
@@ -301,8 +301,10 @@ Given the schema defines **90+ models**, this document lists every model **name*
 - **LegacyWalletArchive** — non-operational audit snapshot of the pre-ledger wallet data (explicitly documented in schema comments as **not used for balance calculation**).
 - **DriverEarning**, **CompanyEarning** — per-trip earning splits.
 - **Payment**, **PaymentEvent** — payment lifecycle + provider webhook event log.
-- **DriverFundingRequest**, **DriverTransfer**, **WithdrawRequest** — driver-initiated money movement workflows with approval steps.
-- **PayoutBatch**, **PayoutItem** — payout batch settlement records.
+- **DriverFundingRequest**, **DriverTransfer** — staff/agent-approved funding of a driver's **commission wallet** and internal transfers between drivers. Neither leaves the platform.
+- **WithdrawRequest** — **legacy/retired for new records.** The creation route was removed (see Section 23); the model, its rows and all its migrations are preserved so operations can close what was already in flight. Do not re-open a creation path without a documented business decision.
+- **PayoutBatch**, **PayoutItem** — payout batch settlement records (staff-driven, built from already-approved legacy withdrawals).
+- **WalletTopUp**, **WalletTopUpEvent** — self-service wallet top-up (passenger flaminGO Pay and driver commission wallet share this path) with a provider-event log. Three independent idempotency keys: request, webhook event, and the ledger transaction.
 
 ### Marketing / growth
 - **Coupon**, **CouponRedemption** — code-based discounts with per-user limits.
@@ -317,6 +319,7 @@ Given the schema defines **90+ models**, this document lists every model **name*
 - **Wilaya** — Algeria's 69 administrative provinces (table, not enum, specifically because the count has changed historically); `isActive` vs `isOperational` distinction.
 - **City**, **Zone** — city and city-zone (polygon) records.
 - **PricingRule**, **PeakPricing** — city/wilaya/national-scoped fare rules with time-window peak multipliers.
+- **CommissionRule** — platform commission, scoped by `countryCode` / `cityId` / `vehicleTypeId` / `vehicleCategoryId` (each nullable = wildcard) with `priority` and `isActive`. `commissionPct` has **no default**: the Dashboard is the only source of a commission rate. Deliberately separate from `VehiclePricingRule` because commission is an independent commercial dimension and because a rate per **vehicle category** cannot be expressed on a table that requires `vehicleTypeId`.
 - **CityScalingControl** — per-city launch status and capacity caps.
 
 ### Safety / support
@@ -402,7 +405,7 @@ FareQuote ── FareOffer (implicit via fareQuoteId, string reference — no fo
 
 ## 9. Enums (full list from schema.prisma)
 
-`UserType`, `UserStatus`, `AccountDeletionStatus`, `Gender`, `DriverStatus`, `DriverAvailability`, `RideClass`, `WorkflowStatus`, `DocumentType`, `DocumentStatus`, `TripStatus`, `SettlementStatus`, `ActorKind`, `PaymentMethod`, `PaymentStatus`, `WithdrawStatus`, `FundingRequestStatus`, `DriverTransferStatus`, `FinancialPartyType`, `FinancialAccountType`, `LedgerTransactionStatus`, `LedgerEntryDirection`, `AgentStatus`, `DriverQrStatus`, `DiscountType`, `CouponFundingSource`, `SubscriptionInterval`, `SubscriptionStatus`, `NotificationTarget`, `NotificationChannel`, `TicketStatus`, `ComplaintStatus`, `ReconciliationStatus`, `ReferralStatus`, `LoyaltyTier`, `LoyaltyEntryType`, `SafetyIncidentType`, `SafetyIncidentStatus`, `LostItemStatus`, `InvoiceStatus`, `TripTipStatus`, `SettingPublicationStatus`, `SettingChangeRequestStatus`, `LegalDocumentType`, `LegalAudience`, `SavedPlaceKind`, `FeatureFlagPlatform`, `FareQuoteStatus`, `FareOfferStatus`, `IdentityDocType`, `IdentityVerificationStatus`, `VehicleVerificationStatus`, `MessageTemplateCategory`, `ContentBlockType`, `ContentAudience`, `BackupKind`, `BackupStatus`, `BackupTrigger`, plus payout/incentive enums (`PayoutItemStatus`, `IncentiveKind`, `CityLaunchStatus` — referenced in the payouts/incentive/city-scaling models but their exact value lists were in the truncated middle portion of the schema read and are **NOT VERIFIED value-by-value in this pass**).
+`UserType`, `UserStatus`, `AccountDeletionStatus`, `Gender`, `DriverStatus`, `DriverAvailability`, `RideClass`, `WorkflowStatus`, `DocumentType`, `DocumentStatus`, `TripStatus`, `SettlementStatus`, `ActorKind`, `PaymentMethod`, `PaymentStatus`, `WithdrawStatus`, `FundingRequestStatus`, `DriverTransferStatus`, `FinancialPartyType`, `FinancialAccountType`, `LedgerTransactionStatus`, `LedgerEntryDirection`, `AgentStatus`, `DriverQrStatus`, `DiscountType`, `CouponFundingSource`, `SubscriptionInterval`, `SubscriptionStatus`, `NotificationTarget`, `NotificationChannel`, `TicketStatus`, `ComplaintStatus`, `ReconciliationStatus`, `ReferralStatus`, `LoyaltyTier`, `LoyaltyEntryType`, `SafetyIncidentType`, `SafetyIncidentStatus`, `LostItemStatus`, `InvoiceStatus`, `TripTipStatus`, `SettingPublicationStatus`, `SettingChangeRequestStatus`, `LegalDocumentType`, `LegalAudience`, `SavedPlaceKind`, `FeatureFlagPlatform`, `FareQuoteStatus`, `FareOfferStatus`, `IdentityDocType`, `IdentityVerificationStatus`, `VehicleVerificationStatus`, `MessageTemplateCategory`, `ContentBlockType`, `ContentAudience`, `BackupKind`, `BackupStatus`, `BackupTrigger`, `WalletTopUpStatus`, plus payout/incentive enums (`PayoutItemStatus`, `IncentiveKind`, `CityLaunchStatus` — referenced in the payouts/incentive/city-scaling models but their exact value lists were in the truncated middle portion of the schema read and are **NOT VERIFIED value-by-value in this pass**).
 
 Business meaning for each enum's exact values (beyond what's self-evident from the name) was not individually annotated from code usage in this pass — this is standard Prisma enum documentation and each is self-describing from `schema.prisma` directly.
 
@@ -558,7 +561,16 @@ Given the breadth requested here duplicates and would require the same per-contr
 ### 20. Pricing (confirmed structure)
 - `PricingRule` scoped by `cityId` (optional) and `wilayaId` (optional) with `rideClass`, `baseFare`, `perKm`, `perMin`, `minFare`, `maxFare`, `currency`, `isActive`.
 - `PeakPricing` — time-window (`startTime`/`endTime`/`daysOfWeek`) multiplier per `PricingRule`.
-- Priority model per schema comment: **city > wilaya > national**, resolved in code by a `resolveLegacy()`-style function (name referenced in schema comment) — **not** a manual priority column, specifically to prevent an admin from creating an illogical override. Exact resolution algorithm **NOT VERIFIED in this pass** (requires reading `pricing`/`pricing-engine` services).
+- Priority model per schema comment: **city > wilaya > national**, resolved in code by a `resolveLegacy()`-style function (name referenced in schema comment) — **not** a manual priority column, specifically to prevent an admin from creating an illogical override. **VERIFIED 2026-09-11** by reading `pricing-engine.service.ts`: `resolve()` prefers an active `VehiclePricingRule` (ordered by `priority` desc then specificity, with city weighted above wilaya), then falls back to `resolveLegacy()` which queries city → wilaya → national in that order, then to the in-code `DEFAULT_RULE` fare values.
+
+#### Commission (VERIFIED 2026-09-11 — corrected, see Section 36)
+- Commission is resolved by `CommissionService.resolve()` in the `commission` module, **not** by the pricing engine, and **never** from a value in code.
+- Resolution order: `CommissionRule` → `VehiclePricingRule.commissionPct` (an optional per-rule override) → the `commission.defaultPct` row in `Setting` → throw `COMMISSION_NOT_CONFIGURED` (409).
+- `CommissionRule` matching: a `null` dimension is a wildcard; ranking is `priority` desc → specificity desc (`cityId` 8, `countryCode` 4, `vehicleTypeId` 2, `vehicleCategoryId` 1 — powers of two so no two dimension sets can tie) → oldest `createdAt` → `id`. Fully deterministic.
+- The resolved rate **and** the rule id are snapshotted onto `Trip.commissionPct` / `Trip.commissionRuleId` (and `FareQuote.commissionPct` / `FareQuote.commissionRuleId`) at creation. Settlement reads the snapshot, so a later Dashboard change **cannot** rewrite historical trip accounting.
+- There is **no commission default anywhere**: the `@default(15)` on `Trip`, `FareQuote` and `VehiclePricingRule` and the `DEFAULT_COMMISSION_PCT = 15` constant were all removed. `src/modules/commission/no-hardcoded-commission.spec.ts` scans `src/`, `schema.prisma` and every migration on every CI run to keep them from returning.
+- **Operational consequence:** with no `CommissionRule`, no `VehiclePricingRule.commissionPct` and no `commission.defaultPct`, fare quoting fails with `COMMISSION_NOT_CONFIGURED`. At least one rule must be configured from the Dashboard before rides can be quoted.
+- Dashboard API: `GET/POST/PATCH/DELETE /api/admin/commission-rules` plus `GET /api/admin/commission-rules/effective` (returns the resolved rate, the winning rule and every candidate, so an operator can see *why* a rate applied). Guarded by `STAFF` + `pricing.manage`, the same pair used by `/api/vehicle-pricing`.
 - `FareQuote`/`FareOffer` — separate inDrive-style negotiated pricing flow (suggested + min/max range, driver counter-offers), decoupled from `PricingRule` by design (string-keyed, no FK) per schema comments.
 - `PricingExperiment`/`ExperimentAssignment` — A/B testing infrastructure exists; active experiment key configured via `PRICING_EXPERIMENT_KEY` env var.
 - Known security-relevant note found directly in schema comments: **server-side validation of fare quotes is implied by design** (min/max bounds stored server-side), but the actual validation code path was **NOT VERIFIED in this pass**.
@@ -576,13 +588,65 @@ Given the breadth requested here duplicates and would require the same per-contr
 - The three specific point fields requested for clarification (`lifetimeTierPoints`, `tierPoints`, `rewardPoints`) **do not appear under those exact names** in the schema as read — the actual model uses `pointsBalance` and `lifetimePoints`. This is flagged explicitly as a naming difference from the request rather than guessed at: **the requested field names are NOT VERIFIED to exist; the schema's actual field names are `pointsBalance` and `lifetimePoints`.**
 - Completeness: structurally present (account + ledger + tiers + env-config), but whether the full grant/spend business logic is **fully implemented vs. partially implemented** was **NOT VERIFIED in this pass** (would require reading the `loyalty` module's services) — this document does **not** claim `PARTIALLY IMPLEMENTED` or `COMPLETE` without that evidence.
 
-### 23. Payments / Wallet (confirmed structure)
-- Ledger-first design: `FinancialParty` → `FinancialAccount` → `LedgerTransaction`/`LedgerEntry` (double-entry, `DEBIT`/`CREDIT`), with `LedgerReconciliationIncident` for automatic cached-vs-derived balance drift detection.
+### 23. Payments / Wallet — business model (VERIFIED 2026-09-11, corrected; see Section 36)
+
+- Ledger-first design: `FinancialParty` → `FinancialAccount` → `LedgerTransaction`/`LedgerEntry` (double-entry, `DEBIT`/`CREDIT`), with `LedgerReconciliationIncident` for automatic cached-vs-derived balance drift detection. `LedgerCoreService.post()` is the **only** writer of money and rejects unbalanced transactions, non-positive amounts, and any reuse of an `idempotencyKey`.
 - `LegacyWalletArchive` explicitly documented in-schema as a **non-operational audit snapshot only** — confirms a wallet→ledger migration happened historically and the old model is retired from write paths.
 - `Payment`/`PaymentEvent` — payment status lifecycle (PENDING→AUTHORIZED→CAPTURED→PAID / FAILED / REFUNDED / CANCELED) with a provider-event audit trail and unique `idempotencyKey` on events.
 - Chargily webhook signature verification is supported by the raw-body capture in `main.ts` (`PAYMENT_WEBHOOK_TOKEN` required in production boot check).
-- Idempotency: enforced globally via `IdempotencyInterceptor` (all mutating requests) plus explicit `idempotencyKey` unique constraints on `PaymentEvent`, `DriverFundingRequest`, `DriverTransfer`, `SafetyIncident`, `LoyaltyLedger` entries.
-- Refunds/exact balance-calculation code paths: **NOT VERIFIED in this pass**.
+- Idempotency: enforced globally via `IdempotencyInterceptor` (all mutating requests) plus explicit `idempotencyKey` unique constraints on `PaymentEvent`, `WalletTopUp`, `WalletTopUpEvent`, `DriverFundingRequest`, `DriverTransfer`, `SafetyIncident`, `LoyaltyLedger` entries.
+
+#### Payment method vs payment provider — two separate concepts
+`PaymentMethod` is customer-facing; the provider is a string resolved through the `PaymentAdapter` registry in `PaymentProviderService`:
+
+| Method | Meaning | Provider(s) |
+| --- | --- | --- |
+| `CASH` | passenger pays the driver directly; no money crosses the platform | internal `cash` adapter |
+| `WALLET` | **flaminGO Pay** stored-value balance | internal `wallet` adapter |
+| `CARD` | gateway payment — the extension point for Visa/Mastercard and local rails | any registered gateway (`chargily` today) |
+
+`resolveProvider()` names **no** gateway: for `CARD` it picks the first registered non-internal adapter, and an explicit `provider` always wins. Adding Visa is one adapter file plus `register()` — no change to trip, payment or settlement logic. **Chargily is a rail, not a synonym for flaminGO Pay.**
+
+#### The five money accounts, and what each one is *not*
+
+| Account code | Meaning | Withdrawable |
+| --- | --- | --- |
+| `USER:<passenger>:<CUR>:AVAILABLE` | flaminGO Pay stored value — pays for rides and platform services | **No** |
+| `USER:<driver>:<CUR>:AVAILABLE` | **driver commission wallet** — a prepaid operating balance for platform commission. **Not profit.** Never credited with earnings | **No** |
+| `USER:<driver>:<CUR>:COMMISSION_CREDIT` | coupon commission credit — consumed *only* by future commission | **No** |
+| `PLATFORM:DRIVER_PAYABLE:<CUR>` | driver net earnings owed for electronically paid rides | n/a (platform liability) |
+| `PLATFORM:COMMISSION:<CUR>` | platform commission entitlement (revenue) | n/a |
+
+`USER:<driver>:<CUR>:LOCKED` still exists and is still **read** (historical coupon compensation from before the correction), but nothing writes to it any more. Do not add a writer.
+
+A driver wallet dropping from 500 to 350 means "paid 150 of commission", **not** "earned 350".
+
+#### Settlement per payment method (`FinancialService.settleTrip`)
+- **Cash** — the platform never touches the fare, so **no fare-collection entry is posted at all**. The only movement is commission: `DEBIT` driver commission wallet / `CREDIT PLATFORM:COMMISSION`. This is what makes double economic crediting structurally impossible (the driver already holds the cash).
+- **flaminGO Pay / card** — `DEBIT` passenger balance (or `PLATFORM:CARD_RECEIVABLE`) / `CREDIT PLATFORM:DRIVER_PAYABLE` for the collected fare, then commission is withheld out of `PLATFORM:DRIVER_PAYABLE`. The driver's commission wallet is untouched.
+- **Commission funding order** (one pure function, `planCommissionFunding`, shared with the accept-time check so the two cannot drift): coupon commission credit → electronically collected fare → commission wallet.
+- Settlement **refuses** to drive the commission wallet negative (`DRIVER_COMMISSION_BALANCE_INSUFFICIENT`); the trip is marked `settlementStatus = FAILED` with the reason, appears in `GET /api/financial/settlement/queue`, and the existing per-minute retry re-attempts it after a top-up.
+- Ledger idempotency keys: `trip:settle:<id>` (fare collection), `trip:commission:<id>`, `trip:couponcredit:<id>`.
+
+#### Coupons
+The platform-funded share of a coupon discount is granted to the driver as **commission credit**, not cash: `DEBIT PLATFORM:COUPON_SUBSIDY / CREDIT USER:<driver>:<CUR>:COMMISSION_CREDIT`. The credit balance is read **before** that grant is posted, so a coupon never pays for the commission of the trip that created it — it offsets a *later* trip's commission. Driver-funded and shared coupons split via `couponFundingSource` / `couponPlatformShare`, both Dashboard-managed (`coupons.funding` setting plus a per-coupon override).
+
+#### Prepaid commission gate before accepting
+`FinancialService.assertDriverCommissionCoverage()` runs inside the same transaction that atomically claims the driver (`ONLINE → ON_TRIP`). That claim is what makes it race-safe without any new locking primitive — a driver cannot hold two trips, so the same balance cannot be spent twice. Applied on **both** trip-creation paths: `MatchingService.assignDriver` and `FareOffersService.acceptOffer`.
+
+#### Wallet top-up
+`POST /api/wallet/topups` serves both the passenger's flaminGO Pay and the driver's commission wallet, because they are the same accounting object with different commercial meaning. Crediting goes through `FinancialService.creditWalletTopUp` → `LedgerCoreService.post` (`DEBIT PLATFORM:TOPUP_CLEARING / CREDIT USER:...:AVAILABLE`), never a direct balance write. Amount limits come from the `wallet.topup` setting. Webhooks keep a **single** entry point (`POST /api/payments/webhooks/:provider`) so raw-body signature verification is not duplicated; `dispatch()` routes deterministically by looking the event up in `WalletTopUp` first, then falling through to trip payments.
+
+#### Withdrawals — none exist, by design
+There is **no** cash-out for any balance: not passenger flaminGO Pay, not the driver commission wallet, not driver net earnings. On a cash ride the driver was already paid in cash; on a flaminGO Pay ride his net is a platform liability settled operationally outside the app. `POST /withdrawals` was removed and `WithdrawalsService.createForDriver` throws `WITHDRAWAL_NOT_SUPPORTED` (403). Staff review routes, the payout bridge, all `WithdrawRequest` rows and every historical migration are intact. `src/modules/payments/no-withdrawal.spec.ts` scans every controller for a cash-out creation route on each CI run.
+
+#### Driver earnings — reporting only
+`GET /api/driver/me/earnings` returns `today / week / month / year / allTime`, each aggregated in PostgreSQL over **all** `DriverEarning` rows (not a capped page), with period boundaries computed in `APP_TIMEZONE` rather than server UTC. The response carries a separate `commission` block (wallet + coupon credit) and `withdrawable: false` as an explicit part of the contract. `DriverEarning`/`CompanyEarning` remain a **projection**: `rebuildTripProjections` regenerates them deterministically from the trip's own immutable snapshot via the same `buildFareBreakdown` used to produce the ledger postings, and reports any drift against the posted commission.
+
+#### Dashboard financial visibility
+Existing: `GET /api/financial/accounts`, `GET /api/financial/transactions` (searchable by account code / `referenceType`), reconciliation summary/incidents/items, settlement queue, `GET /api/payments` + summary, `GET /api/withdrawals` (historical). Added: `GET /api/financial/drivers/:driverId/snapshot` (commission wallet, coupon credit, coverage, accounting earnings, platform commission entitlement, recent ledger activity — answers "why can this driver not accept rides?") and `GET /api/admin/wallet/topups` + `POST /api/admin/wallet/topups/:id/capture` for non-electronic top-ups that produce no webhook.
+
+- Refunds (`refundPayment` reverses the original posted transaction) and card capture (`captureCardPayment`, `CARD_RECEIVABLE → CASH`) were read and left unchanged in this pass.
 
 ### 24. Notifications (confirmed structure)
 - `Notification` model has durable-delivery fields (`deliveryStatus` reusing an `OutboxStatus`-style enum, `attempts`, `maxAttempts` default 8, `nextAttemptAt`, `lastError`) — indicates an outbox/retry pattern, not fire-and-forget.
@@ -602,7 +666,25 @@ Given the breadth requested here duplicates and would require the same per-contr
 - Matching/dispatch algorithm: **NOT VERIFIED in this pass** (module `matching` exists but was not read).
 
 ### 27. Trip Lifecycle (confirmed from `TripStatus` enum + fields)
-`SCHEDULED → SEARCHING → ACCEPTED → ARRIVING → IN_PROGRESS → COMPLETED` (or `CANCELLED` at any point), with supporting timestamp fields on `Trip` (`acceptedAt`, `startedAt`, `completedAt`, `settledAt`, `archivedAt`) and a cancellation-penalty subsystem (`Driver.cancellationStrikes`, `suspendedUntil`, `DriverSanction`). Exact request→quote→matching→payment→rating orchestration code: **NOT VERIFIED in this pass**.
+`SCHEDULED → SEARCHING → ACCEPTED → ARRIVING → IN_PROGRESS → COMPLETED` (or `CANCELLED` at any point), with supporting timestamp fields on `Trip` (`acceptedAt`, `startedAt`, `completedAt`, `settledAt`, `archivedAt`) and a cancellation-penalty subsystem (`Driver.cancellationStrikes`, `suspendedUntil`, `DriverSanction`). The allowed transitions are declared in `src/modules/trips/trip-transitions.ts`. Full request→quote→matching→payment→rating orchestration: still **NOT VERIFIED end-to-end**, but the concurrency and settlement portions were read and are documented below and in Section 23.
+
+#### Passenger trip uniqueness (VERIFIED 2026-09-11 against live PostgreSQL 16 — see Section 36)
+
+The rule is:
+
+```
+future SCHEDULED booking  +  immediate ride now   = ALLOWED
+immediate ride            +  another immediate    = REJECTED
+after cancellation/completion                     = a new immediate ride is allowed
+```
+
+- The authority is the **database**, not application code: partial unique index `Trip_active_passenger_unique` on `Trip("passengerId") WHERE status IN ('SEARCHING','ACCEPTED','ARRIVING','IN_PROGRESS')`, created by migration `20260912090100_trip_active_passenger_unique`.
+- `SCHEDULED` is **deliberately excluded**, so a future booking never blocks a ride now. Terminal statuses are excluded too, so cancelling or completing frees the passenger immediately.
+- Prisma **cannot** express a partial unique index, so it lives in raw SQL (same precedent as the `TripTracking` partitioning migration, Section 11). `schema.prisma` carries a comment on `model Trip` naming that migration — **do not remove the index.** The single source of truth for the status list in code is `ACTIVE_IMMEDIATE_TRIP_STATUSES` in `trip-transitions.ts`; changing it requires a matching migration.
+- The migration **preflights and aborts** if any passenger already holds more than one active trip, naming the offending passengers and their counts. It never mutates trip data — the fix is an operational action (cancel or complete) from the Dashboard, then re-run.
+- The application-level check in `MatchingService.requestRide` / `FareOffersService.acceptOffer` is a courtesy that returns a clean message early; it is a read-then-write and therefore racy on its own. The loser of a real race hits the index and its Prisma `P2002` is translated by `rethrowAsActiveTripConflict` (`src/common/api/prisma-error.util.ts`) into `ACTIVE_TRIP_EXISTS` — **HTTP 409 with an ar/en/fr message, never a 500 and never a raw Prisma string.**
+- App state restoration: `GET /api/rides/current` returns the active immediate ride in `current` and future bookings in a **separate** `scheduled` field, so the passenger app never opens a live-ride screen for next week's booking. It is read-only, so restarting the app cannot create a second trip.
+- Repeatable evidence in the repo: `scripts/verify-trip-concurrency.sql` (11 database-level assertions, ends in `ROLLBACK`) and `src/modules/trips/passenger-active-trip.spec.ts`.
 
 ---
 
@@ -662,6 +744,10 @@ Given the breadth requested here duplicates and would require the same per-contr
 - **Logic tests**: `npm run test:logic` → `ts-node --transpile-only scripts/logic-test.ts` (a custom logic-test runner, 2,359 bytes — content not read).
 - **Smoke tests**: `npm run smoke` → `scripts/smoke.mjs`.
 - **Load tests**: `npm run load` → `scripts/load-test.mjs`.
+- **Database invariant scripts** (added 2026-09-11, repeatable, each wrapped in a transaction ending in `ROLLBACK` so no row survives — run against a development/staging database only):
+  - `psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/verify-trip-concurrency.sql` — 11 assertions on the passenger trip-uniqueness rule, including rejection with SQLSTATE 23505 in each active status and coexistence of a `SCHEDULED` booking with an immediate ride.
+  - `psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/verify-settlement-accounting.sql` — 22 assertions on the settlement accounting: cash rides credit nothing to the driver, commission is withheld from the collected fare on flaminGO Pay rides, coupon credit is consumed by the *next* commission, duplicate `idempotencyKey` and duplicate `LedgerEntry` are rejected by the database, `Decimal(18,2)` precision holds, unbalanced transactions are refused, and the sum of all balances stays exactly 0 with zero cached-vs-derived drift.
+  - These prove what the **schema and its constraints** enforce. They are complementary to, not a substitute for, the database-backed Jest tests in `financial.integration.spec.ts`, which need a live Prisma query engine.
 - **CI-enforced checks**: unit tests (`test:ci`), Prisma schema validation (`prisma:validate`), build, ESLint (`lint:check`), strict type-check (`typecheck:strict`) — all confirmed as **blocking** CI jobs in `ci.yml`.
 - **What is NOT confirmed tested**: actual test coverage/breadth (which modules/endpoints have tests, and which don't) was **NOT VERIFIED in this pass** — would require opening `test/` and every module's `*.spec.ts` files.
 
@@ -748,6 +834,12 @@ Source: `.env.example` (full file read). **Names only — no values are real sec
 | Full schema-vs-Neon diff only performed for `TripTracking`, not all 90+ models | LOW–MEDIUM | Section 7 |
 | Cloud Build/Cloud Run deployment path (`cloudbuild.yaml`, `Dockerfile`) coexists with the confirmed-live Render deployment; whether Cloud Run is also active is unknown | LOW (informational, unless it's an unmonitored duplicate production surface) | Section 1 |
 | Historical markdown docs (`SERVER_STATUS_REPORT.md`, `UPGRADE_PLAN.md`, etc.) may be stale relative to this new baseline | INFORMATIONAL | Not re-verified against current code in this pass |
+| **Commission must be configured from the Dashboard before rides can be quoted.** With no `CommissionRule`, no `VehiclePricingRule.commissionPct` and no `commission.defaultPct`, quoting returns `COMMISSION_NOT_CONFIGURED` (409) | **HIGH at deploy time** (then zero) | Section 20 — this is the intended consequence of banning hard-coded percentages. Configure at least one rule as part of the release, before traffic |
+| **`PLATFORM:DRIVER_PAYABLE` has no in-app settlement path, by design.** It accumulates as an auditable platform liability and must be settled operationally | MEDIUM (operational, not correctness) | Section 23 — the business model has no driver cash-out. Visible via `GET /api/financial/accounts` and `GET /api/financial/drivers/:driverId/snapshot` |
+| A cash ride whose settlement finds an insufficient commission wallet stays `settlementStatus = FAILED` and retries for up to 20 attempts | MEDIUM | Section 23 — the accept-time gate makes this rare, but a coupon applied after acceptance can widen the gap. Monitor `GET /api/financial/settlement/queue` |
+| `FinancialService.transferTip` still credits the driver's `AVAILABLE` account, i.e. a tip lands in the **commission wallet** rather than in earnings | LOW (non-withdrawable either way, so no cash-out risk) | Tips were outside the scope of the 2026-09-11 correction and were deliberately left untouched. Naming/semantic inconsistency worth a follow-up decision |
+| Existing `VehiclePricingRule` rows keep their previously stored `commissionPct = 15` | LOW | That value is now treated as a legitimate Dashboard-set override rather than a code default. Audit any rule where 15 was never an intentional choice |
+| The 4 database-backed tests in `financial.integration.spec.ts` were not executed during the 2026-09-11 change (no native Prisma query engine available in that environment) | MEDIUM | Section 36 — must pass in CI, where the engine is present, before that change is merged |
 
 No risk is invented beyond what a gap in verification implies; severities reflect operational impact if the unverified item turns out to be a real problem, not a confirmed finding of a problem.
 
@@ -772,6 +864,68 @@ No risk is invented beyond what a gap in verification implies; severities reflec
 ---
 
 ## 36. Change History
+
+### 2026-09-11 — Business-model correction: payments, wallets, commission, coupons, trip concurrency
+
+Branch `claude/business-model-corrections-3d827195550380b09fd400a9575a9bbd`, PR #28 (draft). Audit-first: the repository was inspected before anything was changed, and the five items below are the contradictions that inspection actually found — not assumptions carried in from a described architecture.
+
+**Added**
+- `commission` module: `CommissionRule` model, `CommissionService` (deterministic resolution + Dashboard CRUD), `CommissionController` at `/api/admin/commission-rules` including `GET .../effective`.
+- `WalletTopUp` / `WalletTopUpEvent` + `WalletTopUpsService`; `POST /api/wallet/topups`, `GET /api/wallet/topups`, `GET /api/admin/wallet/topups`, `POST /api/admin/wallet/topups/:id/capture`.
+- Ledger accounts `USER:<driver>:<CUR>:COMMISSION_CREDIT`, `PLATFORM:DRIVER_PAYABLE`, `PLATFORM:COUPON_SUBSIDY`, `PLATFORM:TOPUP_CLEARING`.
+- `GET /api/rides/current` (app state restoration) and `GET /api/financial/drivers/:driverId/snapshot`.
+- Partial unique index `Trip_active_passenger_unique` with a non-mutating preflight.
+- `src/common/api/prisma-error.util.ts` — maps `P2002` on that index to `ACTIVE_TRIP_EXISTS`.
+- `scripts/verify-trip-concurrency.sql`, `scripts/verify-settlement-accounting.sql`.
+- 10 new Jest specs (see Section 31 and the PR).
+
+**Changed**
+- `FinancialService.settleTrip` rewritten: a cash ride no longer posts a fare-collection entry and no longer credits the driver; commission is funded in a fixed order (coupon credit → collected fare → commission wallet) by the shared pure function `planCommissionFunding`.
+- `PricingEngineService` now asks `CommissionService` for the rate; `PricingResult` gained `commissionRuleId` and `commissionSource`.
+- `DriverEarning`/`CompanyEarning` projections are now derived from the trip's immutable snapshot via `buildFareBreakdown` (the ledger-entry derivation became impossible for cash rides, which post no `USER:` credit); `rebuildTripProjections` also cross-checks against the posted commission and reports drift. `rebuildAllTripProjections` now scans settled trips rather than `settleTrip` ledger transactions.
+- `getLedgerRevenue` reads `PLATFORM:DRIVER_PAYABLE` for driver net while still counting historical `settleCouponCompensation` credits, so reports spanning the change stay correct.
+- `GET /api/driver/me/earnings`: `today/week/month/year/allTime` aggregated in PostgreSQL over all rows (previously the last 100 summed in Node), boundaries in `APP_TIMEZONE`, plus a separate `commission` block and `withdrawable: false`. Published `totals` shape preserved for older app builds.
+- `PaymentProviderService.resolveProvider` no longer names a gateway for `CARD`.
+- Driver cancellation penalties are recovered from the commission wallet, capped by the balance remaining after this trip's commission.
+- `ScheduledTripsService.create` now resolves and snapshots a commission rate (the schema default that previously covered it is gone).
+- `GET /api/wallet/me` gained `commissionCreditBalance` and `withdrawable: false`.
+
+**Removed**
+- `DEFAULT_COMMISSION_PCT = 15` from `pricing-engine.service.ts`; `commissionPct: 15` from `catalog-seed.service.ts`.
+- `POST /withdrawals` route and `CreateWithdrawDto`.
+- `deriveTripEarnings` + `derive-trip-earnings.spec.ts` (dead after the projection change).
+- `LedgerCoreService.lockedUserAccount` (the writer; the reader `getLockedBalance` stays for historical balances).
+
+**Deprecated**
+- `WithdrawRequest` for new records — model, rows, migrations and staff review routes all preserved; creation refused.
+- `USER:<driver>:<CUR>:LOCKED` — read-only historical account; no writer remains.
+- `VehiclePricingRule.commissionPct` — now an optional legacy override, not the primary source.
+
+**Fixed**
+- Double economic crediting on cash rides (driver received the fare in cash **and** a withdrawable ledger balance).
+- Coupon compensation that accumulated in `LOCKED` with nothing able to consume it.
+- Commission invisible to the Dashboard and unchangeable without a deploy; no way to set a rate per vehicle category.
+- Two concurrent ride requests for one passenger could both succeed (read-then-write race with no database constraint), and a constraint violation would have surfaced as HTTP 500.
+- Driver earnings "today" was wrong for any driver with more than 100 earning rows, and the day boundary followed server UTC rather than platform time.
+- No prepaid-commission check existed before accepting a ride; the fare-negotiation path had no commission gate at all.
+
+**Database changes** — two additive migrations; no column or row dropped, no data mutated, no `db push`, no reset:
+- `20260912090000_commission_rules_and_wallet_topups` — drop the `commissionPct` default on `Trip`, `FareQuote` and `VehiclePricingRule` (and make the last one nullable); add `Trip.commissionRuleId` (+ index + FK) and `FareQuote.commissionRuleId`; create `CommissionRule`, `WalletTopUp`, `WalletTopUpEvent` and the `WalletTopUpStatus` enum. **Inserts no rows** — a seeded percentage would be a hard-coded percentage.
+- `20260912090100_trip_active_passenger_unique` — preflight (raises and aborts on pre-existing duplicates, naming them) then the partial unique index.
+
+**API changes** — all additive except the removal of `POST /withdrawals`. New error codes: `COMMISSION_NOT_CONFIGURED`, `COMMISSION_RULE_NOT_FOUND`, `COMMISSION_RULE_INVALID`, `DRIVER_COMMISSION_BALANCE_INSUFFICIENT`, `WITHDRAWAL_NOT_SUPPORTED`, `WALLET_TOPUP_NOT_FOUND`, `WALLET_TOPUP_INVALID_STATE`, `WALLET_TOPUP_AMOUNT_INVALID` — each with ar/en/fr messages in `API_ERROR_CODES`.
+
+**Security changes**
+- Commission is server-authoritative; neither app can influence it, and the resolved value is snapshotted so it cannot be retroactively altered.
+- The cash-out surface was removed rather than merely guarded, and a source-scanning test keeps it removed.
+- Prepaid-commission enforcement moved from (absent) client-side to the server, inside the transaction that atomically claims the driver.
+- Raw-body webhook signature verification stayed in a single place when top-up webhooks were added.
+
+**Configuration changes** — new Dashboard-managed `Setting` keys (no code defaults): `commission.defaultPct` (`{ "pct": <number> }`) and `wallet.topup` (`{ "minAmount": <number>, "maxAmount": <number> }`). No new environment variables.
+
+**Verification** — `prisma validate` clean; `tsc --noEmit` clean; `lint:check` 0 errors (23 pre-existing warnings, unchanged); Jest 63 suites / 613 passed / 4 skipped. All four migrations applied from scratch on PostgreSQL 16; the uniqueness preflight aborted against deliberately duplicated data leaving both rows intact and no index created, then succeeded after the duplicate was resolved; both SQL invariant scripts passed (11 + 22 assertions); and two concurrent `psql` sessions inserting for one passenger produced exactly one ride. **NOT VERIFIED:** the 4 database-backed tests in `financial.integration.spec.ts` and `drivers-module-graph.spec.ts` could not execute because the native Prisma query engine was unavailable in that environment (`binaries.prisma.sh` returned 403); the same failure occurs on unmodified `main` there, so it is environmental. Both must run in CI before merge.
+
+---
 
 ### 2026-08-25
 - PR #19 merged — `TripTracking` partitioning migration (`20260825122500_trip_tracking_partitioning`) added and tested.

@@ -4,7 +4,11 @@ import { RiskModule } from "../risk/risk.module";
 import { WalletService } from "./wallet.service";
 import { PaymentsService } from "./payments.service";
 import { WithdrawalsService } from "./withdrawals.service";
-import { WalletController } from "./wallet.controller";
+import {
+  WalletController,
+  WalletTopUpsAdminController,
+} from "./wallet.controller";
+import { WalletTopUpsService } from "./wallet-topups.service";
 import { PaymentsController } from "./payments.controller";
 import { WithdrawalsController } from "./withdrawals.controller";
 import { PaymentProviderService } from "./payment-provider.service";
@@ -20,6 +24,7 @@ import { PassengerPaymentsController } from "./passenger-payments.controller";
   imports: [FinancialModule, RiskModule, SettingsModule],
   providers: [
     WalletService,
+    WalletTopUpsService,
     PaymentsService,
     WithdrawalsService,
     PaymentProviderService,
@@ -28,6 +33,7 @@ import { PassengerPaymentsController } from "./passenger-payments.controller";
   ],
   controllers: [
     WalletController,
+    WalletTopUpsAdminController,
     PaymentsController,
     WithdrawalsController,
     PaymentWebhooksController,
@@ -37,6 +43,7 @@ import { PassengerPaymentsController } from "./passenger-payments.controller";
   ],
   exports: [
     WalletService,
+    WalletTopUpsService,
     PaymentsService,
     WithdrawalsService,
     PaymentProviderService,

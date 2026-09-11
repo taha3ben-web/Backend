@@ -6,6 +6,7 @@ import { ProfileLevelsModule } from "../profile-levels/profile-levels.module";
 // المرحلة و: لحقن RequirementsService المُصدَّر من وحدة الكتالوج.
 // لا خطر استيراد دائري: VehicleTypesModule لا يستورد DriversModule.
 import { VehicleTypesModule } from "../vehicle-types/vehicle-types.module";
+import { FinancialModule } from "../financial/financial.module";
 import { DriversService } from "./drivers.service";
 import { DriverSanctionsService } from "./driver-sanctions.service";
 import { DriversController } from "./drivers.controller";
@@ -31,6 +32,8 @@ import { LeaderboardAdminController } from "./leaderboard-admin.controller";
     TripsModule,
     ProfileLevelsModule,
     VehicleTypesModule,
+    // أرصدة العمولة المعروضة للسائق (قراءة من دفتر الأستاذ).
+    FinancialModule,
   ],
   providers: [
     DriversService,

@@ -9,6 +9,7 @@ import { CountryConfigModule } from "../country-config/country-config.module";
 import { CityScalingModule } from "../city-scaling/city-scaling.module";
 import { GrowthModule } from "../growth/growth.module";
 import { GeoModule } from "../geo/geo.module";
+import { CommissionModule } from "../commission/commission.module";
 
 /**
  * محرك التسعير المستقل (Pricing Engine). مستقل عن المطابقة،
@@ -26,6 +27,8 @@ import { GeoModule } from "../geo/geo.module";
     GrowthModule,
     GeoModule,
     SettingsModule,
+    // مصدر الحقيقة الوحيد لنسبة العمولة (مضبوطة من اللوحة، بلا رقم مبرمَج).
+    CommissionModule,
   ],
   providers: [PricingEngineService, SurgeService, PricingPolicyService],
   controllers: [PricingEngineController, SurgeController],

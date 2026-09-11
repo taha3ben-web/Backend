@@ -26,10 +26,13 @@ import { driverOfferKey } from "./matching-lock.util";
 import { CityScalingService } from "../city-scaling/city-scaling.service";
 import { TracerService } from "../../common/observability/tracer.service";
 import { AppException } from "../../common/api/app.exception";
+import { rethrowAsActiveTripConflict } from "../../common/api/prisma-error.util";
+import { ACTIVE_IMMEDIATE_TRIP_STATUSES } from "../trips/trip-transitions";
 import { loadPassengerSummary } from "../../common/passenger-summary";
 import { StorageService } from "../storage/storage.service";
 import { maskPhone } from "../calls/call-masking.adapter";
 import { splitCouponFunding } from "../trips/settlement.util";
+import { FinancialService } from "../financial/financial.service";
 import { round2 } from "../../common/money.util";
 import { DistributedLockService } from "../../common/infra/distributed-lock.service";
 import { TripsService } from "../trips/trips.service";
@@ -90,6 +93,8 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
     private readonly redis: RedisService,
     private readonly pricing: PricingService,
     private readonly coupons: CouponsService,
+    // تغطية عمولة السائق قبل الإسناد (نموذج العمولة مسبقة الدفع).
+    private readonly financial: FinancialService,
     private readonly engine: MatchingEngineService,
     private readonly cityScaling: CityScalingService,
     @Inject(forwardRef(() => RealtimeGateway))
@@ -161,13 +166,18 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
         rideClass: dto.rideClass ?? "ECONOMY",
       },
       async () => {
-        // منع رحلتين نشطتين للراكب نفسه
+        // ===== قاعدة التفرّد: رحلة فورية واحدة لكل راكب =====
+        //
+        // SCHEDULED غير موجودة في ACTIVE_IMMEDIATE_TRIP_STATUSES عمدًا:
+        // حجز الأسبوع القادم لا يحجب رحلة الآن. هذا الفحص "لطيف" (يُرجع
+        // رسالة واضحة قبل أي عمل)، لكن **السلطة النهائية هي قاعدة البيانات**
+        // عبر الفهرس الجزئي Trip_active_passenger_unique: طلبان متزامنان
+        // يمرّان من هنا معًا، وأحدهما يخسر القيد ويُترجَم إلى نفس الكود
+        // ACTIVE_TRIP_EXISTS (انظر rethrowAsActiveTripConflict أدناه).
         const active = await this.prisma.trip.findFirst({
           where: {
             passengerId,
-            status: {
-              in: ["SEARCHING", "ACCEPTED", "ARRIVING", "IN_PROGRESS"],
-            },
+            status: { in: ACTIVE_IMMEDIATE_TRIP_STATUSES },
           },
         });
         if (active) {
@@ -264,71 +274,81 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
         // إنشاء الرحلة وحجز الكوبون في معاملة واحدة: إمّا أن يتمّا معًا أو لا.
         // سابقًا كان الحجز يسبق فحص الرصيد وإنشاء الرحلة، فيُستهلك استخدام
         // الكوبون حتى حين يفشل الطلب، بلا أي مسار لإرجاعه لأن الرحلة لم تُنشأ أصلًا.
-        const trip = await this.prisma.$transaction(async (client) => {
-          const created = await client.trip.create({
-            data: {
-              passengerId,
-              status: "SEARCHING",
-              rideClass,
-              vehicleTypeId,
-              pickupLat: dto.pickupLat,
-              pickupLng: dto.pickupLng,
-              pickupAddress: dto.pickupAddress,
-              destLat: dto.destLat,
-              destLng: dto.destLng,
-              destAddress: dto.destAddress,
-              // محطات التوقّف الوسيطة تُحفظ بترتيبها كي يراها السائق في مساره.
-              ...(dto.stops?.length
-                ? {
-                    stops: {
-                      create: dto.stops.map((stop, index) => ({
-                        seq: index + 1,
-                        lat: stop.lat,
-                        lng: stop.lng,
-                        address: stop.address,
-                      })),
+        const trip = await this.prisma
+          .$transaction(async (client) => {
+            const created = await client.trip.create({
+              data: {
+                passengerId,
+                status: "SEARCHING",
+                rideClass,
+                vehicleTypeId,
+                pickupLat: dto.pickupLat,
+                pickupLng: dto.pickupLng,
+                pickupAddress: dto.pickupAddress,
+                destLat: dto.destLat,
+                destLng: dto.destLng,
+                destAddress: dto.destAddress,
+                // محطات التوقّف الوسيطة تُحفظ بترتيبها كي يراها السائق في مساره.
+                ...(dto.stops?.length
+                  ? {
+                      stops: {
+                        create: dto.stops.map((stop, index) => ({
+                          seq: index + 1,
+                          lat: stop.lat,
+                          lng: stop.lng,
+                          address: stop.address,
+                        })),
+                      },
+                    }
+                  : {}),
+                distanceKm: quote.distanceKm,
+                durationSec: quote.durationSec,
+                // مسار الطرق الحقيقي يُحفظ مرة واحدة ليرسمه التطبيق دون إعادة حساب.
+                routePolyline: quote.route?.polyline ?? null,
+                routeProvider: quote.route?.provider ?? null,
+                fare,
+                // لقطة العمولة: النسبة المحلولة من إعدادات اللوحة وقت الطلب،
+                // مع معرّف القاعدة للتدقيق. تغيير الإعداد لاحقًا لا يمسّها.
+                commissionPct: quote.commissionPct,
+                commissionRuleId: quote.commissionRuleId,
+                currency: quote.currency,
+                paymentMethod: dto.paymentMethod ?? undefined,
+                cityId: dto.cityId,
+                couponId,
+                discountAmount,
+                couponFundingSource,
+                couponPlatformShare,
+                events: {
+                  create: {
+                    type: "trip:requested",
+                    actor: "PASSENGER",
+                    meta: {
+                      pricingExperimentVariant: quote.experimentVariant,
+                      countryCode: quote.breakdown.countryCode,
+                      taxNet: quote.breakdown.taxNet,
+                      taxAmount: quote.breakdown.taxAmount,
+                      taxGross: quote.breakdown.taxGross,
                     },
-                  }
-                : {}),
-              distanceKm: quote.distanceKm,
-              durationSec: quote.durationSec,
-              // مسار الطرق الحقيقي يُحفظ مرة واحدة ليرسمه التطبيق دون إعادة حساب.
-              routePolyline: quote.route?.polyline ?? null,
-              routeProvider: quote.route?.provider ?? null,
-              fare,
-              commissionPct: quote.commissionPct,
-              currency: quote.currency,
-              paymentMethod: dto.paymentMethod ?? undefined,
-              cityId: dto.cityId,
-              couponId,
-              discountAmount,
-              couponFundingSource,
-              couponPlatformShare,
-              events: {
-                create: {
-                  type: "trip:requested",
-                  actor: "PASSENGER",
-                  meta: {
-                    pricingExperimentVariant: quote.experimentVariant,
-                    countryCode: quote.breakdown.countryCode,
-                    taxNet: quote.breakdown.taxNet,
-                    taxAmount: quote.breakdown.taxAmount,
-                    taxGross: quote.breakdown.taxGross,
                   },
                 },
               },
-            },
-          });
-          if (couponId) {
-            await this.coupons.redeem(
-              couponId,
-              passengerId,
-              created.id,
-              client,
-            );
-          }
-          return created;
-        });
+            });
+            if (couponId) {
+              await this.coupons.redeem(
+                couponId,
+                passengerId,
+                created.id,
+                client,
+              );
+            }
+            return created;
+          })
+          // الطلب الخاسر في التسابق يخرق Trip_active_passenger_unique.
+          // بدون هذه الترجمة كان يعود HTTP 500 برسالة Prisma خام؛ الآن يعود
+          // ACTIVE_TRIP_EXISTS (409) مترجَمًا حسب Accept-Language.
+          .catch((error: unknown) =>
+            rethrowAsActiveTripConflict(error, { passengerId }),
+          );
 
         // بدء البحث دون حجز الطلب (fire-and-forget)
         void this.runMatching(trip.id).catch((err) =>
@@ -536,7 +556,7 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
     const riderPays = round2(Number(trip.fare ?? 0));
     const discount = round2(Math.max(Number(trip.discountAmount ?? 0), 0));
     const grossFare = round2(riderPays + discount);
-    const commissionPct = Number(trip.commissionPct ?? 0);
+    const commissionPct = Number(trip.commissionPct);
     const commissionGross = round2((grossFare * commissionPct) / 100);
     const { driverFunded } = splitCouponFunding(
       discount,
@@ -546,6 +566,78 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
         : Number(trip.couponPlatformShare),
     );
     return round2(grossFare - commissionGross - driverFunded);
+  }
+
+  /**
+   * عمولة المنصّة المتوقعة على الرحلة من **لقطتها** (لا من الإعداد الحالي).
+   * تُحسب على قيمة الرحلة قبل خصم الكوبون، تمامًا كما في buildFareBreakdown،
+   * فلا يختلف شرط القبول عن الخصم الفعلي وقت التسوية.
+   */
+  private expectedCommission(trip: {
+    fare: Prisma.Decimal | number | null;
+    discountAmount: Prisma.Decimal | number | null;
+    commissionPct: number;
+  }): number {
+    const riderPays = round2(Number(trip.fare ?? 0));
+    const discount = round2(Math.max(Number(trip.discountAmount ?? 0), 0));
+    const grossFare = round2(riderPays + discount);
+    return round2((grossFare * Number(trip.commissionPct)) / 100);
+  }
+
+  /**
+   * ما ستُحصّله المنصّة إلكترونيًا من هذه الرحلة. صفر للرحلة النقدية: المال
+   * يذهب من الراكب إلى السائق مباشرة ولا يعبر المنصّة، فكل العمولة تحتاج
+   * تغطية مسبقة في محفظة السائق.
+   */
+  private electronicallyCollectable(trip: {
+    fare: Prisma.Decimal | number | null;
+    paymentMethod: string;
+  }): number {
+    const electronic =
+      trip.paymentMethod === "WALLET" || trip.paymentMethod === "CARD";
+    return electronic ? round2(Number(trip.fare ?? 0)) : 0;
+  }
+
+  /**
+   * الرحلة الفورية الجارية للراكب — نقطة استعادة حالة التطبيق بعد إعادة
+   * التشغيل أو تسجيل الدخول أو تغيير الشاشة.
+   *
+   * لماذا تُرجع الحجوزات المجدولة في حقل منفصل: الحجز المستقبلي **ليس**
+   * الرحلة الجارية، وإرجاعه في نفس الحقل كان سيجعل تطبيق الراكب يفتح شاشة
+   * رحلة جارية لحجز الأسبوع القادم. `current = null` يعني «لا رحلة الآن»
+   * ويجوز للراكب طلب رحلة فورية حتى لو كانت `scheduled` غير فارغة.
+   */
+  async currentTrip(passengerUserId: string) {
+    const active = await this.prisma.trip.findFirst({
+      where: {
+        passengerId: passengerUserId,
+        status: { in: ACTIVE_IMMEDIATE_TRIP_STATUSES },
+      },
+      orderBy: { createdAt: "desc" },
+      select: { id: true },
+    });
+    const scheduled = await this.prisma.trip.findMany({
+      where: {
+        passengerId: passengerUserId,
+        status: "SCHEDULED",
+        isScheduled: true,
+      },
+      orderBy: { scheduledAt: "asc" },
+      take: 20,
+      select: {
+        id: true,
+        scheduledAt: true,
+        pickupAddress: true,
+        destAddress: true,
+        rideClass: true,
+      },
+    });
+    return {
+      current: active
+        ? await this.getTripForUser(active.id, passengerUserId)
+        : null,
+      scheduled,
+    };
   }
 
   /** إرسال عرض للسائق وانتظار ردّه ضمن المهلة */
@@ -742,11 +834,37 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
         //    (throw يُلغي المطالبة بالسائق تلقائيًا).
         const current = await client.trip.findUnique({
           where: { id: tripId },
-          select: { status: true },
+          select: {
+            status: true,
+            fare: true,
+            discountAmount: true,
+            commissionPct: true,
+            currency: true,
+            paymentMethod: true,
+          },
         });
         if (!current || current.status !== "SEARCHING") {
           throw new Error("trip-not-searching");
         }
+
+        // 2.b) تغطية عمولة السائق (نموذج العمولة مسبقة الدفع).
+        //
+        // العمولة تُخصم من محفظة عمولة السائق وقت التسوية، ولذلك يجب
+        // التأكد الآن أن التغطية موجودة — وإلا قبل السائق رحلة ستفشل
+        // تسويتها لاحقًا وتبقى معلّقة في طابور إعادة المحاولة.
+        //
+        // أمان التزامن: نحن **داخل نفس المعاملة** التي طالبت بالسائق ذريًا
+        // (ONLINE ← ON_TRIP). لا يمكن للسائق أن يُسنَد لرحلتين معًا، فلا
+        // يوجد مسار لصرف نفس الرصيد مرتين. الخصم نفسه يجري بعزل
+        // Serializable مع حارس «لا رصيد سالب».
+        const expectedCommission = this.expectedCommission(current);
+        await this.financial.assertDriverCommissionCoverage(client, {
+          driverUserId,
+          currency: current.currency,
+          commissionDue: expectedCommission,
+          electronicallyCollected: this.electronicallyCollectable(current),
+          tripId,
+        });
 
         // 3) عيّن السائق للرحلة
         const trip = await client.trip.update({

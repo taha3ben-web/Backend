@@ -26,35 +26,6 @@ export function computeSettlement(
   return { gross, commission, net };
 }
 
-export interface LedgerLine {
-  direction: "DEBIT" | "CREDIT";
-  amount: number;
-  accountCode: string;
-}
-
-/**
- * اشتقاق أرباح الرحلة من قيود دفتر الأستاذ (مصدر الحقيقة الوحيد) بدل
- * الاعتماد على جداول موازية. gross = مجموع المدين، net = الدائن على حساب
- * المستخدم (رمزه يبدأ بـ "USER:")، commission = الباقي (عمولة المنصة).
- */
-export function deriveTripEarnings(lines: LedgerLine[]): Settlement {
-  const gross = round2(
-    lines
-      .filter((line) => line.direction === "DEBIT")
-      .reduce((sum, line) => sum + line.amount, 0),
-  );
-  const net = round2(
-    lines
-      .filter(
-        (line) =>
-          line.direction === "CREDIT" && line.accountCode.startsWith("USER:"),
-      )
-      .reduce((sum, line) => sum + line.amount, 0),
-  );
-  const commission = round2(gross - net);
-  return { gross, commission, net };
-}
-
 /** من يتحمّل تكلفة خصم الكوبون (متطابق مع محرّك التسعير). */
 export type CouponFundingSource = "PLATFORM" | "DRIVER" | "SHARED";
 
@@ -92,4 +63,75 @@ export function splitCouponFunding(
     default:
       return { platformFunded: d, driverFunded: 0 };
   }
+}
+
+// ===========================================================================
+// تمويل عمولة المنصّة (نموذج flaminGO) — دوال نقية.
+//
+// ملاحظة أساسية: **محفظة السائق ليست محفظة أرباح**. إنها رصيد تشغيلي
+// مسبق الدفع لتغطية عمولة المنصّة. ولذلك مصادر تسديد العمولة في الرحلة
+// الواحدة ثلاثة بترتيب ثابت:
+//
+//   1. رصيد عمولة الكوبون (COMMISSION_CREDIT) — منفعة ممنوحة سابقًا،
+//      تُستهلك أولًا لأنها مخصّصة لهذا الغرض حصرًا ولا استعمال آخر لها.
+//   2. المبلغ المُحصَّل إلكترونيًا في هذه الرحلة (flaminGO Pay / بطاقة) —
+//      المال بيد المنصّة أصلًا، فاقتطاع العمولة منه لا يحتاج رصيدًا مسبقًا.
+//   3. محفظة عمولة السائق — الباقي. هذا هو الجزء الذي يحتاج تغطية مسبقة،
+//      وهو كل العمولة في الرحلة النقدية لأن المنصّة لم تُحصّل شيئًا.
+// ===========================================================================
+
+export interface CommissionFundingInput {
+  /** عمولة المنصّة المستحقّة على الرحلة (من buildFareBreakdown). */
+  commissionDue: number;
+  /** رصيد عمولة الكوبون المتاح للسائق قبل هذه الرحلة. */
+  commissionCreditAvailable: number;
+  /** ما حصّلته المنصّة إلكترونيًا في هذه الرحلة (0 للرحلة النقدية). */
+  electronicallyCollected: number;
+}
+
+export interface CommissionFundingPlan {
+  /** المستهلك من رصيد عمولة الكوبون. */
+  fromCommissionCredit: number;
+  /** المقتطع من المبلغ المُحصَّل إلكترونيًا. */
+  fromCollection: number;
+  /** المخصوم من محفظة عمولة السائق. */
+  fromDriverWallet: number;
+}
+
+/**
+ * يوزّع عمولة الرحلة على مصادر التسديد بالترتيب الثابت أعلاه.
+ * ثابت التوازن: fromCommissionCredit + fromCollection + fromDriverWallet
+ *               === round2(commissionDue)
+ */
+export function planCommissionFunding(
+  input: CommissionFundingInput,
+): CommissionFundingPlan {
+  const due = round2(Math.max(input.commissionDue, 0));
+  if (due <= 0) {
+    return { fromCommissionCredit: 0, fromCollection: 0, fromDriverWallet: 0 };
+  }
+  const credit = round2(Math.max(input.commissionCreditAvailable, 0));
+  const collected = round2(Math.max(input.electronicallyCollected, 0));
+
+  const fromCommissionCredit = round2(Math.min(credit, due));
+  const afterCredit = round2(due - fromCommissionCredit);
+  const fromCollection = round2(Math.min(collected, afterCredit));
+  const fromDriverWallet = round2(afterCredit - fromCollection);
+
+  return { fromCommissionCredit, fromCollection, fromDriverWallet };
+}
+
+/**
+ * كم رصيدًا مسبقًا يحتاجه السائق في محفظة العمولة كي يستطيع قبول رحلة؟
+ *
+ * يُستدعى **قبل** الإسناد (عند قبول العرض) بنفس منطق التسوية، فلا يرى
+ * السائق شرطًا وقت القبول يختلف عمّا سيُخصم فعلًا وقت الإنهاء.
+ */
+export function prepaidCommissionRequirement(input: {
+  commissionDue: number;
+  commissionCreditAvailable: number;
+  /** ما ستُحصّله المنصّة إلكترونيًا (0 إن كانت الرحلة نقدية). */
+  electronicallyCollected: number;
+}): number {
+  return planCommissionFunding(input).fromDriverWallet;
 }

@@ -118,6 +118,18 @@ enum ActorKind {
   STAFF
 }
 
+/// وسيلة الدفع (ما يراه العميل) — منفصلة تمامًا عن **مزوّد الدفع**
+/// (Chargily / BaridiMob / CIB / Visa...) الذي يعيش في `Payment.provider`
+/// و`WalletTopUp.provider` كنص، ويُحلّ عبر سجل المحوّلات في
+/// `PaymentProviderService`. لذلك إضافة بوابة جديدة لا تحتاج تغيير هذا enum
+/// ولا تغيير منطق الرحلة أو التسوية.
+///
+///   CASH   نقدًا: الراكب يدفع للسائق مباشرة. المنصّة لا تُحصّل شيئًا،
+///          وتُحصّل عمولتها من محفظة عمولة السائق.
+///   WALLET رصيد **flaminGO Pay** المخزَّن: المنتج الموجّه للراكب. المنصّة
+///          تُحصّل المبلغ وتحتجز العمولة منه. غير قابل للسحب.
+///   CARD   بطاقة عبر بوابة (Visa/Mastercard/بوابة محلية) — نقطة التوسعة
+///          للوسائل المستقبلية بلا إعادة تصميم.
 enum PaymentMethod {
   CASH
   CARD
@@ -193,7 +205,6 @@ enum DriverQrStatus {
   ACTIVE
   REVOKED
 }
-
 
 enum DiscountType {
   PERCENT
@@ -290,71 +301,72 @@ enum ComplaintStatus {
 
 // ---------- Core identity ----------
 model User {
-  id           String     @id @default(uuid())
-  name         String
-  username     String?    @unique
-  phone        String     @unique
-  email        String?    @unique
-  passwordHash String
-  firebaseUid  String?    @unique
-  type         UserType   @default(PASSENGER)
-  status       UserStatus @default(ACTIVE)
-  avatarUrl    String?
-  locale       String     @default("ar")
-  gender       Gender?
+  id                    String     @id @default(uuid())
+  name                  String
+  username              String?    @unique
+  phone                 String     @unique
+  email                 String?    @unique
+  passwordHash          String
+  firebaseUid           String?    @unique
+  type                  UserType   @default(PASSENGER)
+  status                UserStatus @default(ACTIVE)
+  avatarUrl             String?
+  locale                String     @default("ar")
+  gender                Gender?
   onboardingCompletedAt DateTime?
-  staffRoleId  String?
-  staffRole    Role?      @relation(fields: [staffRoleId], references: [id])
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  staffRoleId           String?
+  staffRole             Role?      @relation(fields: [staffRoleId], references: [id])
+  createdAt             DateTime   @default(now())
+  updatedAt             DateTime   @updatedAt
 
-  driver             Driver?
-  agentProfile       AgentProfile?
-  financialParty     FinancialParty?
-  passengerTrips     Trip[]             @relation("PassengerTrips")
-  payments           Payment[]
-  withdrawRequests   WithdrawRequest[]
-  requestedFundingRequests DriverFundingRequest[] @relation("FundingRequester")
-  approvedFundingRequests  DriverFundingRequest[] @relation("FundingApprover")
-  refreshTokens      RefreshToken[]
-  sessions           Session[]
-  deviceTokens       DeviceToken[]
-  notifications      Notification[]
-  notificationStates UserNotificationState[]
-  supportTickets     SupportTicket[]
-  supportMessages    SupportMessage[]
-  ratingsGiven       Rating[]           @relation("RatingAuthor")
-  ratingsReceived    Rating[]           @relation("RatingTarget")
-  complaintsFiled    Complaint[]        @relation("ComplaintFrom")
-  complaintsAgainst  Complaint[]        @relation("ComplaintAgainst")
-  complaintsResolved Complaint[]        @relation("ComplaintResolver")
-  auditLogs          AuditLog[]
-  activityLogs       ActivityLog[]
-  emergencyContacts  EmergencyContact[]
-  safetyIncidents    SafetyIncident[]   @relation("SafetyReporter")
-  safetyAcknowledged SafetyIncident[]   @relation("SafetyAcknowledger")
-  safetyResolved     SafetyIncident[]   @relation("SafetyResolver")
-  lostItemsReported  LostItem[]         @relation("LostItemReporter")
-  lostItemsResolved  LostItem[]         @relation("LostItemResolver")
-  invoices           Invoice[]
-  tipsGiven          TripTip[]          @relation("TripTipPayer")
-  tipsReceived       TripTip[]          @relation("TripTipRecipient")
-  reviewedDocuments  DriverDocument[]   @relation("DocumentReviewer")
-  createdAgents      AgentProfile[]     @relation("AgentCreator")
-  issuedDriverQrCodes DriverQrCode[]     @relation("DriverQrIssuer")
-  revokedDriverQrCodes DriverQrCode[]    @relation("DriverQrRevoker")
-  requestedDriverTransfers DriverTransfer[] @relation("DriverTransferRequester")
-  reviewedDriverTransfers  DriverTransfer[] @relation("DriverTransferReviewer")
-  consents           UserConsent[]
-  savedPlaces        SavedPlace[]
-  subscriptions      UserSubscription[]
+  driver                        Driver?
+  agentProfile                  AgentProfile?
+  financialParty                FinancialParty?
+  passengerTrips                Trip[]                     @relation("PassengerTrips")
+  payments                      Payment[]
+  withdrawRequests              WithdrawRequest[]
+  requestedFundingRequests      DriverFundingRequest[]     @relation("FundingRequester")
+  approvedFundingRequests       DriverFundingRequest[]     @relation("FundingApprover")
+  refreshTokens                 RefreshToken[]
+  sessions                      Session[]
+  deviceTokens                  DeviceToken[]
+  notifications                 Notification[]
+  notificationStates            UserNotificationState[]
+  supportTickets                SupportTicket[]
+  supportMessages               SupportMessage[]
+  ratingsGiven                  Rating[]                   @relation("RatingAuthor")
+  ratingsReceived               Rating[]                   @relation("RatingTarget")
+  complaintsFiled               Complaint[]                @relation("ComplaintFrom")
+  complaintsAgainst             Complaint[]                @relation("ComplaintAgainst")
+  complaintsResolved            Complaint[]                @relation("ComplaintResolver")
+  auditLogs                     AuditLog[]
+  activityLogs                  ActivityLog[]
+  emergencyContacts             EmergencyContact[]
+  safetyIncidents               SafetyIncident[]           @relation("SafetyReporter")
+  safetyAcknowledged            SafetyIncident[]           @relation("SafetyAcknowledger")
+  safetyResolved                SafetyIncident[]           @relation("SafetyResolver")
+  lostItemsReported             LostItem[]                 @relation("LostItemReporter")
+  lostItemsResolved             LostItem[]                 @relation("LostItemResolver")
+  invoices                      Invoice[]
+  tipsGiven                     TripTip[]                  @relation("TripTipPayer")
+  tipsReceived                  TripTip[]                  @relation("TripTipRecipient")
+  reviewedDocuments             DriverDocument[]           @relation("DocumentReviewer")
+  createdAgents                 AgentProfile[]             @relation("AgentCreator")
+  issuedDriverQrCodes           DriverQrCode[]             @relation("DriverQrIssuer")
+  revokedDriverQrCodes          DriverQrCode[]             @relation("DriverQrRevoker")
+  requestedDriverTransfers      DriverTransfer[]           @relation("DriverTransferRequester")
+  reviewedDriverTransfers       DriverTransfer[]           @relation("DriverTransferReviewer")
+  consents                      UserConsent[]
+  savedPlaces                   SavedPlace[]
+  subscriptions                 UserSubscription[]
   identityVerifications         UserIdentityVerification[] @relation("UserIdentities")
   reviewedIdentityVerifications UserIdentityVerification[] @relation("IdentityReviewer")
   verifiedVehicles              Vehicle[]                  @relation("VehicleVerifier")
   requestedSettingChanges       SettingChangeRequest[]     @relation("SettingChangeRequester")
   reviewedSettingChanges        SettingChangeRequest[]     @relation("SettingChangeReviewer")
   accountDeletionRequests       AccountDeletionRequest[]
-  tripMessagesSent              TripMessage[] @relation("TripMessageSender")
+  tripMessagesSent              TripMessage[]              @relation("TripMessageSender")
+  walletTopUps                  WalletTopUp[]
 
   @@index([type])
   @@index([status])
@@ -377,44 +389,44 @@ model AccountDeletionRequest {
 }
 
 model Driver {
-  id           String             @id @default(uuid())
-  userId       String             @unique
-  user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  status       DriverStatus       @default(PENDING)
-  availability DriverAvailability @default(OFFLINE)
-  rating       Float              @default(5)
-  totalTrips   Int                @default(0)
-  cityId       String?
-  city         City?              @relation(fields: [cityId], references: [id])
+  id                  String             @id @default(uuid())
+  userId              String             @unique
+  user                User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status              DriverStatus       @default(PENDING)
+  availability        DriverAvailability @default(OFFLINE)
+  rating              Float              @default(5)
+  totalTrips          Int                @default(0)
+  cityId              String?
+  city                City?              @relation(fields: [cityId], references: [id])
   // المرحلة ب: السائق يختار الولاية فقط عند التسجيل (لا المدينة)،
   // لأن قائمة المدن ناقصة في كثير من الولايات. cityId يبقى للتوافق
   // وللتسعير المديني، ويُملأ من اللوحة عند الحاجة.
-  wilayaId     String?
-  wilaya       Wilaya?            @relation(fields: [wilayaId], references: [id], onDelete: SetNull)
-  currentLat   Float?
-  currentLng   Float?
-  lastSeenAt   DateTime?
+  wilayaId            String?
+  wilaya              Wilaya?            @relation(fields: [wilayaId], references: [id], onDelete: SetNull)
+  currentLat          Float?
+  currentLng          Float?
+  lastSeenAt          DateTime?
   // نظام عقوبات الإلغاء (Stage 65): تعليق مؤقت يُرفع تلقائيًا، عدّاد تصعيد، وآخر عقوبة.
   suspendedUntil      DateTime?
-  cancellationStrikes Int        @default(0)
+  cancellationStrikes Int                @default(0)
   lastSanctionAt      DateTime?
   // بيانات التحويل البنكي للسائق (تُستخدم عند بناء دفعات الصرف).
   payoutIban          String?
   payoutBankName      String?
   payoutAccountHolder String?
-  createdAt    DateTime           @default(now())
-  updatedAt    DateTime           @updatedAt
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
 
-  vehicles         Vehicle[]
-  documents        DriverDocument[]
-  trips            Trip[]            @relation("DriverTrips")
-  earnings         DriverEarning[]
-  withdrawRequests WithdrawRequest[]
-  fundingRequests  DriverFundingRequest[]
-  qrCodes          DriverQrCode[]
-  sanctions        DriverSanction[]
-  outgoingTransfers DriverTransfer[]      @relation("OutgoingDriverTransfers")
-  incomingTransfers DriverTransfer[]      @relation("IncomingDriverTransfers")
+  vehicles          Vehicle[]
+  documents         DriverDocument[]
+  trips             Trip[]                 @relation("DriverTrips")
+  earnings          DriverEarning[]
+  withdrawRequests  WithdrawRequest[]
+  fundingRequests   DriverFundingRequest[]
+  qrCodes           DriverQrCode[]
+  sanctions         DriverSanction[]
+  outgoingTransfers DriverTransfer[]       @relation("OutgoingDriverTransfers")
+  incomingTransfers DriverTransfer[]       @relation("IncomingDriverTransfers")
 
   @@index([status])
   @@index([availability])
@@ -460,24 +472,24 @@ model DriverQrCode {
 }
 
 model Vehicle {
-  id        String    @id @default(uuid())
-  driverId  String
-  driver    Driver    @relation(fields: [driverId], references: [id], onDelete: Cascade)
-  make      String
-  model     String
-  year      Int?
-  color     String?
-  plate     String    @unique
-  rideClass RideClass @default(ECONOMY)
-  vehicleTypeId String?
-  vehicleType   VehicleType? @relation(fields: [vehicleTypeId], references: [id], onDelete: SetNull)
-  isActive  Boolean   @default(true)
+  id                 String                    @id @default(uuid())
+  driverId           String
+  driver             Driver                    @relation(fields: [driverId], references: [id], onDelete: Cascade)
+  make               String
+  model              String
+  year               Int?
+  color              String?
+  plate              String                    @unique
+  rideClass          RideClass                 @default(ECONOMY)
+  vehicleTypeId      String?
+  vehicleType        VehicleType?              @relation(fields: [vehicleTypeId], references: [id], onDelete: SetNull)
+  isActive           Boolean                   @default(true)
   verificationStatus VehicleVerificationStatus @default(PENDING)
   verificationNote   String?
   verifiedById       String?
-  verifiedBy         User?     @relation("VehicleVerifier", fields: [verifiedById], references: [id], onDelete: SetNull)
+  verifiedBy         User?                     @relation("VehicleVerifier", fields: [verifiedById], references: [id], onDelete: SetNull)
   verifiedAt         DateTime?
-  createdAt DateTime  @default(now())
+  createdAt          DateTime                  @default(now())
 
   @@index([driverId])
   @@index([vehicleTypeId])
@@ -506,75 +518,90 @@ model DriverDocument {
 
 // ---------- Trips ----------
 model Trip {
-  id            String        @id @default(uuid())
-  passengerId   String
-  passenger     User          @relation("PassengerTrips", fields: [passengerId], references: [id])
-  driverId      String?
-  driver        Driver?       @relation("DriverTrips", fields: [driverId], references: [id])
-  status        TripStatus    @default(SEARCHING)
-  rideClass     RideClass     @default(ECONOMY)
-  vehicleTypeId String?
-  vehicleType   VehicleType?  @relation(fields: [vehicleTypeId], references: [id])
-  pickupLat     Float
-  pickupLng     Float
-  pickupAddress String?
-  destLat       Float?
-  destLng       Float?
-  destAddress   String?
-  distanceKm    Float?
-  durationSec   Int?
+  id                             String               @id @default(uuid())
+  passengerId                    String
+  passenger                      User                 @relation("PassengerTrips", fields: [passengerId], references: [id])
+  driverId                       String?
+  driver                         Driver?              @relation("DriverTrips", fields: [driverId], references: [id])
+  status                         TripStatus           @default(SEARCHING)
+  rideClass                      RideClass            @default(ECONOMY)
+  vehicleTypeId                  String?
+  vehicleType                    VehicleType?         @relation(fields: [vehicleTypeId], references: [id])
+  pickupLat                      Float
+  pickupLng                      Float
+  pickupAddress                  String?
+  destLat                        Float?
+  destLng                        Float?
+  destAddress                    String?
+  distanceKm                     Float?
+  durationSec                    Int?
   // مسار الرحلة المحسوب من محرك التوجيه (Encoded Polyline) لرسمه في التطبيقات.
-  routePolyline String?
+  routePolyline                  String?
   // اسم المزوّد الذي أنتج المسار (google | internal) للتدقيق والمراقبة.
-  routeProvider String?
-  fare          Decimal?      @db.Decimal(12, 2)
-  commissionPct Float         @default(15)
-  currency      String
-  paymentMethod PaymentMethod @default(CASH)
-  cancelReason  String?
-  cancelledBy   ActorKind?
-  cancellationFee Decimal?    @db.Decimal(12, 2)
-  cancellationSettledAt DateTime?
-  cancellationSettlementAttempts Int @default(0)
-  cancellationSettlementError String?
-  cityId        String?
-  city          City?         @relation(fields: [cityId], references: [id])
-  couponId      String?
-  coupon        Coupon?       @relation(fields: [couponId], references: [id])
-  discountAmount Decimal?     @db.Decimal(12, 2)
-  couponFundingSource CouponFundingSource?
-  couponPlatformShare Decimal? @db.Decimal(5, 4)
-  createdAt     DateTime      @default(now())
-  acceptedAt    DateTime?
-  startedAt     DateTime?
-  completedAt   DateTime?
-  settlementAttempts Int      @default(0)
-  settlementError String?
-  settlementStatus SettlementStatus @default(NOT_REQUIRED)
-  settledAt      DateTime?
+  routeProvider                  String?
+  fare                           Decimal?             @db.Decimal(12, 2)
+  // لقطة نسبة العمولة وقت إنشاء الرحلة (snapshot تاريخي لا يُعاد حسابه).
+  // لا توجد قيمة افتراضية مقصودة: النسبة تُحلّ دائمًا من إعدادات لوحة التحكم
+  // (CommissionRule → VehiclePricingRule → إعداد commission.defaultPct)، فلا
+  // تُبرمَج أي نسبة عمولة في المخطط أو الكود. تغيير الإعداد لاحقًا لا يمسّ
+  // هذه اللقطة ولا محاسبة الرحلات التاريخية.
+  commissionPct                  Float
+  // قاعدة العمولة التي حُلّت منها النسبة (للتدقيق). null = لم تأتِ من CommissionRule.
+  commissionRuleId               String?
+  commissionRule                 CommissionRule?      @relation(fields: [commissionRuleId], references: [id], onDelete: SetNull)
+  currency                       String
+  paymentMethod                  PaymentMethod        @default(CASH)
+  cancelReason                   String?
+  cancelledBy                    ActorKind?
+  cancellationFee                Decimal?             @db.Decimal(12, 2)
+  cancellationSettledAt          DateTime?
+  cancellationSettlementAttempts Int                  @default(0)
+  cancellationSettlementError    String?
+  cityId                         String?
+  city                           City?                @relation(fields: [cityId], references: [id])
+  couponId                       String?
+  coupon                         Coupon?              @relation(fields: [couponId], references: [id])
+  discountAmount                 Decimal?             @db.Decimal(12, 2)
+  couponFundingSource            CouponFundingSource?
+  couponPlatformShare            Decimal?             @db.Decimal(5, 4)
+  createdAt                      DateTime             @default(now())
+  acceptedAt                     DateTime?
+  startedAt                      DateTime?
+  completedAt                    DateTime?
+  settlementAttempts             Int                  @default(0)
+  settlementError                String?
+  settlementStatus               SettlementStatus     @default(NOT_REQUIRED)
+  settledAt                      DateTime?
   // متى أُرشفت الرحلة (نسخة باردة في TripArchive وحذف الأبناء الثقيلين).
-  archivedAt    DateTime?
-  isScheduled   Boolean       @default(false)
-  scheduledAt   DateTime?
-  dispatchAt    DateTime?
-  updatedAt     DateTime      @updatedAt
+  archivedAt                     DateTime?
+  isScheduled                    Boolean              @default(false)
+  scheduledAt                    DateTime?
+  dispatchAt                     DateTime?
+  updatedAt                      DateTime             @updatedAt
 
-  stops          TripStop[]
+  stops           TripStop[]
   safetyIncidents SafetyIncident[]
-  shareTokens    TripShareToken[]
-  lostItems      LostItem[]
-  invoice        Invoice?
-  tip            TripTip?
-  callSessions   CallSession[]
-  archive        TripArchive?
-  tracking       TripTracking[]
-  events         TripEvent[]
-  payment        Payment?
-  ratings        Rating[]
-  complaints     Complaint[]
-  messages       TripMessage[]
-  driverEarning  DriverEarning?
-  companyEarning CompanyEarning?
+  shareTokens     TripShareToken[]
+  lostItems       LostItem[]
+  invoice         Invoice?
+  tip             TripTip?
+  callSessions    CallSession[]
+  archive         TripArchive?
+  tracking        TripTracking[]
+  events          TripEvent[]
+  payment         Payment?
+  ratings         Rating[]
+  complaints      Complaint[]
+  messages        TripMessage[]
+  driverEarning   DriverEarning?
+  companyEarning  CompanyEarning?
+  // ملاحظة مهمة: يوجد أيضًا فهرس تفرّد جزئي (partial unique index) لا يمكن
+  // التعبير عنه في Prisma schema:
+  //   CREATE UNIQUE INDEX "Trip_active_passenger_unique" ON "Trip"("passengerId")
+  //     WHERE "status" IN ('SEARCHING','ACCEPTED','ARRIVING','IN_PROGRESS');
+  // يفرض قاعدة "رحلة فورية واحدة لكل راكب" في قاعدة البيانات نفسها.
+  // SCHEDULED مستثناة عمدًا: حجز مستقبلي لا يجوز أن يحجب رحلة فورية.
+  // يُنشأ في مايغريشن 20260912090100_trip_active_passenger_unique — لا تحذفه.
 
   @@index([status])
   @@index([passengerId])
@@ -585,20 +612,21 @@ model Trip {
   @@index([status, settledAt, completedAt])
   @@index([settlementStatus])
   @@index([archivedAt])
+  @@index([commissionRuleId])
 }
 
 model TripMessage {
-  id        String   @id @default(uuid())
+  id        String    @id @default(uuid())
   tripId    String
-  trip      Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  trip      Trip      @relation(fields: [tripId], references: [id], onDelete: Cascade)
   senderId  String
-  sender    User     @relation("TripMessageSender", fields: [senderId], references: [id], onDelete: Restrict)
+  sender    User      @relation("TripMessageSender", fields: [senderId], references: [id], onDelete: Restrict)
   body      String
   // لحظة قراءة الطرف المستقبِل للرسالة. null = غير مقروءة.
   // الحقل على الرسالة (لا جدول قراءات منفصل) لأن محادثة الرحلة ثنائية دائمًا:
   // طرف واحد مُرسِل وطرف واحد مستقبِل، فلا حاجة لمصفوفة قرّاء.
   readAt    DateTime?
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
 
   @@index([tripId, createdAt])
   @@index([senderId, createdAt])
@@ -653,39 +681,39 @@ model FinancialParty {
 }
 
 model FinancialAccount {
-  id            String               @id @default(uuid())
-  partyId       String
-  party         FinancialParty       @relation(fields: [partyId], references: [id], onDelete: Restrict)
-  code          String               @unique
-  type          FinancialAccountType
-  currency      String               @db.Char(3)
-  balanceCache  Decimal              @default(0) @db.Decimal(18, 2)
-  isActive      Boolean              @default(true)
-  createdAt     DateTime             @default(now())
-  updatedAt     DateTime             @updatedAt
-  entries       LedgerEntry[]
+  id           String               @id @default(uuid())
+  partyId      String
+  party        FinancialParty       @relation(fields: [partyId], references: [id], onDelete: Restrict)
+  code         String               @unique
+  type         FinancialAccountType
+  currency     String               @db.Char(3)
+  balanceCache Decimal              @default(0) @db.Decimal(18, 2)
+  isActive     Boolean              @default(true)
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+  entries      LedgerEntry[]
 
   @@index([partyId, currency])
 }
 
 model LedgerTransaction {
-  id              String                  @id @default(uuid())
-  command         String
-  idempotencyKey  String                  @unique
-  status          LedgerTransactionStatus @default(PENDING)
-  currency        String                  @db.Char(3)
-  referenceType   String?
-  referenceId     String?
-  metadata        Json?
-  createdBy       String?
-  reason          String?
-  failureReason   String?
-  reversalOfId    String?                 @unique
-  reversalOf      LedgerTransaction?      @relation("LedgerReversal", fields: [reversalOfId], references: [id], onDelete: Restrict)
-  reversedBy      LedgerTransaction?      @relation("LedgerReversal")
-  createdAt       DateTime                @default(now())
-  postedAt        DateTime?
-  entries         LedgerEntry[]
+  id             String                  @id @default(uuid())
+  command        String
+  idempotencyKey String                  @unique
+  status         LedgerTransactionStatus @default(PENDING)
+  currency       String                  @db.Char(3)
+  referenceType  String?
+  referenceId    String?
+  metadata       Json?
+  createdBy      String?
+  reason         String?
+  failureReason  String?
+  reversalOfId   String?                 @unique
+  reversalOf     LedgerTransaction?      @relation("LedgerReversal", fields: [reversalOfId], references: [id], onDelete: Restrict)
+  reversedBy     LedgerTransaction?      @relation("LedgerReversal")
+  createdAt      DateTime                @default(now())
+  postedAt       DateTime?
+  entries        LedgerEntry[]
 
   @@index([status, createdAt])
   @@index([referenceType, referenceId])
@@ -816,22 +844,22 @@ model LegacyWalletArchive {
 }
 
 model DriverFundingRequest {
-  id            String               @id @default(uuid())
-  driverId      String
-  driver        Driver               @relation(fields: [driverId], references: [id])
-  requestedById String
-  requestedBy   User                 @relation("FundingRequester", fields: [requestedById], references: [id])
-  approvedById  String?
-  approvedBy    User?                @relation("FundingApprover", fields: [approvedById], references: [id])
-  amount        Decimal              @db.Decimal(12, 2)
-  status        FundingRequestStatus @default(PENDING)
-  note          String?
-  idempotencyKey String              @unique
-  approvedAt    DateTime?
-  fundedAt      DateTime?
-  rejectedAt    DateTime?
-  createdAt     DateTime             @default(now())
-  updatedAt     DateTime             @updatedAt
+  id             String               @id @default(uuid())
+  driverId       String
+  driver         Driver               @relation(fields: [driverId], references: [id])
+  requestedById  String
+  requestedBy    User                 @relation("FundingRequester", fields: [requestedById], references: [id])
+  approvedById   String?
+  approvedBy     User?                @relation("FundingApprover", fields: [approvedById], references: [id])
+  amount         Decimal              @db.Decimal(12, 2)
+  status         FundingRequestStatus @default(PENDING)
+  note           String?
+  idempotencyKey String               @unique
+  approvedAt     DateTime?
+  fundedAt       DateTime?
+  rejectedAt     DateTime?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
 
   @@index([driverId, status])
   @@index([requestedById, createdAt])
@@ -865,13 +893,76 @@ model DriverTransfer {
   @@index([status, createdAt])
 }
 
+enum WalletTopUpStatus {
+  PENDING
+  CAPTURED
+  FAILED
+  CANCELED
+}
+
+/// شحن المحفظة (Top-up) — المسار الوحيد لإدخال رصيد ذاتيًا في:
+///   • flaminGO Pay للراكب (رصيد دفع مخزَّن غير قابل للسحب)
+///   • محفظة عمولة السائق (رصيد تشغيلي مُسبق الدفع لتغطية عمولة المنصّة)
+///
+/// لا يوجد جدول Payment بديل لهذا الغرض لأن Payment.tripId إلزامي وفريد
+/// (دفعة واحدة لكل رحلة)، والشحن ليس مرتبطًا برحلة. يعيد استخدام نفس
+/// طبقة مزوّدي الدفع (PaymentAdapter) ونفس نواة القيد المزدوج (LedgerCore)،
+/// فلا يوجد دفتر مالي ثانٍ ولا تكرار لتكامل المزوّدين.
+model WalletTopUp {
+  id                String            @id @default(uuid())
+  userId            String
+  user              User              @relation(fields: [userId], references: [id], onDelete: Restrict)
+  amount            Decimal           @db.Decimal(12, 2)
+  currency          String            @db.Char(3)
+  /// وسيلة الدفع المستخدمة للشحن (بطاقة/نقدًا عند وكيل...)، لا الرصيد نفسه.
+  method            PaymentMethod
+  provider          String
+  providerPaymentId String?
+  providerStatus    String?
+  status            WalletTopUpStatus @default(PENDING)
+  statusReason      String?
+  reference         String?
+  /// مفتاح الخمول للطلب نفسه: نقرة مكررة لا تُنشئ عملية شحن ثانية.
+  idempotencyKey    String            @unique
+  metadata          Json?
+  capturedAt        DateTime?
+  failedAt          DateTime?
+  canceledAt        DateTime?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  events WalletTopUpEvent[]
+
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+  @@index([provider, providerPaymentId])
+}
+
+/// أحداث مزوّد الدفع لعملية الشحن. idempotencyKey فريد = الحارس الذرّي
+/// ضد ازدواج الإيداع عند إعادة إرسال نفس الـwebhook.
+model WalletTopUpEvent {
+  id             String      @id @default(uuid())
+  topUpId        String
+  topUp          WalletTopUp @relation(fields: [topUpId], references: [id], onDelete: Cascade)
+  type           String
+  status         String?
+  provider       String?
+  idempotencyKey String?     @unique
+  reference      String?
+  payload        Json?
+  createdAt      DateTime    @default(now())
+
+  @@index([topUpId, createdAt])
+  @@index([type, createdAt])
+}
+
 model WithdrawRequest {
-  id            String         @id @default(uuid())
-  driverId      String
-  driver        Driver         @relation(fields: [driverId], references: [id])
-  userId        String
-  user          User           @relation(fields: [userId], references: [id])
-  amount        Decimal        @db.Decimal(12, 2)
+  id             String         @id @default(uuid())
+  driverId       String
+  driver         Driver         @relation(fields: [driverId], references: [id])
+  userId         String
+  user           User           @relation(fields: [userId], references: [id])
+  amount         Decimal        @db.Decimal(12, 2)
   status         WithdrawStatus @default(PENDING)
   processedById  String?
   note           String?
@@ -886,33 +977,33 @@ model WithdrawRequest {
 
 // ---------- Marketing ----------
 model Coupon {
-  id           String       @id @default(uuid())
-  code         String       @unique
-  type         DiscountType @default(PERCENT)
-  value        Decimal      @db.Decimal(12, 2)
-  maxUses      Int?
-  usedCount    Int          @default(0)
+  id            String               @id @default(uuid())
+  code          String               @unique
+  type          DiscountType         @default(PERCENT)
+  value         Decimal              @db.Decimal(12, 2)
+  maxUses       Int?
+  usedCount     Int                  @default(0)
   // حد الاستخدام لكل مستخدم. null = بلا حد لكل مستخدم (يبقى maxUses العام ساريًا).
   // يُفرض عبر عدّ صفوف CouponRedemption لهذا المستخدم.
-  perUserLimit Int?
-  firstRideOnly Boolean     @default(false)
-  userId       String?
+  perUserLimit  Int?
+  firstRideOnly Boolean              @default(false)
+  userId        String?
   // الحد الأدنى لأجرة الرحلة كي يصلح الكوبون (قبل الخصم).
-  minFare      Decimal?     @db.Decimal(12, 2)
+  minFare       Decimal?             @db.Decimal(12, 2)
   // سقف مبلغ الخصم — مهم لكوبونات النسبة كي لا تُفرّغ رحلة طويلة.
-  maxDiscount  Decimal?     @db.Decimal(12, 2)
+  maxDiscount   Decimal?             @db.Decimal(12, 2)
   // فئات الرحلة المسموح بها بأسماء RideClass. مصفوفة فارغة = كل الفئات.
   // نستعمل String[] اتساقًا مع driverCityIds/countryCodes ونتحقق منها بـ @IsEnum في الـDTO.
-  rideClasses  String[]     @default([])
+  rideClasses   String[]             @default([])
   // تقييد بمدينة واحدة. null = كل المدن. حقل عادي مثل userId أعلاه (بلا علاقة).
-  cityId       String?
-  expiresAt    DateTime?
-  isActive     Boolean      @default(true)
+  cityId        String?
+  expiresAt     DateTime?
+  isActive      Boolean              @default(true)
   fundingSource CouponFundingSource?
-  platformShare Decimal?    @db.Decimal(5, 4)
-  createdAt    DateTime     @default(now())
+  platformShare Decimal?             @db.Decimal(5, 4)
+  createdAt     DateTime             @default(now())
 
-  trips Trip[]
+  trips       Trip[]
   redemptions CouponRedemption[]
 
   @@index([cityId])
@@ -1041,34 +1132,34 @@ model LoyaltyLedger {
 
 // ---------- Communication ----------
 model Notification {
-  id          String              @id @default(uuid())
-  target      NotificationTarget  @default(USER)
-  channel     NotificationChannel @default(PUSH)
-  userId      String?
-  user        User?               @relation(fields: [userId], references: [id])
-  campaignKey String?
-  appId       String?
-  clientOs    String?
-  countryCodes String[]           @default([])
-  localeCodes  String[]           @default([])
-  driverCityIds String[]          @default([])
-  title       String
-  body        String
-  imageUrl    String?
-  deepLink    String?
-  data        Json?
-  scheduledAt DateTime?
-  sentAt      DateTime?
-  sentCount   Int                 @default(0)
+  id             String                  @id @default(uuid())
+  target         NotificationTarget      @default(USER)
+  channel        NotificationChannel     @default(PUSH)
+  userId         String?
+  user           User?                   @relation(fields: [userId], references: [id])
+  campaignKey    String?
+  appId          String?
+  clientOs       String?
+  countryCodes   String[]                @default([])
+  localeCodes    String[]                @default([])
+  driverCityIds  String[]                @default([])
+  title          String
+  body           String
+  imageUrl       String?
+  deepLink       String?
+  data           Json?
+  scheduledAt    DateTime?
+  sentAt         DateTime?
+  sentCount      Int                     @default(0)
   // ---- التسليم الدائم (durable delivery): حالة + إعادة محاولة أسّية + DLQ ----
   // يُعاد استخدام enum OutboxStatus نفسه (PENDING/DELIVERED/FAILED/DEAD) تجنّبًا للتكرار.
-  deliveryStatus OutboxStatus     @default(PENDING)
-  attempts       Int              @default(0)
-  maxAttempts    Int              @default(8)
+  deliveryStatus OutboxStatus            @default(PENDING)
+  attempts       Int                     @default(0)
+  maxAttempts    Int                     @default(8)
   nextAttemptAt  DateTime?
   lastError      String?
-  createdAt   DateTime            @default(now())
-  userStates  UserNotificationState[]
+  createdAt      DateTime                @default(now())
+  userStates     UserNotificationState[]
 
   @@index([userId])
   @@index([target])
@@ -1093,22 +1184,22 @@ model UserNotificationState {
 }
 
 model SupportTicket {
-  id        String       @id @default(uuid())
-  userId    String
-  user      User         @relation(fields: [userId], references: [id])
-  subject   String
-  category  String?
-  status    TicketStatus @default(OPEN)
+  id              String         @id @default(uuid())
+  userId          String
+  user            User           @relation(fields: [userId], references: [id])
+  subject         String
+  category        String?
+  status          TicketStatus   @default(OPEN)
   priority        TicketPriority @default(NORMAL)
   assigneeId      String?
   slaDueAt        DateTime?
   firstResponseAt DateTime?
   resolvedAt      DateTime?
   resolutionCode  String?
-  escalationLevel Int          @default(0)
-  breached        Boolean      @default(false)
-  createdAt DateTime     @default(now())
-  updatedAt DateTime     @updatedAt
+  escalationLevel Int            @default(0)
+  breached        Boolean        @default(false)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
 
   messages SupportMessage[]
 
@@ -1119,13 +1210,13 @@ model SupportTicket {
 }
 
 model SupportMessage {
-  id        String   @id @default(uuid())
+  id        String        @id @default(uuid())
   ticketId  String
   ticket    SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   senderId  String
-  sender    User     @relation(fields: [senderId], references: [id])
+  sender    User          @relation(fields: [senderId], references: [id])
   body      String
-  createdAt DateTime @default(now())
+  createdAt DateTime      @default(now())
 
   @@index([ticketId])
 }
@@ -1185,18 +1276,18 @@ model AgentProfile {
 }
 
 model Role {
-  id          String           @id @default(uuid())
-  name        String           @unique
+  id          String   @id @default(uuid())
+  name        String   @unique
   description String?
-  createdAt   DateTime         @default(now())
+  createdAt   DateTime @default(now())
 
   users       User[]
   permissions RolePermission[]
 }
 
 model Permission {
-  id          String           @id @default(uuid())
-  key         String           @unique
+  id          String  @id @default(uuid())
+  key         String  @unique
   description String?
 
   roles RolePermission[]
@@ -1248,11 +1339,11 @@ model Wilaya {
   isOperational Boolean @default(false)
 
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
 
-  cities             City[]
-  drivers            Driver[]
-  pricingRules       PricingRule[]
+  cities              City[]
+  drivers             Driver[]
+  pricingRules        PricingRule[]
   vehiclePricingRules VehiclePricingRule[]
 
   @@index([isActive])
@@ -1267,18 +1358,19 @@ model City {
   centerLat Float?
   centerLng Float?
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
 
   // اختياري عمدًا: المدن الموجودة قبل المرحلة 8 ليس لها ولاية، وإجبار العمود
   // كان سيكسر البيانات الحالية. الربط يتم من اللوحة أو بمطابقة الاسم في الـseed.
   wilayaId String?
   wilaya   Wilaya? @relation(fields: [wilayaId], references: [id], onDelete: SetNull)
 
-  zones        Zone[]
-  pricingRules PricingRule[]
-  drivers      Driver[]
-  agents       AgentProfile[]
-  trips        Trip[]
+  zones           Zone[]
+  pricingRules    PricingRule[]
+  drivers         Driver[]
+  agents          AgentProfile[]
+  trips           Trip[]
+  commissionRules CommissionRule[]
 
   @@index([wilayaId])
 }
@@ -1290,7 +1382,7 @@ model Zone {
   name      String
   polygon   Json?
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
 
   @@index([cityId])
 }
@@ -1432,23 +1524,23 @@ enum InvoiceStatus {
 }
 
 model Invoice {
-  id           String        @id @default(uuid())
-  number       String        @unique
-  tripId       String        @unique
-  trip         Trip          @relation(fields: [tripId], references: [id], onDelete: Cascade)
-  userId       String
-  user         User          @relation(fields: [userId], references: [id])
-  status       InvoiceStatus @default(ISSUED)
-  currency     String
-  subtotal     Decimal       @db.Decimal(12, 2)
-  discount     Decimal       @default(0) @db.Decimal(12, 2)
-  total        Decimal       @db.Decimal(12, 2)
+  id            String        @id @default(uuid())
+  number        String        @unique
+  tripId        String        @unique
+  trip          Trip          @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  userId        String
+  user          User          @relation(fields: [userId], references: [id])
+  status        InvoiceStatus @default(ISSUED)
+  currency      String
+  subtotal      Decimal       @db.Decimal(12, 2)
+  discount      Decimal       @default(0) @db.Decimal(12, 2)
+  total         Decimal       @db.Decimal(12, 2)
   paymentMethod String
-  snapshot     Json
-  pdfPath      String?
-  issuedAt     DateTime      @default(now())
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  snapshot      Json
+  pdfPath       String?
+  issuedAt      DateTime      @default(now())
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
 
   @@index([userId, issuedAt])
   @@index([issuedAt])
@@ -1490,16 +1582,16 @@ enum TripTipStatus {
 // رابط مشاركة الرحلة: رمز عشوائي مؤقّت يسمح لمن يحمله بمتابعة الرحلة
 // دون تسجيل دخول. يُخزّن الرمز مجزّأً (hash) فلا يُسرّب من قاعدة البيانات.
 model TripShareToken {
-  id         String    @id @default(uuid())
-  tripId     String
-  trip       Trip      @relation(fields: [tripId], references: [id], onDelete: Cascade)
-  createdById String
-  tokenHash  String    @unique
-  expiresAt  DateTime
-  revokedAt  DateTime?
-  viewCount  Int       @default(0)
+  id           String    @id @default(uuid())
+  tripId       String
+  trip         Trip      @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  createdById  String
+  tokenHash    String    @unique
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  viewCount    Int       @default(0)
   lastViewedAt DateTime?
-  createdAt  DateTime  @default(now())
+  createdAt    DateTime  @default(now())
 
   @@index([tripId, expiresAt])
 }
@@ -1578,23 +1670,23 @@ model SettingRevision {
 }
 
 model AppVersion {
-  id           String   @id @default(uuid())
-  platform     String
-  appId        String?
-  clientOs     String?
-  countryCodes String[] @default([])
-  releaseChannel String @default("stable")
-  status       String   @default("ACTIVE")
-  version      String
-  minSupported String?
-  forceUpdate  Boolean  @default(false)
-  rolloutPercentage Int @default(100)
-  releaseNotes String?
-  updateTitle  String?
-  updateMessage String?
-  url          String?
-  publishedAt  DateTime @default(now())
-  createdAt    DateTime @default(now())
+  id                String   @id @default(uuid())
+  platform          String
+  appId             String?
+  clientOs          String?
+  countryCodes      String[] @default([])
+  releaseChannel    String   @default("stable")
+  status            String   @default("ACTIVE")
+  version           String
+  minSupported      String?
+  forceUpdate       Boolean  @default(false)
+  rolloutPercentage Int      @default(100)
+  releaseNotes      String?
+  updateTitle       String?
+  updateMessage     String?
+  url               String?
+  publishedAt       DateTime @default(now())
+  createdAt         DateTime @default(now())
 
   @@index([platform])
   @@index([platform, releaseChannel, status])
@@ -1613,14 +1705,14 @@ model DeviceToken {
 }
 
 model RefreshToken {
-  id        String   @id @default(uuid())
+  id        String    @id @default(uuid())
   userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   sessionId String?
   tokenHash String
-  revoked   Boolean  @default(false)
+  revoked   Boolean   @default(false)
   expiresAt DateTime?
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
 
   @@index([userId])
   @@index([sessionId])
@@ -1683,27 +1775,28 @@ model SystemLog {
 /// أنواع المركبات المعروضة في التطبيق (اقتصادي، مريح، فان...) — تُدار من لوحة التحكم
 // فئة مركبات ديناميكية (سيارات / دراجات / أي فئة جديدة يضيفها المدير).
 model VehicleCategory {
-  id              String   @id @default(uuid())
-  name            String   @unique
+  id              String         @id @default(uuid())
+  name            String         @unique
   nameI18n        Json? // { ar, fr, en }
   description     String?
   descriptionI18n Json?
-  iconType        String   @default("EMOJI") // EMOJI | ICON_PACK | SVG | PNG | LOTTIE
+  iconType        String         @default("EMOJI") // EMOJI | ICON_PACK | SVG | PNG | LOTTIE
   iconValue       String? // رمز إيموجي أو مفتاح داخل حزمة أيقونات
   iconUrl         String? // رابط ملف SVG/PNG/Lottie (URL أو File ID فقط)
   imageUrl        String?
   color           String?
-  usageType       String   @default("BOTH") // RIDE | DELIVERY | BOTH
-  domain          String   @default("MOBILITY") // MOBILITY | FOOD | PARCEL | CORPORATE | RENTAL — كتالوج قابل لإعادة الاستخدام
+  usageType       String         @default("BOTH") // RIDE | DELIVERY | BOTH
+  domain          String         @default("MOBILITY") // MOBILITY | FOOD | PARCEL | CORPORATE | RENTAL — كتالوج قابل لإعادة الاستخدام
   status          WorkflowStatus @default(PUBLISHED)
-  version         Int      @default(1) // يتغير مع كل تعديل — للـ smart cache
-  isActive        Boolean  @default(true)
-  sortOrder       Int      @default(0)
+  version         Int            @default(1) // يتغير مع كل تعديل — للـ smart cache
+  isActive        Boolean        @default(true)
+  sortOrder       Int            @default(0)
   deletedAt       DateTime? // حذف ناعم
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
 
-  types VehicleType[]
+  types           VehicleType[]
+  commissionRules CommissionRule[]
 
   @@index([isActive])
   @@index([domain])
@@ -1727,12 +1820,12 @@ model VehicleType {
   usageType       String           @default("BOTH") // RIDE | DELIVERY | BOTH
 
   // خصائص الخدمة (تُدار من اللوحة)
-  allowsNegotiation   Boolean @default(false)
-  supportsCash        Boolean @default(true)
-  supportsWallet      Boolean @default(true)
-  requiresApproval    Boolean @default(false)
-  visibleToPassengers Boolean @default(true)
-  visibleToDrivers    Boolean @default(true)
+  allowsNegotiation   Boolean  @default(false)
+  supportsCash        Boolean  @default(true)
+  supportsWallet      Boolean  @default(true)
+  requiresApproval    Boolean  @default(false)
+  visibleToPassengers Boolean  @default(true)
+  visibleToDrivers    Boolean  @default(true)
   appIds              String[] @default([])
   clientOs            String[] @default([])
   countryCodes        String[] @default([])
@@ -1760,7 +1853,7 @@ model VehicleType {
 
   // دورة حياة النشر (Workflow) + الإصدار + الحذف الناعم
   status    WorkflowStatus @default(DRAFT)
-  version   Int       @default(1)
+  version   Int            @default(1)
   deletedAt DateTime?
 
   isActive  Boolean  @default(true)
@@ -1768,11 +1861,12 @@ model VehicleType {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  features     VehicleTypeFeature[]
-  pricingRules VehiclePricingRule[]
-  fields       VehicleTypeField[]
-  vehicles     Vehicle[]
-  trips        Trip[]
+  features        VehicleTypeFeature[]
+  pricingRules    VehiclePricingRule[]
+  fields          VehicleTypeField[]
+  vehicles        Vehicle[]
+  trips           Trip[]
+  commissionRules CommissionRule[]
 
   @@unique([categoryId, name])
   @@index([isActive])
@@ -1783,19 +1877,19 @@ model VehicleType {
 
 // ميزات مرنة (مكيف/براد/واي فاي/شاحن/كرسي أطفال...) تُضاف من اللوحة دون تعديل قاعدة البيانات.
 model Feature {
-  id        String   @id @default(uuid())
-  code      String   @unique
+  id        String    @id @default(uuid())
+  code      String    @unique
   name      String
   nameI18n  Json?
-  iconType  String   @default("EMOJI")
+  iconType  String    @default("EMOJI")
   iconValue String?
   iconUrl   String?
-  isActive  Boolean  @default(true)
-  sortOrder Int      @default(0)
-  version   Int      @default(1)
+  isActive  Boolean   @default(true)
+  sortOrder Int       @default(0)
+  version   Int       @default(1)
   deletedAt DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 
   types VehicleTypeFeature[]
 
@@ -1816,22 +1910,22 @@ model VehicleTypeFeature {
 
 // مناطق الخدمة (اسم/مدينة/ولاية/دولة/حدود GeoJSON/تفعيل). يرتبط بها التسعير.
 model ServiceArea {
-  id        String   @id @default(uuid())
-  name      String
-  city      String?
-  state     String?
-  country   String?
+  id          String    @id @default(uuid())
+  name        String
+  city        String?
+  state       String?
+  country     String?
   geojson     Json? // Polygon / GeoJSON — تمثيل هندسي عام مستقل عن مزوّد الخرائط
-  provider    String   @default("GEOJSON") // GEOJSON | GOOGLE | OSM | MAPBOX
+  provider    String    @default("GEOJSON") // GEOJSON | GOOGLE | OSM | MAPBOX
   providerRef Json? // معرفات خاصة بالمزوّد (اختياري) دون تغيير المخطط
-  centerLat Float?
-  centerLng Float?
-  isActive  Boolean  @default(true)
-  sortOrder Int      @default(0)
-  version   Int      @default(1)
-  deletedAt DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  centerLat   Float?
+  centerLng   Float?
+  isActive    Boolean   @default(true)
+  sortOrder   Int       @default(0)
+  version     Int       @default(1)
+  deletedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   pricingRules VehiclePricingRule[]
 
@@ -1842,9 +1936,9 @@ model ServiceArea {
 // نظام تسعير مرن: عدة قواعد سعر لكل نوع مركبة، تختلف حسب المنطقة/المدينة/الولاية/الدولة/
 // الوقت/الذروة/المناسبات/نوع العميل/العروض/الكوبونات. يُختار أنسبها حسب الأولوية وال��طابق.
 model VehiclePricingRule {
-  id            String       @id @default(uuid())
+  id            String      @id @default(uuid())
   vehicleTypeId String
-  vehicleType   VehicleType  @relation(fields: [vehicleTypeId], references: [id], onDelete: Cascade)
+  vehicleType   VehicleType @relation(fields: [vehicleTypeId], references: [id], onDelete: Cascade)
   name          String?
 
   // النطاق الجغرافي
@@ -1860,13 +1954,13 @@ model VehiclePricingRule {
   country       String?
 
   // نوع العميل والعروض والكوبونات
-  customerType String? // ALL | NEW | VIP ...
-  couponCode   String?
-  appIds       String[] @default([])
-  clientOs     String[] @default([])
+  customerType     String? // ALL | NEW | VIP ...
+  couponCode       String?
+  appIds           String[] @default([])
+  clientOs         String[] @default([])
   audienceSegments String[] @default([])
-  minAppVersion String?
-  maxAppVersion String?
+  minAppVersion    String?
+  maxAppVersion    String?
 
   // النافذة الزمنية / المناسبات / الذروة
   validFrom      DateTime?
@@ -1884,21 +1978,65 @@ model VehiclePricingRule {
   maxFare        Decimal? @db.Decimal(12, 2)
   negotiationMin Decimal? @db.Decimal(12, 2)
   negotiationMax Decimal? @db.Decimal(12, 2)
-  commissionPct  Float    @default(15)
+  // بلا default وبلا NOT NULL: نسبة العمولة تُدار من لوحة التحكم عبر
+  // CommissionRule؛ هذا العمود يبقى كتجاوز اختياري لكل قاعدة سعر ولا يجوز
+  // أن يحمل أي نسبة مبرمَجة. null = لا تجاوز، فيُستعمل CommissionRule.
+  commissionPct  Float?
   currency       String
   metadata       Json?
 
-  priority  Int      @default(0) // الأعلى يفوز عند تطابق أكثر من قاعدة
-  isActive  Boolean  @default(true)
-  version   Int      @default(1)
+  priority  Int       @default(0) // الأعلى يفوز عند تطابق أكثر من قاعدة
+  isActive  Boolean   @default(true)
+  version   Int       @default(1)
   deletedAt DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 
   @@index([vehicleTypeId])
   @@index([serviceAreaId])
   @@index([isActive])
   @@index([deletedAt])
+}
+
+/// قاعدة عمولة المنصّة — تُدار **بالكامل** من لوحة التحكم.
+///
+/// لماذا جدول مستقل عن VehiclePricingRule: العمولة بُعد تجاري مستقل عن
+/// السعر. ربطها بقاعدة سعر يعني أن تغيير نسبة العمولة في مدينة واحدة يفرض
+/// تعديل كل قواعد السعر هناك، ولا يمكن التعبير عن نسبة على مستوى **فئة**
+/// المركبة (VehicleCategory) إطلاقًا لأن قاعدة السعر مربوطة بـvehicleTypeId
+/// إلزاميًا. هذا الجدول يغطي الأبعاد المطلوبة: دولة ← مدينة ← نوع ← فئة.
+///
+/// كل بُعد يقبل null بمعنى "أي قيمة" (wildcard)، والحلّ حتمي:
+/// الأولوية (priority) تنازليًا، ثم درجة التخصيص، ثم الأقدم إنشاءً.
+/// لا توجد قيمة افتراضية لـcommissionPct: نسبة العمولة يجب أن تُضبط من
+/// اللوحة، ولا يُبرمَج أي رقم في الكود أو المخطط أو بيانات الـseed.
+model CommissionRule {
+  id                String           @id @default(uuid())
+  name              String?
+  /// ISO-3166-1 alpha-2 بحروف كبيرة (مثل "DZ"). null = كل الدول.
+  countryCode       String?
+  cityId            String?
+  city              City?            @relation(fields: [cityId], references: [id], onDelete: Cascade)
+  vehicleTypeId     String?
+  vehicleType       VehicleType?     @relation(fields: [vehicleTypeId], references: [id], onDelete: Cascade)
+  vehicleCategoryId String?
+  vehicleCategory   VehicleCategory? @relation(fields: [vehicleCategoryId], references: [id], onDelete: Cascade)
+  /// نسبة العمولة (0..100). بلا default — اللوحة هي المصدر الوحيد.
+  commissionPct     Float
+  priority          Int              @default(0)
+  isActive          Boolean          @default(true)
+  note              String?
+  createdById       String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  trips Trip[]
+
+  @@index([isActive])
+  @@index([countryCode, cityId])
+  @@index([vehicleTypeId])
+  @@index([vehicleCategoryId])
+  @@index([priority])
 }
 
 // حقول ديناميكية يعرّفها المدير لكل نوع (Dynamic Forms) دون تعديل الكود.
@@ -1923,23 +2061,23 @@ model VehicleTypeField {
 
 /// ا��إعلانات/البانرات المعروضة في تطبيقي الراكب والسائق
 model Advertisement {
-  id        String      @id @default(uuid())
-  title     String
-  imageUrl  String
-  targetUrl String?
-  campaignKey String?
-  placement AdPlacement @default(PASSENGER_HOME)
-  appId     String?
-  clientOs  String?
-  countryCodes String[] @default([])
-  audienceSegments String[] @default([])
-  isActive  Boolean     @default(true)
-  startsAt  DateTime?
-  endsAt    DateTime?
-  priority  Int         @default(0)
-  sortOrder Int         @default(0)
-  createdAt DateTime    @default(now())
-  updatedAt DateTime    @updatedAt
+  id               String      @id @default(uuid())
+  title            String
+  imageUrl         String
+  targetUrl        String?
+  campaignKey      String?
+  placement        AdPlacement @default(PASSENGER_HOME)
+  appId            String?
+  clientOs         String?
+  countryCodes     String[]    @default([])
+  audienceSegments String[]    @default([])
+  isActive         Boolean     @default(true)
+  startsAt         DateTime?
+  endsAt           DateTime?
+  priority         Int         @default(0)
+  sortOrder        Int         @default(0)
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
 
   @@index([placement, isActive])
   @@index([campaignKey])
@@ -2037,7 +2175,7 @@ enum RiskReviewStatus {
 
 /// سجلّ تقييم مخاطر: لقطة غير قابلة للتعديل لكل إجراء حسّاس (للتدقيق).
 model RiskEvent {
-  id          String          @id @default(cuid())
+  id          String           @id @default(cuid())
   subjectKind String
   subjectId   String
   action      String
@@ -2046,7 +2184,7 @@ model RiskEvent {
   decision    RiskDecisionKind
   amount      Float?
   reasons     Json
-  createdAt   DateTime        @default(now())
+  createdAt   DateTime         @default(now())
 
   @@index([subjectKind, subjectId])
   @@index([decision, createdAt])
@@ -2471,7 +2609,12 @@ model FareQuote {
   maxFare       Decimal         @db.Decimal(12, 2)
   proposedFare  Decimal?        @db.Decimal(12, 2)
   passengerNote String?         @db.VarChar(300)
-  commissionPct Float           @default(15)
+  // لقطة نسبة العمولة وقت إصدار عرض السعر، بلا قيمة افتراضية مبرمَجة:
+  // تُحلّ من إعدادات لوحة التحكم وتنتقل كما هي إلى الرحلة عند قبول عرض
+  // السائق، فلا يتغيّر ما اتُّفق عليه إن غُيّر الإعداد بينهما.
+  commissionPct Float
+  /// قاعدة العمولة التي حُلّت منها النسبة (للتدقيق).
+  commissionRuleId String?
   pricingSource String?
   pricingRuleId String?
   status        FareQuoteStatus @default(QUOTED)
@@ -2679,7 +2822,6 @@ model BackupRecord {
   @@index([startedAt])
 }
 
-
 // Server-driven mobile translation bundles. One atomic, versioned JSON payload per locale.
 model TranslationBundle {
   id          String   @id @default(uuid())
@@ -2695,44 +2837,44 @@ model TranslationBundle {
   @@index([isActive])
 }
 
-
 model ManagedAsset {
- id String @id @default(uuid())
- key String @unique
- kind String
- audience String @default("PASSENGER")
- objectPath String
- contentType String
- etag String
- version Int @default(1)
- bytes Int
- width Int?
- height Int?
- isActive Boolean @default(true)
- createdById String?
- updatedById String?
- createdAt DateTime @default(now())
- updatedAt DateTime @updatedAt
- @@index([audience, isActive])
- @@index([kind, isActive])
+  id          String   @id @default(uuid())
+  key         String   @unique
+  kind        String
+  audience    String   @default("PASSENGER")
+  objectPath  String
+  contentType String
+  etag        String
+  version     Int      @default(1)
+  bytes       Int
+  width       Int?
+  height      Int?
+  isActive    Boolean  @default(true)
+  createdById String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([audience, isActive])
+  @@index([kind, isActive])
 }
 
 /// ربط مكالمة مخفية: يربط (رقم وسيط + رقم المتصل) بطرف الوجهة دون كشف الأرقام.
 model CallSession {
-  id           String   @id @default(uuid())
-  tripId       String
-  trip         Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
-  provider     String   @default("twilio")
-  proxyNumber  String
-  callerRole   ActorKind
-  callerPhone  String
-  calleePhone  String
-  pin          String?
-  expiresAt    DateTime
-  revokedAt    DateTime?
-  lastCallAt   DateTime?
-  callCount    Int      @default(0)
-  createdAt    DateTime @default(now())
+  id          String    @id @default(uuid())
+  tripId      String
+  trip        Trip      @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  provider    String    @default("twilio")
+  proxyNumber String
+  callerRole  ActorKind
+  callerPhone String
+  calleePhone String
+  pin         String?
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  lastCallAt  DateTime?
+  callCount   Int       @default(0)
+  createdAt   DateTime  @default(now())
 
   @@index([proxyNumber, callerPhone, expiresAt])
   @@index([tripId, callerRole])
@@ -2743,22 +2885,22 @@ model CallSession {
 // نسخة باردة من الرحلات المنتهية القديمة: صف واحد لكل رحلة يحمل كل ما يلزم
 // للدعم والتدقيق بعد حذف TripEvent و TripMessage من الجداول الساخنة.
 model TripArchive {
-  id         String   @id @default(uuid())
-  tripId     String   @unique
-  trip       Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
-  passengerId String
-  driverId   String?
-  status     TripStatus
-  currency   String
-  fare       Decimal? @db.Decimal(12, 2)
-  completedAt DateTime?
-  tripCreatedAt DateTime
-  eventCount Int      @default(0)
-  messageCount Int    @default(0)
-  trackingCount Int   @default(0)
-  snapshotVersion Int @default(1)
-  snapshot   Json
-  archivedAt DateTime @default(now())
+  id              String     @id @default(uuid())
+  tripId          String     @unique
+  trip            Trip       @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  passengerId     String
+  driverId        String?
+  status          TripStatus
+  currency        String
+  fare            Decimal?   @db.Decimal(12, 2)
+  completedAt     DateTime?
+  tripCreatedAt   DateTime
+  eventCount      Int        @default(0)
+  messageCount    Int        @default(0)
+  trackingCount   Int        @default(0)
+  snapshotVersion Int        @default(1)
+  snapshot        Json
+  archivedAt      DateTime   @default(now())
 
   @@index([passengerId, completedAt])
   @@index([driverId, completedAt])

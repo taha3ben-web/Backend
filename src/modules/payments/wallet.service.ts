@@ -36,9 +36,21 @@ export class WalletService {
       }),
       this.prisma.ledgerEntry.count({ where }),
     ]);
+    const commissionCredit =
+      await this.financial.getCommissionCreditBalance(userId);
     return {
       ...balance,
       lockedBalance: locked.locked,
+      /**
+       * رصيد عمولة الكوبون — منفعة مخصّصة لتغطية عمولة رحلات قادمة.
+       * ليس رصيد دفع ولا ربحًا ولا قابلًا للسحب أو التحويل.
+       */
+      commissionCreditBalance: commissionCredit.commissionCredit,
+      /**
+       * ثابت في نموذج العمل: لا سحب ولا صرف نقدي لأي رصيد محفظة —
+       * لا لرصيد flaminGO Pay للراكب ولا لمحفظة عمولة السائق.
+       */
+      withdrawable: false as const,
       source: "LEDGER" as const,
       transactions: entries,
       total,

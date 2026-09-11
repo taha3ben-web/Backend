@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Post, Query, UseGuards } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Query,
+  UseGuards,
+} from "@nestjs/common";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
 import { RolesGuard } from "../../common/guards/roles.guard";
 import { PermissionsGuard } from "../../common/guards/permissions.guard";
@@ -45,6 +53,22 @@ export class FinancialController {
       status,
       referenceType,
       search,
+    );
+  }
+
+  /**
+   * لقطة مالية لسائق: محفظة العمولة، رصيد عمولة الكوبون، الأرباح المحاسبية،
+   * استحقاق عمولة المنصّة، وآخر حركات الدفتر — في رد واحد للدعم واللوحة.
+   */
+  @RequirePermissions("payments.read", "reports.read")
+  @Get("drivers/:driverId/snapshot")
+  driverSnapshot(
+    @Param("driverId") driverId: string,
+    @Query("currency") currency?: string,
+  ) {
+    return this.financial.driverFinancialSnapshot(
+      driverId,
+      currency?.toUpperCase(),
     );
   }
 

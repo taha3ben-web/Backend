@@ -84,6 +84,18 @@ export class MatchingController {
     );
   }
 
+  /**
+   * استعادة الحالة: الرحلة الفورية الجارية (إن وُجدت) + الحجوزات المجدولة.
+   *
+   * يُستدعى عند إقلاع التطبيق/تسجيل الدخول/العودة من الخلفية. مسار قراءة
+   * محض: لا يُنشئ رحلة ولا يغيّر حالة، فإعادة تشغيل التطبيق لا تُنتج رحلة
+   * ثانية. مُعرَّف **قبل** `@Get(":id")` كي لا تُلتقط كلمة "current" كمعرّف.
+   */
+  @Get("current")
+  current(@CurrentUser() user: AuthUser) {
+    return this.matching.currentTrip(user.userId);
+  }
+
   /** سجل رحلات الراكب (رحلاتي) */
   @Get("mine")
   myTrips(@CurrentUser() user: AuthUser, @Query() q: PaginationDto) {
