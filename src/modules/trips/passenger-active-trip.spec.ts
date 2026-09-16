@@ -12,20 +12,11 @@ import { AppException } from "../../common/api/app.exception";
 /**
  * قاعدة تزامن رحلات الراكب.
  *
- * ===== النموذج المطلوب =====
- *   حجز مستقبلي (SCHEDULED) + رحلة فورية الآن  = مسموح
- *   رحلة فورية + رحلة فورية أخرى               = مرفوض
- *   بعد الإلغاء/الإكمال                        = رحلة فورية جديدة مسموحة
- *
- * ===== ما تحاكيه الاختبارات =====
  * `FakeTripStore` يحاكي الفهرس الجزئي الفريد في PostgreSQL:
- *   CREATE UNIQUE INDEX "Trip_active_passenger_unique" ON "Trip"("passengerId")
- *     WHERE status IN ('SEARCHING','ACCEPTED','ARRIVING','IN_PROGRESS');
- * أي كتابة تخالفه ترمي خطأ P2002 بنفس شكل Prisma، فنُثبت أن المسار يترجمه
- * إلى `ACTIVE_TRIP_EXISTS` بدل HTTP 500. التحقّق على قاعدة بيانات حقيقية
- * مُنفَّذ عبر `scripts/verify-trip-concurrency.sql`.
+ * CREATE UNIQUE INDEX "Trip_one_active_per_passenger_idx"
+ * ON "Trip"("passengerId")
+ * WHERE status IN ('SEARCHING','ACCEPTED','ARRIVING','IN_PROGRESS').
  */
-
 interface FakeTrip {
   id: string;
   passengerId: string;
@@ -46,7 +37,6 @@ class FakeTripStore {
   private readonly rows: FakeTrip[] = [];
   private seq = 0;
 
-  /** يفرض الفهرس الجزئي: راكب واحد ← رحلة فورية واحدة. */
   private assertIndex(passengerId: string, status: TripStatus, id?: string) {
     if (!isActiveImmediateTripStatus(status)) return;
     const clash = this.rows.some(
@@ -76,7 +66,6 @@ class FakeTripStore {
     row.status = status;
   }
 
-  /** نظير `GET /rides/current`: الرحلة الفورية الجارية + الحجوزات. */
   currentTrip(passengerId: string): {
     current: FakeTrip | null;
     scheduled: FakeTrip[];
@@ -95,7 +84,6 @@ class FakeTripStore {
   }
 }
 
-/** نظير مسار الطلب: ينشئ الرحلة ويترجم خرق القيد إلى خطأ نطاق. */
 function requestImmediateRide(store: FakeTripStore, passengerId: string) {
   try {
     return store.create(passengerId, "SEARCHING");
@@ -116,7 +104,7 @@ describe("passenger trip uniqueness — status set", () => {
     ]);
   });
 
-  it("does NOT include SCHEDULED (a future booking must never block now)", () => {
+  it("does NOT include SCHEDULED", () => {
     expect(ACTIVE_IMMEDIATE_TRIP_STATUSES).not.toContain("SCHEDULED");
     expect(isActiveImmediateTripStatus("SCHEDULED")).toBe(false);
   });
@@ -160,18 +148,17 @@ describe("immediate ride requests", () => {
     expect(immediate.status).toBe("SEARCHING");
   });
 
-  it("7. scheduled + immediate coexist, and the scheduled one stays scheduled", () => {
+  it("7. scheduled + immediate coexist", () => {
     const store = new FakeTripStore();
     const booking = store.create(PASSENGER, "SCHEDULED");
     const immediate = requestImmediateRide(store, PASSENGER);
     const state = store.currentTrip(PASSENGER);
     expect(state.current?.id).toBe(immediate.id);
     expect(state.scheduled.map((t) => t.id)).toEqual([booking.id]);
-    // الحجز لا يُعاد كرحلة جارية إطلاقًا.
     expect(state.current?.id).not.toBe(booking.id);
   });
 
-  it("8-9. two simultaneous requests: exactly one wins, the loser gets a domain error", () => {
+  it("8-9. two simultaneous requests: exactly one wins", () => {
     const store = new FakeTripStore();
     const results = ["a", "b"].map(() => {
       try {
@@ -186,20 +173,16 @@ describe("immediate ride requests", () => {
     const error = (loser as { error: unknown }).error;
     expect(error).toBeInstanceOf(AppException);
     expect((error as AppException).code).toBe("ACTIVE_TRIP_EXISTS");
-    // ليس 500، وليست رسالة Prisma خام.
-    expect((error as AppException).getStatus()).not.toBe(500);
     expect((error as AppException).getStatus()).toBe(409);
   });
 
-  it("10. app restart returns the current immediate ride, not a new trip", () => {
+  it("10. app restart returns the current immediate ride", () => {
     const store = new FakeTripStore();
     const trip = requestImmediateRide(store, PASSENGER);
     store.setStatus(trip.id, "ACCEPTED");
-    // التطبيق أُغلق ثم أُعيد فتحه ⇒ يقرأ الحالة فقط.
     const restored = store.currentTrip(PASSENGER);
     expect(restored.current?.id).toBe(trip.id);
     expect(restored.current?.status).toBe("ACCEPTED");
-    // وطلب رحلة جديدة (لو حاول التطبيق) ما زال مرفوضًا.
     expect(() => requestImmediateRide(store, PASSENGER)).toThrow(AppException);
   });
 
@@ -227,13 +210,19 @@ describe("immediate ride requests", () => {
   });
 
   it("activating a scheduled trip is blocked while an immediate ride is live", () => {
-    // تفعيل الحجز يحوّله إلى SEARCHING، وهي حالة يحجبها الفهرس.
-    // السلوك المطلوب: الفشل مرئي في القاعدة بدل رحلتين فوريتين للراكب.
     const store = new FakeTripStore();
     const booking = store.create(PASSENGER, "SCHEDULED");
     requestImmediateRide(store, PASSENGER);
     expect(() => store.setStatus(booking.id, "SEARCHING")).toThrow(
-      /Trip_active_passenger_unique/,
+      /Trip_one_active_per_passenger_idx/,
     );
+  });
+
+  it("rethrows unrelated P2002 errors", () => {
+    const unrelated = {
+      code: "P2002",
+      meta: { target: "CouponRedemption_tripId_key" },
+    };
+    expect(() => rethrowAsActiveTripConflict(unrelated)).toThrow(unrelated);
   });
 });
