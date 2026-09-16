@@ -14,10 +14,12 @@ import { AppException } from "./app.exception";
 
 /**
  * اسم الفهرس الجزئي الفريد الذي يفرض «رحلة فورية واحدة لكل راكب» في
- * قاعدة البيانات. مُعرَّف في مايغريشن 20260912090100 ولا يمكن التعبير عنه
+ * قاعدة البيانات. مُعرَّف في مايغريشن
+ * 20260910060000_trip_active_passenger_uniqueness ولا يمكن التعبير عنه
  * في schema.prisma، لذلك الاسم مركزي هنا بدل تكراره نصًّا في كل مسار.
  */
-export const ACTIVE_TRIP_UNIQUE_INDEX = "Trip_active_passenger_unique";
+export const ACTIVE_TRIP_UNIQUE_INDEX =
+  "Trip_one_active_per_passenger_idx";
 
 interface PrismaLikeError {
   code?: unknown;
@@ -34,10 +36,9 @@ export function isUniqueConstraintError(error: unknown): boolean {
 /**
  * هل خرق التفرّد يتعلّق بالقيد المذكور؟
  *
- * Prisma يضع اسم الهدف في `meta.target` كمصفوفة أعمدة للقيود المعروفة في
- * المخطط، وكاسم الفهرس نصًّا للفهارس المُعرّفة في القاعدة فقط (حالتنا).
- * نفحص التمثيل النصي للـmeta وللرسالة معًا حتى لا نعتمد على شكل واحد
- * قد يتغيّر بين إصدارات Prisma.
+ * الفهرس الجزئي غير ممثل في Prisma schema، لذلك نطابق اسمه الصريح فقط
+ * في meta أو الرسالة. لا نطابق passengerId وحده، لأن ذلك قد يحوّل قيدًا
+ * مختلفًا مستقبلًا إلى ACTIVE_TRIP_EXISTS عن طريق الخطأ.
  */
 export function isUniqueConstraintOn(error: unknown, target: string): boolean {
   if (!isUniqueConstraintError(error)) return false;
@@ -55,22 +56,10 @@ export function isUniqueConstraintOn(error: unknown, target: string): boolean {
 }
 
 /**
- * يحوّل خرق قيد «الرحلة الفورية الواحدة» إلى `ACTIVE_TRIP_EXISTS`.
- *
- * يُستدعى في كل مسار قد يُنشئ رحلة فورية (طلب رحلة، قبول عرض سعر). أي خطأ
- * آخر يُعاد رميه كما هو دون تغيير سلوك أو إخفاء سبب.
- *
- * لماذا نقبل شكلين للهدف: خطأ PostgreSQL الأصلي يقول
- * `duplicate key value violates unique constraint "Trip_active_passenger_unique"`،
- * لكن Prisma قد يُعيد صياغته إلى `meta.target` كاسم القيد أو كقائمة أعمدة
- * (`passengerId`) حسب الإصدار. لا يوجد أي قيد تفرّد آخر على `Trip` يشمل
- * `passengerId`، فمطابقة أيّ الشكلين آمنة ولا تخطئ في تصنيف خطأ آخر
- * (مثل خرق `CouponRedemption.tripId` الذي يظهر بهدف `tripId`).
+ * يحوّل فقط خرق فهرس «الرحلة الفورية الواحدة» المعروف إلى
+ * ACTIVE_TRIP_EXISTS. أي P2002 آخر يُعاد رميه كما هو.
  */
-export const ACTIVE_TRIP_UNIQUE_TARGETS = [
-  ACTIVE_TRIP_UNIQUE_INDEX,
-  "passengerId",
-] as const;
+export const ACTIVE_TRIP_UNIQUE_TARGETS = [ACTIVE_TRIP_UNIQUE_INDEX] as const;
 
 export function rethrowAsActiveTripConflict(
   error: unknown,
