@@ -10,6 +10,7 @@ import {
 } from "@nestjs/common";
 import { JwtAuthGuard } from "../../common/guards/jwt-auth.guard";
 import { RolesGuard } from "../../common/guards/roles.guard";
+import { Roles } from "../../common/decorators/roles.decorator";
 import {
   CurrentUser,
   AuthUser,
@@ -42,8 +43,10 @@ export class ScheduledTripsController {
     return this.service.listUpcoming(passengerId);
   }
 
+  /** إلغاء رحلة مجدولة قبل تفعيلها — للراكب المالك فقط. */
+  @Roles("PASSENGER")
   @Delete(":id")
-  cancel(@Param("id") id: string) {
-    return this.service.cancel(id);
+  cancel(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.service.cancel(id, user.userId);
   }
 }
