@@ -3,6 +3,7 @@ import { Cron, CronExpression } from "@nestjs/schedule";
 import { FareOffer, FareQuote, Prisma } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import { AppException } from "../../common/api/app.exception";
+import { rethrowAsActiveTripConflict } from "../../common/api/prisma-error.util";
 import { round2 } from "../../common/money.util";
 import { RealtimeGateway } from "../realtime/realtime.gateway";
 import { NotificationsService } from "../notifications/notifications.service";
@@ -16,7 +17,6 @@ import {
   STORED_MEDIA_READ_TTL_MINUTES,
 } from "../storage/storage.service";
 import { DistributedLockService } from "../../common/infra/distributed-lock.service";
-import { rethrowAsActiveTripConflict } from "../../common/api/prisma-error.util";
 import { ACTIVE_IMMEDIATE_TRIP_STATUSES } from "../trips/trip-transitions";
 import { FinancialService } from "../financial/financial.service";
 
@@ -31,16 +31,13 @@ type DriverBidProfile = Prisma.DriverGetPayload<{
 /**
  * خدمة عروض السائقين المضادة (FareOffer — مزايدة inDrive).
  * السائق يقدّم عرضًا مضادًا على FareQuote مفتوح، ثم يقبل الراكب عرضًا واحدًا
- * فتُرفض بقية العروض المعلّقة ذريًّا. لا توجد حركة مالية هنا (قبل-الرحلة).
+ * فتُرفض بقية العروض المعلّقة ذريًّا. لا توجد حركة مالية هنا (قبل-الرحلة).
  */
 @Injectable()
 export class FareOffersService {
   private readonly logger = new Logger(FareOffersService.name);
-
-  /** المدة الافتراضية لصلاحية عرض السائق (نافذة مزايدة قصيرة كـ inDrive). */
   private static readonly OFFER_TTL_MS = 120_000;
 
-  /** يحسب لحظة انتهاء صلاحية العرض دون تجاوز صلاحية عرض السعر نفسه. */
   private computeOfferExpiry(quote: FareQuote): Date {
     const ttl = Date.now() + FareOffersService.OFFER_TTL_MS;
     return new Date(Math.min(ttl, quote.expiresAt.getTime()));
@@ -49,16 +46,13 @@ export class FareOffersService {
   constructor(
     private readonly cronLock: DistributedLockService,
     private readonly prisma: PrismaService,
-    // تبعية دائرية عبر RealtimeGateway — نؤجّل الحقن بـ forwardRef.
     @Inject(forwardRef(() => RealtimeGateway))
     private readonly realtime: RealtimeGateway,
     private readonly notifications: NotificationsService,
     private readonly storage: StorageService,
-    // تغطية عمولة السائق قبل الإسناد (نفس فحص محرك المطابقة).
     private readonly financial: FinancialService,
   ) {}
 
-  /** يحلّ userId لسائق واحد (لغرفة user:{id} في الـ WebSocket). */
   private async resolveDriverUserId(driverId: string): Promise<string | null> {
     const d = await this.prisma.driver.findUnique({
       where: { id: driverId },
@@ -67,7 +61,6 @@ export class FareOffersService {
     return d?.userId ?? null;
   }
 
-  /** يحلّ userIds لمجموعة سائقين دفعة واحدة (Driver.id → User.id). */
   private async resolveDriverUserIds(
     driverIds: string[],
   ): Promise<Map<string, string>> {
@@ -80,7 +73,6 @@ export class FareOffersService {
     return new Map(drivers.map((d) => [d.id, d.userId]));
   }
 
-  /** بثّ حدث لمستخدم بأفضل-جهد؛ فشل الـ WebSocket لا يُفشل عملية REST. */
   private notify(userId: string | null, event: string, payload: unknown): void {
     if (!userId) return;
     try {
@@ -92,7 +84,6 @@ export class FareOffersService {
     }
   }
 
-  /** إشعار Push بأفضل-جهد؛ يصل حتى والتطبيق مغلق (لا يُفشل عملية REST). */
   private notifyPush(
     userId: string | null,
     title: string,
@@ -107,7 +98,6 @@ export class FareOffersService {
       );
   }
 
-  /** يحلّ سجل السائق من userId (Driver.id متوافق مع Trip.driverId). */
   private async requireDriver(userId: string): Promise<DriverBidProfile> {
     const driver = await this.prisma.driver.findUnique({
       where: { userId },
@@ -146,7 +136,6 @@ export class FareOffersService {
     );
   }
 
-  /** السائق: طلبات تفاوض مفتوحة تناسب المدينة والمركبة المعتمدتين. */
   async listDriverOpportunities(userId: string, limit = 20) {
     const driver = await this.requireDriver(userId);
     this.assertDriverCanBid(driver);
@@ -209,7 +198,6 @@ export class FareOffersService {
     }));
   }
 
-  /** يحمّل عرض سعر يخصّ الراكب أو يرمي خطأ عدم وجود. */
   private async requireQuoteOwned(
     passengerUserId: string,
     quoteId: string,
@@ -230,7 +218,6 @@ export class FareOffersService {
     );
   }
 
-  /** يتأكد أن العرض مفتوح للمزايدة وإلا يرمي خطأً مناسبًا. */
   private assertQuoteOpen(quote: FareQuote): void {
     if (
       (quote.status === "QUOTED" || quote.status === "PROPOSED") &&
@@ -243,7 +230,6 @@ export class FareOffersService {
     }
   }
 
-  /** السائق: تقديم عرض مضاد (أو تحديث عرضه المعلّق الحالي). */
   async createOffer(userId: string, dto: CreateFareOfferDto) {
     const driver = await this.requireDriver(userId);
     this.assertDriverCanBid(driver);
@@ -285,7 +271,6 @@ export class FareOffersService {
         },
       });
       const payload = this.serialize(updated);
-      // بثّ فوري للراكب: عرض سائق مُحدَّث.
       this.notify(quote.passengerId, "fare:offer", {
         quoteId: quote.id,
         offer: payload,
@@ -307,7 +292,6 @@ export class FareOffersService {
       },
     });
     const payload = this.serialize(created);
-    // بثّ فوري للراكب: عرض سائق جديد.
     this.notify(quote.passengerId, "fare:offer", {
       quoteId: quote.id,
       offer: payload,
@@ -322,7 +306,6 @@ export class FareOffersService {
     return payload;
   }
 
-  /** السائق: قائمة عروضه الأحدث. */
   async listDriverOffers(userId: string, limit = 30) {
     const driver = await this.requireDriver(userId);
     const offers = await this.prisma.fareOffer.findMany({
@@ -333,7 +316,6 @@ export class FareOffersService {
     return offers.map((o) => this.serialize(o));
   }
 
-  /** السائق: سحب عرضه المعلّق. */
   async withdrawOffer(userId: string, offerId: string) {
     const driver = await this.requireDriver(userId);
     const offer = await this.prisma.fareOffer.findUnique({
@@ -349,7 +331,6 @@ export class FareOffersService {
       where: { id: offer.id },
       data: { status: "WITHDRAWN", respondedAt: new Date() },
     });
-    // بثّ فوري للراكب: سحب السائق لعرضه.
     const owner = await this.prisma.fareQuote.findUnique({
       where: { id: offer.fareQuoteId },
       select: { passengerId: true },
@@ -361,7 +342,6 @@ export class FareOffersService {
     return this.serialize(updated);
   }
 
-  /** الراكب: عرض العروض الواردة على عرض السعر (مع ملخّص السائق). */
   async listQuoteOffers(passengerUserId: string, quoteId: string) {
     await this.requireQuoteOwned(passengerUserId, quoteId);
     const offers = await this.prisma.fareOffer.findMany({
@@ -401,7 +381,6 @@ export class FareOffersService {
             ? {
                 id: d.id,
                 name: d.user?.name ?? null,
-                // صورة السائق مخزّنة كمفتاح؛ تُحوّل لرابط عند عرض العروض للراكب.
                 avatarUrl: await this.storage.resolveStoredUrl(
                   d.user?.avatarUrl ?? null,
                   STORED_MEDIA_READ_TTL_MINUTES,
@@ -416,19 +395,11 @@ export class FareOffersService {
     );
   }
 
-  /**
-   * الراكب: قبول عرض سائق — يُنشئ رحلة (Trip) بالسعر المتفَق، ويقفل عرض السعر،
-   * ويرفض بقية العروض المعلّقة — كلّه ذريًّا داخل معاملة واحدة.
-   * لا توجد حركة Ledger هنا: الرحلة تُنشأ بحالة ACCEPTED، والتسوية المالية
-   * تبقى عند إكمال الرحلة (settleTrip) معتمدة على trip.fare + commissionPct.
-   */
   async acceptOffer(passengerUserId: string, quoteId: string, offerId: string) {
     const quote = await this.requireQuoteOwned(passengerUserId, quoteId);
     this.assertQuoteOpen(quote);
-    if (quote.tripId) {
-      // عرض السعر حُوّل بالفعل إلى رحلة.
-      throw new AppException("FARE_QUOTE_INVALID_STATE");
-    }
+    if (quote.tripId) throw new AppException("FARE_QUOTE_INVALID_STATE");
+
     const offer = await this.prisma.fareOffer.findUnique({
       where: { id: offerId },
     });
@@ -442,10 +413,6 @@ export class FareOffersService {
       throw new AppException("FARE_OFFER_EXPIRED");
     }
 
-    // المرحلة 7 (حماية من التلاعب): إعادة التحقق من أن مبلغ العرض ما زال داخل
-    // نطاق التفاوض الذي أصدره الخادم [minFare, maxFare] لحظة القبول أيضًا،
-    // وليس عند إنشاء العرض فقط. مصدر الحقيقة هو حدود عرض السعر المحفوظة
-    // في قاعدة البيانات والتي ولّدها محرك التسعير، لا أي رقم من العميل.
     const offeredAmount = round2(Number(offer.amount));
     const bandMin = round2(Number(quote.minFare));
     const bandMax = round2(Number(quote.maxFare));
@@ -460,10 +427,6 @@ export class FareOffersService {
       });
     }
 
-    // قاعدة التفرّد: رحلة فورية واحدة لكل راكب. SCHEDULED مستثناة عمدًا
-    // (انظر ACTIVE_IMMEDIATE_TRIP_STATUSES). هذا الفحص لطيف فقط؛ السلطة
-    // النهائية هي الفهرس الجزئي Trip_active_passenger_unique في القاعدة،
-    // والطلب الخاسر في التسابق يُترجَم إلى نفس الكود ACTIVE_TRIP_EXISTS.
     const activeTrip = await this.prisma.trip.findFirst({
       where: {
         passengerId: quote.passengerId,
@@ -480,118 +443,124 @@ export class FareOffersService {
     const now = new Date();
     const result = await this.prisma
       .$transaction(async (client) => {
-      // 1) مطالبة ذريّة بالسائق (ONLINE ←→ ON_TRIP) لمنع الإسناد المزدوج.
-      const claimed = await client.driver.updateMany({
-        where: { id: offer.driverId, availability: "ONLINE" },
-        data: { availability: "ON_TRIP" },
-      });
-      if (claimed.count === 0) {
-        throw new AppException("FARE_OFFER_DRIVER_UNAVAILABLE");
-      }
+        const wonQuote = await client.fareQuote.updateMany({
+          where: {
+            id: quoteId,
+            passengerId: passengerUserId,
+            status: { in: ["QUOTED", "PROPOSED"] },
+            tripId: null,
+          },
+          data: {
+            status: "ACCEPTED",
+            proposedFare: offer.amount,
+            proposedAt: now,
+          },
+        });
+        if (wonQuote.count === 0) {
+          throw new AppException("FARE_QUOTE_INVALID_STATE");
+        }
 
-      // 1.b) تغطية عمولة السائق قبل الإسناد.
-      //
-      // الرحلة تُنشأ هنا بحالة ACCEPTED مباشرةً (السائق مُسنَد فورًا)، فهذه
-      // هي اللحظة المكافئة لـassignDriver في محرك المطابقة. بدون هذا الفحص
-      // كان مسار التفاوض ثغرةً تتجاوز شرط العمولة مسبقة الدفع بالكامل.
-      // الفحص داخل نفس المعاملة التي طالبت بالسائق ذريًا، فلا تسابق.
-      const driverUser = await client.driver.findUnique({
-        where: { id: offer.driverId },
-        select: { userId: true },
-      });
-      if (driverUser) {
-        const grossFare = round2(Number(offer.amount));
+        const wonOffer = await client.fareOffer.updateMany({
+          where: { id: offer.id, fareQuoteId: quoteId, status: "PENDING" },
+          data: { status: "ACCEPTED", respondedAt: now },
+        });
+        if (wonOffer.count === 0) {
+          throw new AppException("FARE_OFFER_INVALID_STATE");
+        }
+
+        const claimed = await client.driver.updateMany({
+          where: { id: offer.driverId, availability: "ONLINE" },
+          data: { availability: "ON_TRIP" },
+        });
+        if (claimed.count === 0) {
+          throw new AppException("FARE_OFFER_DRIVER_UNAVAILABLE");
+        }
+
+        const driverUser = await client.driver.findUnique({
+          where: { id: offer.driverId },
+          select: { userId: true },
+        });
+        if (!driverUser) throw new AppException("DRIVER_NOT_FOUND");
+
         await this.financial.assertDriverCommissionCoverage(client, {
           driverUserId: driverUser.userId,
           currency: quote.currency,
           commissionDue: round2(
-            (grossFare * Number(quote.commissionPct)) / 100,
+            (offeredAmount * Number(quote.commissionPct)) / 100,
           ),
-          // رحلة التفاوض تُنشأ بوسيلة الدفع الافتراضية (نقدًا)، فلا يوجد
-          // تحصيل إلكتروني تُقتطع منه العمولة: التغطية المسبقة مطلوبة كاملة.
           electronicallyCollected: 0,
           tripId: undefined,
         });
-      }
 
-      // 2) إنشاء الرحلة بحالة ACCEPTED وبالسعر المتفَق (عرض السائق).
-      const trip = await client.trip.create({
-        data: {
-          passengerId: quote.passengerId,
-          driverId: offer.driverId,
-          status: "ACCEPTED",
-          rideClass: quote.rideClass,
-          vehicleTypeId: quote.vehicleTypeId,
-          pickupLat: quote.pickupLat,
-          pickupLng: quote.pickupLng,
-          pickupAddress: quote.pickupAddress,
-          destLat: quote.destLat,
-          destLng: quote.destLng,
-          destAddress: quote.destAddress,
-          distanceKm: quote.distanceKm,
-          durationSec: quote.durationSec,
-          fare: offer.amount,
-          // لقطة العمولة تنتقل كما هي من عرض السعر: ما وافق عليه الطرفان.
-          commissionPct: quote.commissionPct,
-          commissionRuleId: quote.commissionRuleId,
-          currency: quote.currency,
-          cityId: quote.cityId,
-          events: {
-            create: [
-              {
-                type: "trip:requested",
-                actor: "PASSENGER",
-                meta: { source: "fare_negotiation", fareQuoteId: quote.id },
-              },
-              {
-                type: "trip:accepted",
-                actor: "PASSENGER",
-                meta: {
-                  fareOfferId: offer.id,
-                  driverId: offer.driverId,
-                  amount: Number(offer.amount),
+        const trip = await client.trip.create({
+          data: {
+            passengerId: quote.passengerId,
+            driverId: offer.driverId,
+            status: "ACCEPTED",
+            rideClass: quote.rideClass,
+            vehicleTypeId: quote.vehicleTypeId,
+            pickupLat: quote.pickupLat,
+            pickupLng: quote.pickupLng,
+            pickupAddress: quote.pickupAddress,
+            destLat: quote.destLat,
+            destLng: quote.destLng,
+            destAddress: quote.destAddress,
+            distanceKm: quote.distanceKm,
+            durationSec: quote.durationSec,
+            fare: offer.amount,
+            commissionPct: quote.commissionPct,
+            commissionRuleId: quote.commissionRuleId,
+            currency: quote.currency,
+            cityId: quote.cityId,
+            events: {
+              create: [
+                {
+                  type: "trip:requested",
+                  actor: "PASSENGER",
+                  meta: { source: "fare_negotiation", fareQuoteId: quote.id },
                 },
-              },
-            ],
+                {
+                  type: "trip:accepted",
+                  actor: "PASSENGER",
+                  meta: {
+                    fareOfferId: offer.id,
+                    driverId: offer.driverId,
+                    amount: Number(offer.amount),
+                  },
+                },
+              ],
+            },
           },
-        },
-      });
+        });
 
-      // 3) تثبيت حالات العروض وعرض السعر + ربط tripId.
-      const accepted = await client.fareOffer.update({
-        where: { id: offer.id },
-        data: { status: "ACCEPTED", respondedAt: now },
-      });
-      // العروض المعلّقة الأخرى (ل��خطار أصحابها بالرفض بعد الالتزام).
-      const siblings = await client.fareOffer.findMany({
-        where: {
-          fareQuoteId: quoteId,
-          status: "PENDING",
-          id: { not: offer.id },
-        },
-        select: { id: true, driverId: true },
-      });
-      await client.fareOffer.updateMany({
-        where: {
-          fareQuoteId: quoteId,
-          status: "PENDING",
-          id: { not: offer.id },
-        },
-        data: { status: "REJECTED", respondedAt: now },
-      });
-      await client.fareQuote.update({
-        where: { id: quoteId },
-        data: {
-          status: "ACCEPTED",
-          proposedFare: offer.amount,
-          proposedAt: now,
-          tripId: trip.id,
-        },
-      });
-      return { trip, accepted, siblings };
+        await client.fareQuote.update({
+          where: { id: quoteId },
+          data: { tripId: trip.id },
+        });
+
+        const siblings = await client.fareOffer.findMany({
+          where: {
+            fareQuoteId: quoteId,
+            status: "PENDING",
+            id: { not: offer.id },
+          },
+          select: { id: true, driverId: true },
+        });
+        await client.fareOffer.updateMany({
+          where: {
+            fareQuoteId: quoteId,
+            status: "PENDING",
+            id: { not: offer.id },
+          },
+          data: { status: "REJECTED", respondedAt: now },
+        });
+
+        const accepted = await client.fareOffer.findUnique({
+          where: { id: offer.id },
+        });
+        if (!accepted) throw new AppException("FARE_OFFER_NOT_FOUND");
+        return { trip, accepted, siblings };
       })
-      // نفس ترجمة محرك المطابقة: الطلب الخاسر في التسابق على
-      // Trip_active_passenger_unique يعود ACTIVE_TRIP_EXISTS لا HTTP 500.
       .catch((error: unknown) =>
         rethrowAsActiveTripConflict(error, {
           passengerId: quote.passengerId,
@@ -599,7 +568,6 @@ export class FareOffersService {
         }),
       );
 
-    // بثّ فوري بعد الالتزام (أفضل-جهد).
     const { trip, accepted, siblings } = result;
     const winnerUserId = await this.resolveDriverUserId(offer.driverId);
     this.notify(winnerUserId, "fare:offer_accepted", {
@@ -660,12 +628,9 @@ export class FareOffersService {
     };
   }
 
-  /** الراكب: رفض عرض سائق معيّن. */
   async rejectOffer(passengerUserId: string, quoteId: string, offerId: string) {
     await this.requireQuoteOwned(passengerUserId, quoteId);
-    const offer = await this.prisma.fareOffer.findUnique({
-      where: { id: offerId },
-    });
+    const offer = await this.prisma.fareOffer.findUnique({ where: { id: offerId } });
     if (!offer || offer.fareQuoteId !== quoteId) {
       throw new AppException("FARE_OFFER_NOT_FOUND");
     }
@@ -676,7 +641,6 @@ export class FareOffersService {
       where: { id: offer.id },
       data: { status: "REJECTED", respondedAt: new Date() },
     });
-    // بثّ فوري للسائق: رفض الراكب لعرضه.
     const driverUserId = await this.resolveDriverUserId(offer.driverId);
     this.notify(driverUserId, "fare:offer_rejected", {
       quoteId,
@@ -692,7 +656,6 @@ export class FareOffersService {
     return this.serialize(updated);
   }
 
-  /** اللوحة (STAFF): قائمة العروض مع مرشّحات. */
   async adminList(query: AdminFareOfferQueryDto) {
     const where: Prisma.FareOfferWhereInput = {};
     if (query.status) where.status = query.status;
@@ -706,20 +669,14 @@ export class FareOffersService {
     return offers.map((o) => this.serialize(o));
   }
 
-  /** اللوحة (STAFF): تفاصيل عرض. */
   async adminGet(id: string) {
     const offer = await this.prisma.fareOffer.findUnique({ where: { id } });
     if (!offer) throw new AppException("FARE_OFFER_NOT_FOUND");
     return this.serialize(offer);
   }
 
-  /**
-   * مهمة دورية: تُنهي صلاحية العروض المعلّقة التي تجاوزت expiresAt وتبثّ
-   * الحدث للطرفين (الراكب والسائق). أفضل-جهد: فشل البثّ لا يُفشل التحديث.
-   */
   @Cron(CronExpression.EVERY_30_SECONDS)
   async expirePendingOffers(): Promise<void> {
-    // قفل موزّع: مع أكثر من نسخة تعمل يجب أن تنفّذ واحدة فقط كل دورة.
     await this.cronLock.runExclusive(
       "cron:fare-offers-expire",
       () => this.expirePendingOffersTask(),
@@ -727,7 +684,6 @@ export class FareOffersService {
     );
   }
 
-  /** المنطق الفعلي للمهمة بعد الحصول على القفل. */
   async expirePendingOffersTask(): Promise<void> {
     const now = new Date();
     const expired = await this.prisma.fareOffer.findMany({
@@ -743,7 +699,6 @@ export class FareOffersService {
     });
     if (!res.count) return;
 
-    // بثّ فوري للطرفين (أفضل-جهد).
     const quoteIds = [...new Set(expired.map((o) => o.fareQuoteId))];
     const quotes = await this.prisma.fareQuote.findMany({
       where: { id: { in: quoteIds } },
