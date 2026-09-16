@@ -4,7 +4,6 @@ import { PrismaService } from "../../prisma/prisma.service";
 import { PaginationDto } from "../../common/dto/pagination.dto";
 import { FinancialService } from "../financial/financial.service";
 import { round2 } from "../../common/money.util";
-import { TracerService } from "../../common/observability/tracer.service";
 import { AppException } from "../../common/api/app.exception";
 import { DistributedLockService } from "../../common/infra/distributed-lock.service";
 import {
@@ -17,19 +16,8 @@ export class WithdrawalsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly financial: FinancialService,
-    @Optional() private readonly tracer?: TracerService,
     @Optional() private readonly lock?: DistributedLockService,
   ) {}
-
-  private withTrace<T>(
-    name: string,
-    attributes: Record<string, unknown>,
-    fn: () => Promise<T>,
-  ): Promise<T> {
-    return this.tracer
-      ? this.tracer.withSpan(name, async () => fn(), attributes)
-      : fn();
-  }
 
   private withTransitionLock<T>(id: string, fn: () => Promise<T>): Promise<T> {
     return this.lock
