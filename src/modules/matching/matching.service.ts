@@ -171,7 +171,7 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
         // SCHEDULED غير موجودة في ACTIVE_IMMEDIATE_TRIP_STATUSES عمدًا:
         // حجز الأسبوع القادم لا يحجب رحلة الآن. هذا الفحص "لطيف" (يُرجع
         // رسالة واضحة قبل أي عمل)، لكن **السلطة النهائية هي قاعدة البيانات**
-        // عبر الفهرس الجزئي Trip_active_passenger_unique: طلبان متزامنان
+        // عبر الفهرس الجزئي Trip_one_active_per_passenger_idx: طلبان متزامنان
         // يمرّان من هنا معًا، وأحدهما يخسر القيد ويُترجَم إلى نفس الكود
         // ACTIVE_TRIP_EXISTS (انظر rethrowAsActiveTripConflict أدناه).
         const active = await this.prisma.trip.findFirst({
@@ -343,7 +343,7 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
             }
             return created;
           })
-          // الطلب الخاسر في التسابق يخرق Trip_active_passenger_unique.
+          // الطلب الخاسر يخرق Trip_one_active_per_passenger_idx.
           // بدون هذه الترجمة كان يعود HTTP 500 برسالة Prisma خام؛ الآن يعود
           // ACTIVE_TRIP_EXISTS (409) مترجَمًا حسب Accept-Language.
           .catch((error: unknown) =>
@@ -411,15 +411,18 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
           select: { status: true, passengerId: true },
         });
         if (current && current.status === "SEARCHING") {
-          await this.releaseCoupon(tripId);
-          await this.prisma.trip.update({
-            where: { id: tripId },
+          const cancelled = await this.prisma.trip.updateMany({
+            where: { id: tripId, status: "SEARCHING" },
             data: {
               status: "CANCELLED",
               cancelReason: "لا يوجد سائق متاح",
               cancelledBy: "SYSTEM",
-              events: { create: { type: "trip:no_drivers", actor: "SYSTEM" } },
             },
+          });
+          if (cancelled.count === 0) return;
+          await this.releaseCoupon(tripId);
+          await this.prisma.tripEvent.create({
+            data: { tripId, type: "trip:no_drivers", actor: "SYSTEM" },
           });
           this.realtime.emitToUser(current.passengerId, "ride:no_drivers", {
             tripId,
@@ -867,17 +870,20 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
         });
 
         // 3) عيّن السائق للرحلة
-        const trip = await client.trip.update({
-          where: { id: tripId },
+        const accepted = await client.trip.updateMany({
+          where: { id: tripId, status: "SEARCHING" },
           data: {
             status: "ACCEPTED",
             driverId: driver.id,
             acceptedAt: new Date(),
-            events: {
-              create: { type: "trip:accepted", actor: "DRIVER" },
-            },
           },
         });
+        if (accepted.count === 0) throw new Error("trip-not-searching");
+        await client.tripEvent.create({
+          data: { tripId, type: "trip:accepted", actor: "DRIVER" },
+        });
+        const trip = await client.trip.findUnique({ where: { id: tripId } });
+        if (!trip) throw new Error("trip-not-searching");
         return trip;
       });
 
@@ -974,15 +980,21 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
       throw new BadRequestException("لا يمكن إلغاء البحث في هذه الحالة");
     }
     this.cancelled.add(tripId);
-    await this.releaseCoupon(tripId);
-    await this.prisma.trip.update({
-      where: { id: tripId },
+    const cancelled = await this.prisma.trip.updateMany({
+      where: { id: tripId, passengerId, status: "SEARCHING" },
       data: {
         status: "CANCELLED",
         cancelReason: "ألغاه الراكب",
         cancelledBy: "PASSENGER",
-        events: { create: { type: "trip:cancelled", actor: "PASSENGER" } },
       },
+    });
+    if (cancelled.count === 0) {
+      this.cancelled.delete(tripId);
+      throw new BadRequestException("لا يمكن إلغاء البحث في هذه الحالة");
+    }
+    await this.releaseCoupon(tripId);
+    await this.prisma.tripEvent.create({
+      data: { tripId, type: "trip:cancelled", actor: "PASSENGER" },
     });
     this.realtime.emitTripStatus(tripId, "CANCELLED");
   }
@@ -1029,17 +1041,24 @@ export class MatchingService implements OnModuleInit, OnModuleDestroy {
     // بعد القبول وقبل بدء الرحلة
     if (trip.status === "ACCEPTED" || trip.status === "ARRIVING") {
       const statusAtCancel = trip.status;
-      await this.releaseCoupon(tripId);
-      await this.prisma.trip.update({
-        where: { id: tripId },
+      const cancelled = await this.prisma.trip.updateMany({
+        where: {
+          id: tripId,
+          passengerId: passengerUserId,
+          status: { in: ["ACCEPTED", "ARRIVING"] },
+        },
         data: {
           status: "CANCELLED",
           cancelReason: reason ?? "ألغاه الراكب",
           cancelledBy: "PASSENGER",
-          events: {
-            create: { type: "trip:cancelled", actor: "PASSENGER" },
-          },
         },
+      });
+      if (cancelled.count === 0) {
+        throw new BadRequestException("لا يمكن إلغاء الرحلة في هذه الحالة");
+      }
+      await this.releaseCoupon(tripId);
+      await this.prisma.tripEvent.create({
+        data: { tripId, type: "trip:cancelled", actor: "PASSENGER" },
       });
       // تحرير السائق: إتاحته من جديد ومسح ارتباطه بالرحلة في Redis
       if (trip.driverId) {

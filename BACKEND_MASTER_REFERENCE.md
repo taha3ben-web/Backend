@@ -678,7 +678,7 @@ immediate ride            +  another immediate    = REJECTED
 after cancellation/completion                     = a new immediate ride is allowed
 ```
 
-- The authority is the **database**, not application code: partial unique index `Trip_active_passenger_unique` on `Trip("passengerId") WHERE status IN ('SEARCHING','ACCEPTED','ARRIVING','IN_PROGRESS')`, created by migration `20260912090100_trip_active_passenger_unique`.
+- The authority is the **database**, not application code: partial unique index `Trip_one_active_per_passenger_idx` on `Trip("passengerId") WHERE status IN ('SEARCHING','ACCEPTED','ARRIVING','IN_PROGRESS')`, created by migration `20260910060000_trip_active_passenger_uniqueness`.
 - `SCHEDULED` is **deliberately excluded**, so a future booking never blocks a ride now. Terminal statuses are excluded too, so cancelling or completing frees the passenger immediately.
 - Prisma **cannot** express a partial unique index, so it lives in raw SQL (same precedent as the `TripTracking` partitioning migration, Section 11). `schema.prisma` carries a comment on `model Trip` naming that migration — **do not remove the index.** The single source of truth for the status list in code is `ACTIVE_IMMEDIATE_TRIP_STATUSES` in `trip-transitions.ts`; changing it requires a matching migration.
 - The migration **preflights and aborts** if any passenger already holds more than one active trip, naming the offending passengers and their counts. It never mutates trip data — the fix is an operational action (cancel or complete) from the Dashboard, then re-run.
@@ -874,7 +874,7 @@ Branch `claude/business-model-corrections-3d827195550380b09fd400a9575a9bbd`, PR 
 - `WalletTopUp` / `WalletTopUpEvent` + `WalletTopUpsService`; `POST /api/wallet/topups`, `GET /api/wallet/topups`, `GET /api/admin/wallet/topups`, `POST /api/admin/wallet/topups/:id/capture`.
 - Ledger accounts `USER:<driver>:<CUR>:COMMISSION_CREDIT`, `PLATFORM:DRIVER_PAYABLE`, `PLATFORM:COUPON_SUBSIDY`, `PLATFORM:TOPUP_CLEARING`.
 - `GET /api/rides/current` (app state restoration) and `GET /api/financial/drivers/:driverId/snapshot`.
-- Partial unique index `Trip_active_passenger_unique` with a non-mutating preflight.
+- Partial unique index `Trip_one_active_per_passenger_idx` with a non-mutating preflight.
 - `src/common/api/prisma-error.util.ts` — maps `P2002` on that index to `ACTIVE_TRIP_EXISTS`.
 - `scripts/verify-trip-concurrency.sql`, `scripts/verify-settlement-accounting.sql`.
 - 10 new Jest specs (see Section 31 and the PR).
@@ -911,7 +911,7 @@ Branch `claude/business-model-corrections-3d827195550380b09fd400a9575a9bbd`, PR 
 
 **Database changes** — two additive migrations; no column or row dropped, no data mutated, no `db push`, no reset:
 - `20260912090000_commission_rules_and_wallet_topups` — drop the `commissionPct` default on `Trip`, `FareQuote` and `VehiclePricingRule` (and make the last one nullable); add `Trip.commissionRuleId` (+ index + FK) and `FareQuote.commissionRuleId`; create `CommissionRule`, `WalletTopUp`, `WalletTopUpEvent` and the `WalletTopUpStatus` enum. **Inserts no rows** — a seeded percentage would be a hard-coded percentage.
-- `20260912090100_trip_active_passenger_unique` — preflight (raises and aborts on pre-existing duplicates, naming them) then the partial unique index.
+- `20260910060000_trip_active_passenger_uniqueness` — preflight (raises and aborts on pre-existing duplicates, naming them) then the partial unique index.
 
 **API changes** — all additive except the removal of `POST /withdrawals`. New error codes: `COMMISSION_NOT_CONFIGURED`, `COMMISSION_RULE_NOT_FOUND`, `COMMISSION_RULE_INVALID`, `DRIVER_COMMISSION_BALANCE_INSUFFICIENT`, `WITHDRAWAL_NOT_SUPPORTED`, `WALLET_TOPUP_NOT_FOUND`, `WALLET_TOPUP_INVALID_STATE`, `WALLET_TOPUP_AMOUNT_INVALID` — each with ar/en/fr messages in `API_ERROR_CODES`.
 
@@ -1015,3 +1015,5 @@ See header at the top of this document for Document/Project/Repository/Document 
 ## 41–43. Document Creation, GitHub Workflow, Final Report
 
 See the accompanying pull request for branch name, PR number, commit SHA, and file statistics. This file was added on a dedicated branch (`docs/backend-master-reference`), containing **only** this new file, with no other file modified. The PR is documentation-only, was not merged automatically, and no migration, deploy, or Production/Render/Neon change was performed as part of creating this document.
+
+> Database deployment state: **DATABASE STATE NOT VERIFIED**. The authoritative active-passenger index name in code is `Trip_one_active_per_passenger_idx`; this document does not assert that its migration has been deployed.

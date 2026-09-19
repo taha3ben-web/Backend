@@ -597,11 +597,11 @@ model Trip {
   companyEarning  CompanyEarning?
   // ملاحظة مهمة: يوجد أيضًا فهرس تفرّد جزئي (partial unique index) لا يمكن
   // التعبير عنه في Prisma schema:
-  //   CREATE UNIQUE INDEX "Trip_active_passenger_unique" ON "Trip"("passengerId")
+  //   CREATE UNIQUE INDEX "Trip_one_active_per_passenger_idx" ON "Trip"("passengerId")
   //     WHERE "status" IN ('SEARCHING','ACCEPTED','ARRIVING','IN_PROGRESS');
   // يفرض قاعدة "رحلة فورية واحدة لكل راكب" في قاعدة البيانات نفسها.
   // SCHEDULED مستثناة عمدًا: حجز مستقبلي لا يجوز أن يحجب رحلة فورية.
-  // يُنشأ في مايغريشن 20260912090100_trip_active_passenger_unique — لا تحذفه.
+  // يُنشأ في مايغريشن 20260910060000_trip_active_passenger_uniqueness — لا تحذفه.
 
   @@index([status])
   @@index([passengerId])
